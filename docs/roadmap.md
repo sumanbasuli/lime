@@ -43,3 +43,4 @@ This document outlines the sequential steps to build the accessibility scanner s
 - [ ] End-to-end testing of the entire flow.
 - [ ] Optimize Juicer's resource usage.
 - [x] Polish UI — refined scan detail hierarchy, aligned heading/body/code font usage on scan pages, and fixed the issue expander so open/closed state is visually clear.
+- [x] Issue triage groundwork — persisted false-positive mark/unmark controls on issue cards without changing scan aggregation behavior yet.

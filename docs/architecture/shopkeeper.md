@@ -55,6 +55,8 @@ repo root
 | GET | `/api/scans/{id}` | GetScan | Single scan detail |
 | DELETE | `/api/scans/{id}` | DeleteScan | Delete a completed/failed scan and related data |
 | GET | `/api/scans/{id}/issues` | GetScanIssues | Issues with occurrences for a scan, enriched with ACT context and suggested fixes |
+| POST | `/api/scans/{id}/issues/{issueId}/false-positive` | MarkIssueFalsePositive | Mark a scan issue as a false positive |
+| DELETE | `/api/scans/{id}/issues/{issueId}/false-positive` | UnmarkIssueFalsePositive | Remove the false-positive mark from a scan issue |
 
 ### Dependency Injection
 
@@ -86,6 +88,13 @@ The async execution is backend-owned. Browser navigation only affects UI polling
 - `GET /api/scans/{id}/issues` loads the DB issues first, then resolves `violation_type -> act_rule_ids[] -> act_rules[]` through `internal/actrules/resolver.go`.
 - Suggested fixes are deterministic and local. They come from the checked-in ACT catalog and curated rule-level guidance, not from runtime AI generation and not from live W3C requests.
 - If no ACT mapping exists for an axe rule, the API still returns the original issue shape with `act_rules: []` and `suggested_fixes: []`.
+
+## Issue Triage State
+
+- Issues now persist a local triage flag in PostgreSQL through `issues.is_false_positive`.
+- The false-positive flag is intentionally lightweight in this phase. It does not remove issues from scan results, change dashboard counts, or alter ACT enrichment.
+- Shopkeeper exposes explicit mark and unmark routes so the Next UI can update issue state without writing to the database directly.
+- The flag is scan-specific because issue rows are scan-specific; marking an issue in one scan does not affect future rescans.
 
 ### Catalog Source of Truth
 

@@ -34,6 +34,7 @@ type Issue struct {
 	Description     string    `json:"description"`
 	HelpURL         *string   `json:"help_url"`
 	Severity        string    `json:"severity"`
+	IsFalsePositive bool      `json:"is_false_positive"`
 	CreatedAt       time.Time `json:"created_at"`
 	OccurrenceCount int       `json:"occurrence_count,omitempty"`
 	ActRules        []ACTRule `json:"act_rules"`

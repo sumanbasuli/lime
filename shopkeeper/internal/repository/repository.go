@@ -22,6 +22,9 @@ func New(pool *pgxpool.Pool) *Repository {
 // scanColumns is the SELECT column list for scans (used in all scan queries).
 const scanColumns = `id, sitemap_url, status, scan_type, tag, total_urls, scanned_urls, created_at, updated_at`
 
+// issueColumns is the SELECT column list for issues (used in single-issue queries).
+const issueColumns = `id, scan_id, violation_type, description, help_url, severity, is_false_positive, created_at`
+
 // scanRow scans a row into a Scan struct. Must match scanColumns order.
 func scanRow(row interface{ Scan(dest ...any) error }) (*models.Scan, error) {
 	scan := &models.Scan{}
@@ -33,6 +36,19 @@ func scanRow(row interface{ Scan(dest ...any) error }) (*models.Scan, error) {
 		return nil, err
 	}
 	return scan, nil
+}
+
+// issueRow scans a row into an Issue struct. Must match issueColumns order.
+func issueRow(row interface{ Scan(dest ...any) error }) (*models.Issue, error) {
+	issue := &models.Issue{}
+	err := row.Scan(
+		&issue.ID, &issue.ScanID, &issue.ViolationType, &issue.Description, &issue.HelpURL,
+		&issue.Severity, &issue.IsFalsePositive, &issue.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return issue, nil
 }
 
 // CreateScan inserts a new scan record and returns it.
@@ -257,16 +273,37 @@ func (r *Repository) UpdateURLStatus(ctx context.Context, urlID string, status s
 
 // CreateIssue inserts a new issue record and returns it.
 func (r *Repository) CreateIssue(ctx context.Context, scanID, violationType, description, severity string, helpURL *string) (*models.Issue, error) {
-	issue := &models.Issue{}
-	err := r.pool.QueryRow(ctx,
+	row := r.pool.QueryRow(ctx,
 		`INSERT INTO issues (scan_id, violation_type, description, severity, help_url)
 		 VALUES ($1, $2, $3, $4, $5)
-		 RETURNING id, scan_id, violation_type, description, help_url, severity, created_at`,
+		 RETURNING `+issueColumns,
 		scanID, violationType, description, severity, helpURL,
-	).Scan(&issue.ID, &issue.ScanID, &issue.ViolationType, &issue.Description, &issue.HelpURL, &issue.Severity, &issue.CreatedAt)
+	)
+	issue, err := issueRow(row)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create issue: %w", err)
 	}
+	return issue, nil
+}
+
+// SetIssueFalsePositive updates the false-positive flag for an issue in the given scan.
+func (r *Repository) SetIssueFalsePositive(ctx context.Context, scanID, issueID string, isFalsePositive bool) (*models.Issue, error) {
+	row := r.pool.QueryRow(ctx,
+		`UPDATE issues
+		 SET is_false_positive = $1
+		 WHERE id = $2 AND scan_id = $3
+		 RETURNING `+issueColumns,
+		isFalsePositive, issueID, scanID,
+	)
+
+	issue, err := issueRow(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to update false-positive state: %w", err)
+	}
+
 	return issue, nil
 }
 
@@ -287,7 +324,7 @@ func (r *Repository) CreateIssueOccurrence(ctx context.Context, issueID, urlID s
 func (r *Repository) GetScanIssues(ctx context.Context, scanID string) ([]models.IssueWithOccurrences, error) {
 	// First, get all issues for this scan
 	issueRows, err := r.pool.Query(ctx,
-		`SELECT i.id, i.scan_id, i.violation_type, i.description, i.help_url, i.severity, i.created_at,
+		`SELECT i.id, i.scan_id, i.violation_type, i.description, i.help_url, i.severity, i.is_false_positive, i.created_at,
 		        COUNT(io.id) as occurrence_count
 		 FROM issues i
 		 LEFT JOIN issue_occurrences io ON io.issue_id = i.id
@@ -310,7 +347,7 @@ func (r *Repository) GetScanIssues(ctx context.Context, scanID string) ([]models
 	var issues []models.Issue
 	for issueRows.Next() {
 		var i models.Issue
-		if err := issueRows.Scan(&i.ID, &i.ScanID, &i.ViolationType, &i.Description, &i.HelpURL, &i.Severity, &i.CreatedAt, &i.OccurrenceCount); err != nil {
+		if err := issueRows.Scan(&i.ID, &i.ScanID, &i.ViolationType, &i.Description, &i.HelpURL, &i.Severity, &i.IsFalsePositive, &i.CreatedAt, &i.OccurrenceCount); err != nil {
 			return nil, fmt.Errorf("failed to scan issue row: %w", err)
 		}
 		issues = append(issues, i)

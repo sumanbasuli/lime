@@ -92,6 +92,8 @@ make logs-ui
 | GET | `/api/scans/{id}` | Get scan detail by ID |
 | DELETE | `/api/scans/{id}` | Delete a completed/failed scan and its saved assets |
 | GET | `/api/scans/{id}/issues` | Get issues with occurrences for a scan, including ACT rules and suggested fixes |
+| POST | `/api/scans/{id}/issues/{issueId}/false-positive` | Mark an issue as a false positive |
+| DELETE | `/api/scans/{id}/issues/{issueId}/false-positive` | Remove the false-positive mark from an issue |
 
 ## Runtime Behavior
 
@@ -101,6 +103,7 @@ make logs-ui
 - For long-running scans in local development, prefer Docker or `make start-shopkeeper` over `make dev-shopkeeper`, because hot reload restarts the Go process frequently.
 - ACT issue guidance is loaded from the local checked-in catalog at read time. There is no runtime dependency on W3C services and no ACT snapshot stored in Postgres.
 - The issue details page is the main ACT UI surface in this phase. Compact scan summaries remain unchanged.
+- False-positive marking is persisted per issue row and is currently a triage flag only. It does not yet filter issues out of counts, summaries, or scan detail tables.
 
 ## ACT Catalog Maintenance
 

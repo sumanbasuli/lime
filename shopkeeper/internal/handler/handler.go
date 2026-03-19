@@ -205,6 +205,16 @@ func (h *Handler) GetScanIssues(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, issues)
 }
 
+// MarkIssueFalsePositive handles POST /api/scans/{id}/issues/{issueId}/false-positive.
+func (h *Handler) MarkIssueFalsePositive(w http.ResponseWriter, r *http.Request) {
+	h.updateIssueFalsePositive(w, r, true)
+}
+
+// UnmarkIssueFalsePositive handles DELETE /api/scans/{id}/issues/{issueId}/false-positive.
+func (h *Handler) UnmarkIssueFalsePositive(w http.ResponseWriter, r *http.Request) {
+	h.updateIssueFalsePositive(w, r, false)
+}
+
 // RescanScan handles POST /api/scans/{id}/rescan.
 // It creates a fresh scan using the same target URL, scan type, and tag.
 func (h *Handler) RescanScan(w http.ResponseWriter, r *http.Request) {
@@ -305,6 +315,55 @@ func (h *Handler) DeleteScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) updateIssueFalsePositive(w http.ResponseWriter, r *http.Request, isFalsePositive bool) {
+	scanID := chi.URLParam(r, "id")
+	if scanID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Scan ID is required",
+		})
+		return
+	}
+
+	issueID := chi.URLParam(r, "issueId")
+	if issueID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Issue ID is required",
+		})
+		return
+	}
+
+	issue, err := h.repo.SetIssueFalsePositive(r.Context(), scanID, issueID, isFalsePositive)
+	if err != nil {
+		log.Printf("Failed to update false-positive state: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to update issue state",
+		})
+		return
+	}
+	if issue == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "Issue not found for scan",
+		})
+		return
+	}
+
+	resolver, resolverErr := actrules.Default()
+	if resolverErr != nil {
+		log.Printf("ACT resolver unavailable, using empty ACT context: %v", resolverErr)
+	}
+	if resolver != nil {
+		issue.ActRules, issue.SuggestedFixes = resolver.Resolve(issue.ViolationType)
+	}
+	if issue.ActRules == nil {
+		issue.ActRules = []models.ACTRule{}
+	}
+	if issue.SuggestedFixes == nil {
+		issue.SuggestedFixes = []string{}
+	}
+
+	writeJSON(w, http.StatusOK, issue)
 }
 
 // GetStats handles GET /api/stats.

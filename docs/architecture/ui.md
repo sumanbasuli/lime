@@ -16,6 +16,7 @@ The frontend for the accessibility scanner is a strictly decoupled **NextJS** ap
 - **Server Components** read data directly from PostgreSQL via Drizzle ORM
 - **Server Components** also read the shared ACT catalog at render time for issue-detail enrichment
 - **Client Components** call the Shopkeeper API for writes and live updates (POST/DELETE for scan actions, GET for polling)
+  - this now includes issue-level false-positive mark/unmark actions from the issue details page
 - Shopkeeper owns all DB writes; the NextJS app only reads
 
 ### Page Routes
@@ -35,6 +36,7 @@ The frontend for the accessibility scanner is a strictly decoupled **NextJS** ap
 | `NewScanForm` | Client | `src/components/new-scan-form.tsx` |
 | `ScanProgress` | Client | `src/components/scan-progress.tsx` |
 | `ScanActions` | Client | `src/components/scan-actions.tsx` |
+| `IssueFalsePositiveButton` | Client | `src/components/issue-false-positive-button.tsx` |
 | `StatusBadge` / `SeverityBadge` | Server | `src/components/status-badge.tsx` |
 | `AppSidebar` | Client | `src/components/app-sidebar.tsx` |
 
@@ -63,6 +65,8 @@ Typed fetch wrapper using `process.env.NEXT_PUBLIC_API_URL`:
 - `createScan(sitemapUrl)` — POST /api/scans
 - `rescanScan(id)` — POST /api/scans/{id}/rescan
 - `deleteScan(id)` — DELETE /api/scans/{id}
+- `markIssueFalsePositive(scanId, issueId)` — POST /api/scans/{id}/issues/{issueId}/false-positive
+- `unmarkIssueFalsePositive(scanId, issueId)` — DELETE /api/scans/{id}/issues/{issueId}/false-positive
 - `getScans()` — GET /api/scans
 - `getScan(id)` — GET /api/scans/{id}
 - `getScanIssues(id)` — GET /api/scans/{id}/issues
@@ -80,6 +84,7 @@ Active scans do not expose these actions, which prevents conflicts with the runn
 
 - ACT context is intentionally shown on `/scans/[id]/issues`, not on the dashboard or compact scan tables.
 - The issue details page enriches each DB-backed issue by resolving its Sweetner-generated `violationType` against the shared `data/act-rules.json` catalog.
+- Each main issue card also exposes a top-right false-positive action that persists through Shopkeeper and refreshes the server-rendered issue list.
 - Each expanded issue can show:
   - ACT rule ID badges near the issue heading
   - W3C ACT rule links and status badges (`Approved` / `Proposed`)

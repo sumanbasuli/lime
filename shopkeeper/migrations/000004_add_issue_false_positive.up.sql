@@ -1,0 +1,2 @@
+ALTER TABLE issues
+ADD COLUMN is_false_positive BOOLEAN NOT NULL DEFAULT FALSE;

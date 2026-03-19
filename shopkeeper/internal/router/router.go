@@ -45,6 +45,8 @@ func Setup(repo *repository.Repository, scanner handler.ScanRunner) http.Handler
 			r.Get("/{id}", h.GetScan)
 			r.Delete("/{id}", h.DeleteScan)
 			r.Get("/{id}/issues", h.GetScanIssues)
+			r.Post("/{id}/issues/{issueId}/false-positive", h.MarkIssueFalsePositive)
+			r.Delete("/{id}/issues/{issueId}/false-positive", h.UnmarkIssueFalsePositive)
 		})
 
 		r.Get("/screenshots/{scanId}/{filename}", h.ServeScreenshot)
