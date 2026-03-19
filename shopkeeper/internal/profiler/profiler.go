@@ -2,6 +2,7 @@ package profiler
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -33,8 +34,18 @@ type urlEntry struct {
 	Loc string `xml:"loc"`
 }
 
-var httpClient = &http.Client{
-	Timeout: 30 * time.Second,
+const (
+	fetchTimeout    = 30 * time.Second
+	fetchRetryDelay = 400 * time.Millisecond
+	maxFetchRetries = 3
+)
+
+var httpClient = newHTTPClient()
+
+func newHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: fetchTimeout,
+	}
 }
 
 // Discover fetches a sitemap URL and recursively extracts all page URLs.
@@ -68,6 +79,7 @@ func discoverRecursive(sitemapURL string, seen map[string]bool, result *[]string
 	var index sitemapIndex
 	if err := xml.Unmarshal(body, &index); err == nil && len(index.Sitemaps) > 0 {
 		log.Printf("Profiler: found sitemapindex at %s with %d sitemaps", sitemapURL, len(index.Sitemaps))
+		var nestedErrs []error
 		for _, entry := range index.Sitemaps {
 			loc := strings.TrimSpace(entry.Loc)
 			if loc == "" {
@@ -75,8 +87,11 @@ func discoverRecursive(sitemapURL string, seen map[string]bool, result *[]string
 			}
 			if err := discoverRecursive(loc, seen, result, depth+1); err != nil {
 				log.Printf("Profiler: warning: failed to process nested sitemap %s: %v", loc, err)
-				// Continue processing other sitemaps rather than failing entirely
+				nestedErrs = append(nestedErrs, fmt.Errorf("%s: %w", loc, err))
 			}
+		}
+		if len(nestedErrs) > 0 {
+			return fmt.Errorf("failed to fully process sitemapindex %s: %w", sitemapURL, errors.Join(nestedErrs...))
 		}
 		return nil
 	}
@@ -106,22 +121,51 @@ func discoverRecursive(sitemapURL string, seen map[string]bool, result *[]string
 }
 
 func fetchURL(rawURL string) ([]byte, error) {
-	resp, err := httpClient.Get(rawURL)
+	var lastErr error
+
+	for attempt := 1; attempt <= maxFetchRetries; attempt++ {
+		body, shouldRetry, err := fetchURLOnce(rawURL)
+		if err == nil {
+			return body, nil
+		}
+
+		lastErr = err
+		if !shouldRetry || attempt == maxFetchRetries {
+			break
+		}
+
+		time.Sleep(time.Duration(attempt) * fetchRetryDelay)
+	}
+
+	return nil, lastErr
+}
+
+func fetchURLOnce(rawURL string) ([]byte, bool, error) {
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, false, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/xml,text/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("User-Agent", "LIME Accessibility Scanner/1.0")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, true, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, rawURL)
+		return nil, resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500,
+			fmt.Errorf("HTTP %d for %s", resp.StatusCode, rawURL)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 50*1024*1024)) // 50MB limit
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, true, fmt.Errorf("failed to read response body: %w", err)
 	}
 
-	return body, nil
+	return body, false, nil
 }
 
 func isValidURL(rawURL string) bool {

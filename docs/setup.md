@@ -101,6 +101,8 @@ make logs-ui
 - A scan does not survive a dead Shopkeeper process in-memory, but non-terminal scans are now recovered automatically the next time Shopkeeper starts.
 - Recovery resets partial URLs/issues/screenshots for that scan before rerunning it, so the final stored result is clean.
 - For long-running scans in local development, prefer Docker or `make start-shopkeeper` over `make dev-shopkeeper`, because hot reload restarts the Go process frequently.
+- Sitemap discovery now retries transient nested sitemap fetch failures. If Shopkeeper still cannot fetch every sitemap listed in a sitemap index, the scan fails rather than scanning a partial subset of URLs.
+- Screenshot capture now waits for a fuller page-settle point before capturing and falls back to broader context when a tight element crop is blank or too small.
 - ACT issue guidance is loaded from the local checked-in catalog at read time. There is no runtime dependency on W3C services and no ACT snapshot stored in Postgres.
 - The issue details page is the main ACT UI surface in this phase. Compact scan summaries remain unchanged.
 - False-positive marking is persisted per issue row and is currently a triage flag only. It does not yet filter issues out of counts, summaries, or scan detail tables.

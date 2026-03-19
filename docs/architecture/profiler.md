@@ -18,7 +18,8 @@ To extract a complete list of individual page URLs from a given sitemap URL.
 * **Max Depth**: Recursion is limited to 10 levels to prevent infinite loops.
 * **De-duplication**: Uses a `map[string]bool` to ensure URLs are unique before returning.
 * **Validation**: Each URL is validated using `url.ParseRequestURI` — only `http://` and `https://` schemes are accepted.
-* **Error Resilience**: If a nested sitemap fails to fetch, the error is logged but processing continues for the remaining sitemaps.
+* **Fetch Retries**: Sitemap requests retry transient fetch failures before giving up.
+* **Complete Discovery Requirement**: Shopkeeper does not continue into scanning with a partial sitemap index. If any nested sitemap still fails after retries, discovery returns an error and the scan fails instead of silently scanning an incomplete URL set.
 * **Size Limit**: Response bodies are limited to 50MB to prevent memory exhaustion.
 
 ### XML Structures
@@ -36,7 +37,8 @@ type urlSet struct {
 ### HTTP Client
 
 * Timeout: 30 seconds per request
-* Standard Go `http.Client`
+* Retries transient sitemap fetch failures up to 3 times with short backoff
+* Uses a dedicated `http.Client` configuration for sitemap requests
 
 ## Output
 

@@ -85,6 +85,7 @@ Active scans do not expose these actions, which prevents conflicts with the runn
 - ACT context is intentionally shown on `/scans/[id]/issues`, not on the dashboard or compact scan tables.
 - The issue details page enriches each DB-backed issue by resolving its Sweetner-generated `violationType` against the shared `data/act-rules.json` catalog.
 - Each main issue card also exposes a top-right false-positive action that persists through Shopkeeper and refreshes the server-rendered issue list.
+- When an element-level screenshot is unavailable or rejected as unreliable, the issue details page falls back to the saved page screenshot as page context instead of showing an empty image box.
 - Each expanded issue can show:
   - ACT rule ID badges near the issue heading
   - W3C ACT rule links and status badges (`Approved` / `Proposed`)

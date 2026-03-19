@@ -19,10 +19,12 @@ func ScanPages(ctx, allocCtx context.Context, pages []PageInput, scanID string, 
 ## Responsibilities
 
 * **Axe-Core Execution**: Injects axe-core 4.10.2 into each page via `chromedp.Evaluate()` and runs `axe.run(document, {resultTypes: ['violations']})`.
-* **Screenshot Capturing**: Takes full-page screenshots (80% quality JPEG) saved to `/app/screenshots/{scanID}/{urlID}.png`.
+* **Screenshot Capturing**: Takes full-page PNG screenshots and per-element screenshots saved under `/app/screenshots/{scanID}/`.
 * **Concurrency Management**: Worker pool using a buffered channel semaphore of size 5.
 * **Politeness**: 500ms delay between requests via `time.Sleep`.
 * **Progress Reporting**: Calls `onProgress(scannedCount)` after each page, enabling real-time scan progress in the UI.
+* **Visual Stabilization**: Waits for document load, fonts, images, and a short paint-settle window before screenshots are captured.
+* **Context Fallback**: Tiny or visually blank element crops are retried with a wider contextual clip, and the UI can fall back to the saved page screenshot when no reliable element crop is available.
 
 ## System Constraints
 
@@ -55,3 +57,9 @@ Returns `[]RawResult`, each containing:
 - `Violations` — Array of axe-core violations, each with ID, description, help, impact, and affected DOM nodes
 - `ScreenshotPath` — Path to the saved full-page screenshot
 - `Error` — Error message if the page failed to scan
+
+### Screenshot Reliability Notes
+
+- Juicer no longer captures screenshots immediately after `body` becomes available.
+- Element clips are padded and minimum-sized so very small targets do not collapse into unreadable dots.
+- If the element crop still looks unreliable after capture, Juicer prefers a wider context crop; otherwise the UI falls back to the page screenshot instead of showing a misleading white box.

@@ -74,10 +74,11 @@ The `scanner.Scanner` implements this interface. The handler launches scans asyn
 2. Shopkeeper validates the URL and creates a `Scan` record with status `pending`.
 3. Shopkeeper launches an async goroutine that runs the scan pipeline.
 4. Pipeline updates status to `profiling`, calls Profiler to discover URLs.
-5. Discovered URLs are bulk-inserted into the DB; status moves to `scanning`.
-6. Juicer scans pages with 5-concurrent workers; progress updates in real-time.
-7. Status moves to `processing`; Sweetner deduplicates and stores issues.
-8. Status is set to `completed`. On any error, status is set to `failed`.
+5. Profiler must finish full sitemap discovery before scanning starts. If any nested sitemap still fails after retries, the scan fails instead of continuing with a partial URL set.
+6. Discovered URLs are bulk-inserted into the DB; status moves to `scanning`.
+7. Juicer scans pages with 5-concurrent workers; progress updates in real-time.
+8. Status moves to `processing`; Sweetner deduplicates and stores issues.
+9. Status is set to `completed`. On any error, status is set to `failed`.
 
 The async execution is backend-owned. Browser navigation only affects UI polling, not the actual scan job.
 

@@ -1,10 +1,13 @@
 package juicer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image/png"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -27,6 +30,17 @@ const (
 
 	// ScreenshotDir is the base directory for screenshots.
 	ScreenshotDir = "/app/screenshots"
+
+	pageSettleTimeout            = 5 * time.Second
+	postLoadSettleDelay          = 350 * time.Millisecond
+	elementScreenshotPadding     = 12.0
+	elementContextPadding        = 36.0
+	elementScreenshotMinWidth    = 96.0
+	elementScreenshotMinHeight   = 64.0
+	elementContextMinWidth       = 280.0
+	elementContextMinHeight      = 180.0
+	elementScreenshotMinByteSize = 128
+	elementScreenshotScale       = 2.0
 )
 
 // PageInput represents a URL to scan with its DB record ID.
@@ -37,6 +51,16 @@ type PageInput struct {
 
 // ProgressCallback is called after each page is scanned.
 type ProgressCallback func(scannedCount int)
+
+type elementBounds struct {
+	X              float64 `json:"x"`
+	Y              float64 `json:"y"`
+	Width          float64 `json:"width"`
+	Height         float64 `json:"height"`
+	ViewportWidth  float64 `json:"viewportWidth"`
+	ViewportHeight float64 `json:"viewportHeight"`
+	Visible        bool    `json:"visible"`
+}
 
 // ScanPages scans multiple pages for accessibility issues using chromedp and axe-core.
 // It uses a worker pool with bounded concurrency (max 5 simultaneous pages).
@@ -122,6 +146,12 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 		return result
 	}
 
+	if err := waitForPageSettle(tabCtx); err != nil {
+		result.Error = fmt.Sprintf("page did not settle for %s: %v", page.URL, err)
+		log.Printf("Juicer: %s", result.Error)
+		return result
+	}
+
 	// Inject axe-core
 	err = chromedp.Run(tabCtx,
 		chromedp.Evaluate(axeMinJS, nil),
@@ -161,21 +191,9 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	}
 	result.Violations = axeRes.Violations
 
-	// Wait for page images to finish loading before taking screenshots
-	chromedp.Run(tabCtx,
-		chromedp.Evaluate(`new Promise(r => {
-			const imgs = Array.from(document.images);
-			if (imgs.every(i => i.complete)) return r();
-			let remaining = imgs.filter(i => !i.complete).length;
-			if (remaining === 0) return r();
-			imgs.filter(i => !i.complete).forEach(i => {
-				i.onload = i.onerror = () => { remaining--; if (remaining <= 0) r(); };
-			});
-			setTimeout(r, 3000);
-		})`, nil, func(ep *runtime.EvaluateParams) *runtime.EvaluateParams {
-			return ep.WithAwaitPromise(true)
-		}),
-	)
+	if err := waitForPageSettle(tabCtx); err != nil {
+		log.Printf("Juicer: warning: page settle before screenshots timed out for %s: %v", page.URL, err)
+	}
 
 	// Take element-level screenshots BEFORE the full-page screenshot
 	// (FullScreenshot changes the viewport/device metrics and can break subsequent element screenshots)
@@ -190,23 +208,8 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 			}
 			selector := node.Target[0]
 
-			// Scroll element into view and get its viewport-relative bounds
-			var bounds struct {
-				X      float64 `json:"x"`
-				Y      float64 `json:"y"`
-				Width  float64 `json:"width"`
-				Height float64 `json:"height"`
-			}
-			err := chromedp.Run(tabCtx,
-				chromedp.Evaluate(fmt.Sprintf(`(() => {
-					const el = document.querySelector(%q);
-					if (!el) return null;
-					el.scrollIntoView({block: 'center', behavior: 'instant'});
-					const r = el.getBoundingClientRect();
-					return {x: r.x, y: r.y, width: r.width, height: r.height};
-				})()`, selector), &bounds),
-			)
-			if err != nil || bounds.Width == 0 || bounds.Height == 0 {
+			bounds, err := locateElement(tabCtx, selector)
+			if err != nil || !bounds.Visible || bounds.Width == 0 || bounds.Height == 0 {
 				if err != nil {
 					log.Printf("Juicer: warning: failed to get bounds for %q: %v", selector, err)
 				}
@@ -214,31 +217,32 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 				continue
 			}
 
-			// Capture screenshot clipped to the element's viewport bounds
-			var elemScreenshot []byte
-			err = chromedp.Run(tabCtx, chromedp.ActionFunc(func(ctx context.Context) error {
-				data, err := cdppage.CaptureScreenshot().
-					WithFormat(cdppage.CaptureScreenshotFormatPng).
-					WithClip(&cdppage.Viewport{
-						X:      bounds.X,
-						Y:      bounds.Y,
-						Width:  bounds.Width,
-						Height: bounds.Height,
-						Scale:  2,
-					}).
-					Do(ctx)
-				if err != nil {
-					return err
-				}
-				elemScreenshot = data
-				return nil
-			}))
+			clip := buildViewportClip(bounds, elementScreenshotPadding, elementScreenshotMinWidth, elementScreenshotMinHeight)
+			if clip == nil {
+				nodeIdx++
+				continue
+			}
+
+			elemScreenshot, err := captureClip(tabCtx, clip)
 			if err != nil {
 				log.Printf("Juicer: warning: failed to screenshot element %q on %s: %v", selector, page.URL, err)
 				nodeIdx++
 				continue
 			}
-			if len(elemScreenshot) > 0 {
+
+			if screenshotNeedsContext(elemScreenshot) {
+				contextClip := buildViewportClip(bounds, elementContextPadding, elementContextMinWidth, elementContextMinHeight)
+				if contextClip != nil {
+					contextScreenshot, contextErr := captureClip(tabCtx, contextClip)
+					if contextErr != nil {
+						log.Printf("Juicer: warning: failed fallback screenshot for %q on %s: %v", selector, page.URL, contextErr)
+					} else if !screenshotNeedsContext(contextScreenshot) {
+						elemScreenshot = contextScreenshot
+					}
+				}
+			}
+
+			if len(elemScreenshot) >= elementScreenshotMinByteSize && !screenshotNeedsContext(elemScreenshot) {
 				elemPath := filepath.Join(screenshotDir, fmt.Sprintf("%s_elem_%d.png", page.URLID, nodeIdx))
 				if err := os.WriteFile(elemPath, elemScreenshot, 0644); err != nil {
 					log.Printf("Juicer: warning: failed to save element screenshot: %v", err)
@@ -267,4 +271,251 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 
 	log.Printf("Juicer: scanned %s — %d violations found", page.URL, len(result.Violations))
 	return result
+}
+
+func waitForPageSettle(ctx context.Context) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, pageSettleTimeout)
+	defer cancel()
+
+	script := fmt.Sprintf(`(async () => {
+		const waitForLoad = () => new Promise((resolve) => {
+			if (document.readyState === "complete") {
+				resolve();
+				return;
+			}
+			window.addEventListener("load", () => resolve(), { once: true });
+			setTimeout(resolve, 5000);
+		});
+
+		const waitForFonts = async () => {
+			if (!document.fonts || !document.fonts.ready) {
+				return;
+			}
+			try {
+				await Promise.race([
+					document.fonts.ready,
+					new Promise((resolve) => setTimeout(resolve, 5000)),
+				]);
+			} catch (_) {}
+		};
+
+		const waitForImages = () => new Promise((resolve) => {
+			const pending = Array.from(document.images).filter((img) => !img.complete);
+			if (pending.length === 0) {
+				resolve();
+				return;
+			}
+
+			let remaining = pending.length;
+			const done = () => {
+				remaining -= 1;
+				if (remaining <= 0) {
+					resolve();
+				}
+			};
+
+			pending.forEach((img) => {
+				img.addEventListener("load", done, { once: true });
+				img.addEventListener("error", done, { once: true });
+			});
+
+			setTimeout(resolve, 5000);
+		});
+
+		const waitForFrames = () =>
+			new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+		await waitForLoad();
+		await waitForFonts();
+		await waitForImages();
+		await waitForFrames();
+		await new Promise((resolve) => setTimeout(resolve, %d));
+		await waitForFrames();
+		return true;
+	})()`, postLoadSettleDelay.Milliseconds())
+
+	return chromedp.Run(timeoutCtx, chromedp.Evaluate(script, nil, func(ep *runtime.EvaluateParams) *runtime.EvaluateParams {
+		return ep.WithAwaitPromise(true)
+	}))
+}
+
+func locateElement(ctx context.Context, selector string) (elementBounds, error) {
+	var bounds elementBounds
+
+	err := chromedp.Run(ctx, chromedp.Evaluate(fmt.Sprintf(`(async () => {
+		const el = document.querySelector(%q);
+		if (!el) {
+			return null;
+		}
+
+		el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+		await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+		const style = window.getComputedStyle(el);
+		const rect = el.getBoundingClientRect();
+
+		return {
+			x: rect.x,
+			y: rect.y,
+			width: rect.width,
+			height: rect.height,
+			viewportWidth: window.innerWidth,
+			viewportHeight: window.innerHeight,
+			visible:
+				rect.width > 0 &&
+				rect.height > 0 &&
+				style.display !== "none" &&
+				style.visibility !== "hidden" &&
+				Number(style.opacity || 1) > 0
+		};
+	})()`, selector), &bounds, func(ep *runtime.EvaluateParams) *runtime.EvaluateParams {
+		return ep.WithAwaitPromise(true)
+	}))
+	if err != nil {
+		return elementBounds{}, err
+	}
+
+	return bounds, nil
+}
+
+func buildViewportClip(bounds elementBounds, padding, minWidth, minHeight float64) *cdppage.Viewport {
+	width := bounds.Width + padding*2
+	height := bounds.Height + padding*2
+	x := bounds.X - padding
+	y := bounds.Y - padding
+
+	if width < minWidth {
+		x -= (minWidth - width) / 2
+		width = minWidth
+	}
+	if height < minHeight {
+		y -= (minHeight - height) / 2
+		height = minHeight
+	}
+
+	if x < 0 {
+		width += x
+		x = 0
+	}
+	if y < 0 {
+		height += y
+		y = 0
+	}
+
+	if x+width > bounds.ViewportWidth {
+		width = bounds.ViewportWidth - x
+	}
+	if y+height > bounds.ViewportHeight {
+		height = bounds.ViewportHeight - y
+	}
+
+	width = math.Max(0, width)
+	height = math.Max(0, height)
+	if width == 0 || height == 0 {
+		return nil
+	}
+
+	return &cdppage.Viewport{
+		X:      x,
+		Y:      y,
+		Width:  width,
+		Height: height,
+		Scale:  elementScreenshotScale,
+	}
+}
+
+func captureClip(ctx context.Context, clip *cdppage.Viewport) ([]byte, error) {
+	if clip == nil {
+		return nil, fmt.Errorf("missing viewport clip")
+	}
+
+	var screenshot []byte
+	err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		data, err := cdppage.CaptureScreenshot().
+			WithFormat(cdppage.CaptureScreenshotFormatPng).
+			WithClip(clip).
+			Do(ctx)
+		if err != nil {
+			return err
+		}
+		screenshot = data
+		return nil
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return screenshot, nil
+}
+
+func screenshotNeedsContext(data []byte) bool {
+	if len(data) < elementScreenshotMinByteSize {
+		return true
+	}
+
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return false
+	}
+
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width < int(elementScreenshotMinWidth) || height < int(elementScreenshotMinHeight) {
+		return true
+	}
+
+	samplesX := min(width, 24)
+	samplesY := min(height, 24)
+	if samplesX == 0 || samplesY == 0 {
+		return true
+	}
+
+	stepX := math.Max(1, float64(width)/float64(samplesX))
+	stepY := math.Max(1, float64(height)/float64(samplesY))
+
+	baseSet := false
+	var baseR, baseG, baseB uint32
+	total := 0
+	varied := 0
+
+	for sampleY := 0; sampleY < samplesY; sampleY++ {
+		for sampleX := 0; sampleX < samplesX; sampleX++ {
+			x := bounds.Min.X + int(float64(sampleX)*stepX)
+			y := bounds.Min.Y + int(float64(sampleY)*stepY)
+			if x >= bounds.Max.X {
+				x = bounds.Max.X - 1
+			}
+			if y >= bounds.Max.Y {
+				y = bounds.Max.Y - 1
+			}
+
+			r, g, b, a := img.At(x, y).RGBA()
+			if a == 0 {
+				continue
+			}
+
+			if !baseSet {
+				baseR, baseG, baseB = r, g, b
+				baseSet = true
+			}
+
+			total++
+			if colorDistance(baseR, baseG, baseB, r, g, b) > 12000 {
+				varied++
+			}
+		}
+	}
+
+	if total == 0 {
+		return true
+	}
+
+	return float64(varied)/float64(total) < 0.015
+}
+
+func colorDistance(r1, g1, b1, r2, g2, b2 uint32) float64 {
+	dr := float64(int64(r1) - int64(r2))
+	dg := float64(int64(g1) - int64(g2))
+	db := float64(int64(b1) - int64(b2))
+	return math.Sqrt(dr*dr + dg*dg + db*db)
 }

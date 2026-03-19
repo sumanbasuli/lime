@@ -38,6 +38,8 @@ This document outlines the sequential steps to build the accessibility scanner s
 - [x] Scan management actions — Rescan completed/failed scans and delete old terminal scans without touching active jobs.
 - [x] Interrupted scan recovery — Non-terminal scans are automatically reset and resumed when Shopkeeper starts again.
 - [x] ACT-enriched issue details — Shared local ACT catalog, W3C rule links, WCAG mappings, and deterministic suggested fixes on `/scans/[id]/issues` without changing the DB schema.
+- [x] Sitemap discovery hardening — Retry transient nested sitemap fetch failures and avoid partial sitemap-index scans when full discovery is unavailable.
+- [x] Screenshot capture hardening — Wait for pages to settle before capture, reject tiny/blank element crops, and fall back to broader page context in the issue viewer.
 
 ## Phase 6: Testing & Refinement
 - [ ] End-to-end testing of the entire flow.
