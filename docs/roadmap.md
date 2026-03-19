@@ -37,6 +37,7 @@ This document outlines the sequential steps to build the accessibility scanner s
 - [x] Sidebar navigation updated with real routes.
 - [x] Scan management actions — Rescan completed/failed scans and delete old terminal scans without touching active jobs.
 - [x] Interrupted scan recovery — Non-terminal scans are automatically reset and resumed when Shopkeeper starts again.
+- [x] ACT-enriched issue details — Shared local ACT catalog, W3C rule links, WCAG mappings, and deterministic suggested fixes on `/scans/[id]/issues` without changing the DB schema.
 
 ## Phase 6: Testing & Refinement
 - [ ] End-to-end testing of the entire flow.

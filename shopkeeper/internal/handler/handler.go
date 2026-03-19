@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/campuspress/lime/shopkeeper/internal/actrules"
 	"github.com/campuspress/lime/shopkeeper/internal/models"
 	"github.com/campuspress/lime/shopkeeper/internal/repository"
 	"github.com/go-chi/chi/v5"
@@ -191,6 +192,14 @@ func (h *Handler) GetScanIssues(w http.ResponseWriter, r *http.Request) {
 			"error": "Failed to get scan issues",
 		})
 		return
+	}
+
+	resolver, resolverErr := actrules.Default()
+	if resolverErr != nil {
+		log.Printf("ACT resolver unavailable, using empty ACT context: %v", resolverErr)
+	}
+	if resolver != nil {
+		issues = resolver.EnrichIssues(issues)
 	}
 
 	writeJSON(w, http.StatusOK, issues)

@@ -41,6 +41,12 @@ for each RawResult:
 
 This means if "color-contrast" appears on 50 pages with 3 nodes each, we get 1 Issue record and 150 IssueOccurrence records.
 
+### Relationship to ACT Enrichment
+
+- Sweetner does not persist ACT metadata.
+- The stored `issues.violation_type` field is the stable key used later by the read-time ACT resolver.
+- This keeps the scan pipeline simple: Juicer produces axe violations, Sweetner normalizes them into canonical issue records, and the ACT layer enriches those issues only when they are read by the API or issue-details UI.
+
 ## Output
 
 All data is persisted directly to the database via the repository layer. The Sweetner does not return data — it writes to:

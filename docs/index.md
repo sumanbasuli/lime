@@ -24,6 +24,12 @@ Operational notes for scan lifecycle behavior are documented primarily in:
 - `docs/architecture/ui.md` for polling and page-navigation behavior
 - `docs/setup.md` for runtime and debugging commands
 
+ACT enrichment notes are documented primarily in:
+- `docs/architecture/shopkeeper.md` for the shared catalog, resolver behavior, and API enrichment model
+- `docs/architecture/sweetner.md` for how Sweetner's canonical axe rule IDs feed ACT lookups later
+- `docs/architecture/ui.md` for where ACT guidance appears in the interface
+- `docs/setup.md` for ACT catalog refresh and runtime path resolution
+
 ## Guidelines for Contributing
 
 * Ensure all new features or modules are documented here first before coding starts.

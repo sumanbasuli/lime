@@ -20,6 +20,7 @@ All environment configuration is managed through `.env` files:
 | `DATABASE_URL` | `postgresql://lime:lime_dev_password@db:5432/lime_db?sslmode=disable` | Full connection string (Docker) |
 | `SHOPKEEPER_PORT` | `8080` | Port for the Go backend API |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:8080` | Shopkeeper API URL for the frontend |
+| `ACT_RULES_PATH` | auto-resolved | Optional explicit path to `data/act-rules.json` for Shopkeeper and Next |
 
 ### File Locations
 
@@ -48,6 +49,10 @@ make dev-ui            # NextJS with hot reload (in a new terminal)
 ```
 
 Note: scans now recover automatically when Shopkeeper starts again, but `make dev-shopkeeper` still restarts the Go process frequently during code edits. For stable long-running scans, prefer `make start-shopkeeper` or `make start-all`.
+
+ACT catalog note:
+- Docker sets `ACT_RULES_PATH=/shared-data/act-rules.json` automatically for both services.
+- Native local development usually does not need `ACT_RULES_PATH`; both apps fall back to `../data/act-rules.json`.
 
 ### Individual Services
 
@@ -86,7 +91,7 @@ make logs-ui
 | POST | `/api/scans/{id}/rescan` | Start a fresh scan using the same target URL/type/tag |
 | GET | `/api/scans/{id}` | Get scan detail by ID |
 | DELETE | `/api/scans/{id}` | Delete a completed/failed scan and its saved assets |
-| GET | `/api/scans/{id}/issues` | Get issues with occurrences for a scan |
+| GET | `/api/scans/{id}/issues` | Get issues with occurrences for a scan, including ACT rules and suggested fixes |
 
 ## Runtime Behavior
 
@@ -94,6 +99,26 @@ make logs-ui
 - A scan does not survive a dead Shopkeeper process in-memory, but non-terminal scans are now recovered automatically the next time Shopkeeper starts.
 - Recovery resets partial URLs/issues/screenshots for that scan before rerunning it, so the final stored result is clean.
 - For long-running scans in local development, prefer Docker or `make start-shopkeeper` over `make dev-shopkeeper`, because hot reload restarts the Go process frequently.
+- ACT issue guidance is loaded from the local checked-in catalog at read time. There is no runtime dependency on W3C services and no ACT snapshot stored in Postgres.
+- The issue details page is the main ACT UI surface in this phase. Compact scan summaries remain unchanged.
+
+## ACT Catalog Maintenance
+
+The shared ACT catalog lives at `data/act-rules.json`.
+
+Refresh it with:
+
+```bash
+node scripts/refresh-act-data.mjs
+```
+
+What the refresh script does:
+- reads axe-core `actIds` mappings from `shopkeeper/internal/juicer/axe.min.js`
+- pulls official ACT metadata from `https://act-rules.github.io/testcases.json`
+- resolves official W3C ACT rule URLs
+- merges the checked-in deterministic remediation overlay and writes a new `data/act-rules.json`
+
+This is a maintenance/build-time step only. The running app does not call external ACT services.
 
 ## Operations
 
@@ -121,8 +146,10 @@ docker compose logs -f shopkeeper
 ```
 lime/                    (project root)
 ├── docs/                Documentation
+├── data/                Shared ACT catalog used by Shopkeeper and Next
 ├── lime/                NextJS frontend (App Router, shadcn/ui, Drizzle ORM)
 ├── shopkeeper/          Go backend (Chi, pgx, golang-migrate)
+├── scripts/             Maintenance scripts such as ACT catalog refresh
 ├── docker-compose.yml   Multi-container orchestration
 ├── Makefile             Developer commands
 └── .env                 Environment variables

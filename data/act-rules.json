@@ -1,0 +1,1711 @@
+{
+  "version": 1,
+  "generated_at": "2026-03-19T09:04:24.194Z",
+  "sources": {
+    "axe_core_version": "4.10.2",
+    "axe_mapping_source": "shopkeeper/internal/juicer/axe.min.js",
+    "act_testcases_json": "https://act-rules.github.io/testcases.json",
+    "act_rule_pages": "https://www.w3.org/WAI/standards-guidelines/act/rules/"
+  },
+  "axe_rule_to_act_rule_ids": {
+    "area-alt": [
+      "c487ae"
+    ],
+    "aria-allowed-attr": [
+      "5c01ea"
+    ],
+    "aria-command-name": [
+      "97a4e1"
+    ],
+    "aria-conditional-attr": [
+      "5c01ea"
+    ],
+    "aria-deprecated-role": [
+      "674b10"
+    ],
+    "aria-hidden-focus": [
+      "6cfa84"
+    ],
+    "aria-input-field-name": [
+      "e086e5"
+    ],
+    "aria-prohibited-attr": [
+      "5c01ea"
+    ],
+    "aria-required-attr": [
+      "4e8ab6"
+    ],
+    "aria-required-children": [
+      "bc4a75",
+      "ff89c9"
+    ],
+    "aria-required-parent": [
+      "ff89c9"
+    ],
+    "aria-roles": [
+      "674b10"
+    ],
+    "aria-toggle-field-name": [
+      "e086e5"
+    ],
+    "aria-valid-attr-value": [
+      "6a7281"
+    ],
+    "aria-valid-attr": [
+      "5f99a7"
+    ],
+    "audio-caption": [
+      "2eb176",
+      "afb423"
+    ],
+    "autocomplete-valid": [
+      "73f2c2"
+    ],
+    "avoid-inline-spacing": [
+      "24afc2",
+      "9e45ec",
+      "78fd32"
+    ],
+    "button-name": [
+      "97a4e1",
+      "m6b1q3"
+    ],
+    "bypass": [
+      "cf77f2",
+      "047fe0",
+      "b40fd1",
+      "3e12e1",
+      "ye5d6e"
+    ],
+    "color-contrast-enhanced": [
+      "09o5cg"
+    ],
+    "color-contrast": [
+      "afw4f7",
+      "09o5cg"
+    ],
+    "css-orientation-lock": [
+      "b33eff"
+    ],
+    "document-title": [
+      "2779a5"
+    ],
+    "empty-heading": [
+      "ffd0e9"
+    ],
+    "frame-focusable-content": [
+      "akn7bn"
+    ],
+    "frame-title-unique": [
+      "4b1c6c"
+    ],
+    "frame-title": [
+      "cae760"
+    ],
+    "html-has-lang": [
+      "b5c3f8"
+    ],
+    "html-lang-valid": [
+      "bf051a"
+    ],
+    "html-xml-lang-mismatch": [
+      "5b7ae0"
+    ],
+    "identical-links-same-purpose": [
+      "b20e66"
+    ],
+    "image-alt": [
+      "23a2a8"
+    ],
+    "input-button-name": [
+      "97a4e1"
+    ],
+    "input-image-alt": [
+      "59796f"
+    ],
+    "label-content-name-mismatch": [
+      "2ee8b8"
+    ],
+    "label": [
+      "e086e5"
+    ],
+    "link-name": [
+      "c487ae"
+    ],
+    "meta-refresh-no-exceptions": [
+      "bisz58"
+    ],
+    "meta-refresh": [
+      "bc659a",
+      "bisz58"
+    ],
+    "meta-viewport": [
+      "b4f0c3"
+    ],
+    "nested-interactive": [
+      "307n5z"
+    ],
+    "no-autoplay-audio": [
+      "80f0bf"
+    ],
+    "object-alt": [
+      "8fc3b6"
+    ],
+    "presentation-role-conflict": [
+      "46ca7f"
+    ],
+    "role-img-alt": [
+      "23a2a8"
+    ],
+    "scrollable-region-focusable": [
+      "0ssw9k"
+    ],
+    "select-name": [
+      "e086e5"
+    ],
+    "svg-img-alt": [
+      "7d6734"
+    ],
+    "td-headers-attr": [
+      "a25f45"
+    ],
+    "th-has-data-cells": [
+      "d0f69e"
+    ],
+    "valid-lang": [
+      "de46e4"
+    ],
+    "video-caption": [
+      "eac66b"
+    ]
+  },
+  "act_rules": {
+    "c487ae": {
+      "act_rule_id": "c487ae",
+      "title": "Link has non-empty accessible name",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/c487ae/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:4.1.2",
+          "title": "WCAG 2.0 4.1.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag20:2.4.4",
+          "title": "WCAG 2.0 2.4.4",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag20:2.4.9",
+          "title": "WCAG 2.0 2.4.9",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G91",
+          "title": "WCAG technique G91",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Link has non-empty accessible name",
+      "suggested_fixes": [
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label."
+      ],
+      "implementation_notes": []
+    },
+    "5c01ea": {
+      "act_rule_id": "5c01ea",
+      "title": "ARIA state or property is permitted",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/5c01ea/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag-technique:ARIA5",
+          "title": "WCAG technique ARIA5",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "aria11:state_property_processing",
+          "title": "ARIA 1.1 state property processing",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "satisfied",
+          "inapplicable": "satisfied"
+        }
+      ],
+      "summary": "ARIA state or property is permitted",
+      "suggested_fixes": [
+        "Use only ARIA states and properties that are supported by the element's semantic role or are globally allowed.",
+        "If the required ARIA attribute is invalid for the current element, fix the role or remove the unsupported attribute rather than leaving conflicting semantics in place."
+      ],
+      "implementation_notes": []
+    },
+    "97a4e1": {
+      "act_rule_id": "97a4e1",
+      "title": "Button has non-empty accessible name",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/97a4e1/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:4.1.2",
+          "title": "WCAG 2.0 4.1.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Button has non-empty accessible name",
+      "suggested_fixes": [
+        "Give each button an accessible name from visible text, `aria-label`, or `aria-labelledby`.",
+        "Prefer visible button text when possible so both visual and assistive-technology users get the same control name.",
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label."
+      ],
+      "implementation_notes": []
+    },
+    "674b10": {
+      "act_rule_id": "674b10",
+      "title": "Role attribute has valid value",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/674b10/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.3.1",
+          "title": "WCAG 2.0 1.3.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:ARIA4",
+          "title": "WCAG technique ARIA4",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G108",
+          "title": "WCAG technique G108",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Role attribute has valid value",
+      "suggested_fixes": [],
+      "implementation_notes": []
+    },
+    "6cfa84": {
+      "act_rule_id": "6cfa84",
+      "title": "Element with aria-hidden has no content in sequential focus navigation",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/6cfa84/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:4.1.2",
+          "title": "WCAG 2.0 4.1.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "using-aria:fourth",
+          "title": "using-aria:fourth",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Element with aria-hidden has no content in sequential focus navigation",
+      "suggested_fixes": [
+        "Make sure users can reach the reported region or control using the keyboard without getting trapped or skipped.",
+        "Apply focusability only where it preserves a predictable tab sequence and exposes meaningful context."
+      ],
+      "implementation_notes": []
+    },
+    "e086e5": {
+      "act_rule_id": "e086e5",
+      "title": "Form field has non-empty accessible name",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/e086e5/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:4.1.2",
+          "title": "WCAG 2.0 4.1.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Form field has non-empty accessible name",
+      "suggested_fixes": [
+        "Associate each form control with a stable programmatic name using a `<label>`, `aria-label`, or `aria-labelledby`.",
+        "Make sure the label describes the control's purpose, not only its current value or placeholder text.",
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label."
+      ],
+      "implementation_notes": []
+    },
+    "4e8ab6": {
+      "act_rule_id": "4e8ab6",
+      "title": "Element with role attribute has required states and properties",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/4e8ab6/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:4.1.2",
+          "title": "WCAG 2.0 4.1.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:ARIA5",
+          "title": "WCAG technique ARIA5",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Element with role attribute has required states and properties",
+      "suggested_fixes": [],
+      "implementation_notes": []
+    },
+    "bc4a75": {
+      "act_rule_id": "bc4a75",
+      "title": "ARIA required owned elements",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/bc4a75/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.3.1",
+          "title": "WCAG 2.0 1.3.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "ARIA required owned elements",
+      "suggested_fixes": [
+        "Avoid failing patterns like: This element with the list",
+        "Use the ACT passing pattern as a reference: This element with the list"
+      ],
+      "implementation_notes": [
+        "Passing ACT example: This element with the list",
+        "Failing ACT example: This element with the list"
+      ]
+    },
+    "ff89c9": {
+      "act_rule_id": "ff89c9",
+      "title": "ARIA required context role",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/ff89c9/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.3.1",
+          "title": "WCAG 2.0 1.3.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "ARIA required context role",
+      "suggested_fixes": [
+        "Avoid failing patterns like: This element with an explicit role of listitem",
+        "Use the ACT passing pattern as a reference: These elements with an explicit role of listitem"
+      ],
+      "implementation_notes": [
+        "Passing ACT example: These elements with an explicit role of listitem",
+        "Failing ACT example: This element with an explicit role of listitem"
+      ]
+    },
+    "6a7281": {
+      "act_rule_id": "6a7281",
+      "title": "ARIA state or property has valid value",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/6a7281/",
+      "accessibility_requirements": [
+        {
+          "id": "aria11:state_prop_values",
+          "title": "ARIA 1.1 state prop values",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "satisfied",
+          "inapplicable": "satisfied"
+        }
+      ],
+      "summary": "ARIA state or property has valid value",
+      "suggested_fixes": [
+        "Use only ARIA states and properties that are supported by the element's semantic role or are globally allowed.",
+        "If the required ARIA attribute is invalid for the current element, fix the role or remove the unsupported attribute rather than leaving conflicting semantics in place."
+      ],
+      "implementation_notes": []
+    },
+    "5f99a7": {
+      "act_rule_id": "5f99a7",
+      "title": "ARIA attribute is defined in WAI-ARIA",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/5f99a7/",
+      "accessibility_requirements": [],
+      "summary": "ARIA attribute is defined in WAI-ARIA",
+      "suggested_fixes": [
+        "Use only ARIA states and properties that are supported by the element's semantic role or are globally allowed.",
+        "If the required ARIA attribute is invalid for the current element, fix the role or remove the unsupported attribute rather than leaving conflicting semantics in place."
+      ],
+      "implementation_notes": []
+    },
+    "2eb176": {
+      "act_rule_id": "2eb176",
+      "title": "Audio element content has transcript",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/2eb176/",
+      "accessibility_requirements": [],
+      "summary": "Audio element content has transcript",
+      "suggested_fixes": [],
+      "implementation_notes": []
+    },
+    "afb423": {
+      "act_rule_id": "afb423",
+      "title": "Audio element content is media alternative for text",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/afb423/",
+      "accessibility_requirements": [],
+      "summary": "Audio element content is media alternative for text",
+      "suggested_fixes": [],
+      "implementation_notes": []
+    },
+    "73f2c2": {
+      "act_rule_id": "73f2c2",
+      "title": "Autocomplete attribute has valid value",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/73f2c2/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag21:1.3.5",
+          "title": "WCAG 2.1 1.3.5",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Autocomplete attribute has valid value",
+      "suggested_fixes": [],
+      "implementation_notes": []
+    },
+    "24afc2": {
+      "act_rule_id": "24afc2",
+      "title": "Letter spacing in style attributes is not !important",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/24afc2/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag21:1.4.12",
+          "title": "WCAG 2.1 1.4.12",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Letter spacing in style attributes is not !important",
+      "suggested_fixes": [],
+      "implementation_notes": []
+    },
+    "9e45ec": {
+      "act_rule_id": "9e45ec",
+      "title": "Word spacing in style attributes is not !important",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/9e45ec/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag21:1.4.12",
+          "title": "WCAG 2.1 1.4.12",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Word spacing in style attributes is not !important",
+      "suggested_fixes": [],
+      "implementation_notes": []
+    },
+    "78fd32": {
+      "act_rule_id": "78fd32",
+      "title": "Line height in style attributes is not !important",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/78fd32/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag21:1.4.12",
+          "title": "WCAG 2.1 1.4.12",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Line height in style attributes is not !important",
+      "suggested_fixes": [],
+      "implementation_notes": []
+    },
+    "m6b1q3": {
+      "act_rule_id": "m6b1q3",
+      "title": "Menuitem has non-empty accessible name",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/m6b1q3/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:4.1.2",
+          "title": "WCAG 2.0 4.1.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Menuitem has non-empty accessible name",
+      "suggested_fixes": [
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label.",
+        "Avoid failing patterns like: This element with the menuitem",
+        "Use the ACT passing pattern as a reference: This element with the menuitem"
+      ],
+      "implementation_notes": [
+        "Passing ACT example: This element with the menuitem",
+        "Failing ACT example: This element with the menuitem"
+      ]
+    },
+    "cf77f2": {
+      "act_rule_id": "cf77f2",
+      "title": "Bypass Blocks of Repeated Content",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/cf77f2/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:2.4.1",
+          "title": "Input Rules",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G1",
+          "title": "WCAG technique G1",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G123",
+          "title": "WCAG technique G123",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G124",
+          "title": "WCAG technique G124",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:H69",
+          "title": "WCAG technique H69",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:SCR28",
+          "title": "WCAG technique SCR28",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Bypass Blocks of Repeated Content",
+      "suggested_fixes": [
+        "Add a reliable skip mechanism or landmark path that lets keyboard users move past repeated content quickly.",
+        "Ensure the bypass target becomes focusable and visible when the skip mechanism is activated.",
+        "Add a working skip link or landmark path that lets keyboard users bypass repeated blocks of content.",
+        "Ensure the bypass target can receive focus and lands at the start of the main destination content.",
+        "Avoid failing patterns like: This HTML web page does not pass any of the input rules.",
+        "Use the ACT passing pattern as a reference: This HTML web page is passing rule Block of repeated content is collapsible."
+      ],
+      "implementation_notes": [
+        "Passing ACT example: This HTML web page is passing rule Block of repeated content is collapsible.",
+        "Failing ACT example: This HTML web page does not pass any of the input rules."
+      ]
+    },
+    "047fe0": {
+      "act_rule_id": "047fe0",
+      "title": "Document has heading for non-repeated content",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/047fe0/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag-technique:H69",
+          "title": "WCAG technique H69",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Document has heading for non-repeated content",
+      "suggested_fixes": [
+        "Add a working skip link or landmark path that lets keyboard users bypass repeated blocks of content.",
+        "Ensure the bypass target can receive focus and lands at the start of the main destination content.",
+        "Avoid failing patterns like: In this document, there is semantic heading"
+      ],
+      "implementation_notes": [
+        "Failing ACT example: In this document, there is semantic heading"
+      ]
+    },
+    "b40fd1": {
+      "act_rule_id": "b40fd1",
+      "title": "Document has a landmark with non-repeated content",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/b40fd1/",
+      "accessibility_requirements": [],
+      "summary": "Document has a landmark with non-repeated content",
+      "suggested_fixes": [
+        "Add a working skip link or landmark path that lets keyboard users bypass repeated blocks of content.",
+        "Ensure the bypass target can receive focus and lands at the start of the main destination content.",
+        "Avoid failing patterns like: This document has no element with a landmark role.",
+        "Use the ACT passing pattern as a reference: In this document, the main"
+      ],
+      "implementation_notes": [
+        "Passing ACT example: In this document, the main",
+        "Failing ACT example: This document has no element with a landmark role."
+      ]
+    },
+    "3e12e1": {
+      "act_rule_id": "3e12e1",
+      "title": "Block of repeated content is collapsible",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/3e12e1/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag-technique:SCR28",
+          "title": "WCAG technique SCR28",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Block of repeated content is collapsible",
+      "suggested_fixes": [
+        "Add a working skip link or landmark path that lets keyboard users bypass repeated blocks of content.",
+        "Ensure the bypass target can receive focus and lands at the start of the main destination content.",
+        "Avoid failing patterns like: This document has no instrument to toggle the navigational block of repeated content.",
+        "Use the ACT passing pattern as a reference: This document has a link at the start of the document to toggle the visibility and inclusion in the accessibility tree of the navigational block of repeated content."
+      ],
+      "implementation_notes": [
+        "Passing ACT example: This document has a link at the start of the document to toggle the visibility and inclusion in the accessibility tree of the navigational block of repeated content.",
+        "Failing ACT example: This document has no instrument to toggle the navigational block of repeated content."
+      ]
+    },
+    "ye5d6e": {
+      "act_rule_id": "ye5d6e",
+      "title": "Document has an instrument to move focus to non-repeated content",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/ye5d6e/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag-technique:G1",
+          "title": "WCAG technique G1",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G123",
+          "title": "WCAG technique G123",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G124",
+          "title": "WCAG technique G124",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Document has an instrument to move focus to non-repeated content",
+      "suggested_fixes": [
+        "Add a working skip link or landmark path that lets keyboard users bypass repeated blocks of content.",
+        "Ensure the bypass target can receive focus and lands at the start of the main destination content.",
+        "Avoid failing patterns like: This document has no instrument to skip to the non-repeated content.",
+        "Use the ACT passing pattern as a reference: In this document, the first a"
+      ],
+      "implementation_notes": [
+        "Passing ACT example: In this document, the first a",
+        "Failing ACT example: This document has no instrument to skip to the non-repeated content."
+      ]
+    },
+    "09o5cg": {
+      "act_rule_id": "09o5cg",
+      "title": "Text has enhanced contrast",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/09o5cg/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.4.6",
+          "title": "WCAG 2.0 1.4.6",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G17",
+          "title": "WCAG technique G17",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G18",
+          "title": "WCAG technique G18",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Text has enhanced contrast",
+      "suggested_fixes": [
+        "Adjust the text and background colors until the reported text meets the minimum contrast ratio in every visible state.",
+        "Re-test hover, focus, disabled, and placeholder states separately because color tokens often differ between states.",
+        "Adjust the foreground and background color combination until the reported content meets the required contrast ratio.",
+        "Check the failing text in every visible state, including hover, focus, disabled, and placeholder variants.",
+        "Avoid failing patterns like: This light gray text has a contrast ratio of 5.7:1 on the white background.",
+        "Use the ACT passing pattern as a reference: This dark gray text has a contrast ratio of 12.6:1 on the white background."
+      ],
+      "implementation_notes": [
+        "Passing ACT example: This dark gray text has a contrast ratio of 12.6:1 on the white background.",
+        "Failing ACT example: This light gray text has a contrast ratio of 5.7:1 on the white background."
+      ]
+    },
+    "afw4f7": {
+      "act_rule_id": "afw4f7",
+      "title": "Text has minimum contrast",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/afw4f7/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.4.3",
+          "title": "WCAG 2.0 1.4.3",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag20:1.4.6",
+          "title": "WCAG 2.0 1.4.6",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Text has minimum contrast",
+      "suggested_fixes": [
+        "Increase contrast for all reported text, including smaller or lighter-weight variants that may fail before larger text does.",
+        "Avoid depending on font weight or size changes alone when the base color combination is still below the required ratio.",
+        "Adjust the foreground and background color combination until the reported content meets the required contrast ratio.",
+        "Check the failing text in every visible state, including hover, focus, disabled, and placeholder variants.",
+        "Avoid failing patterns like: This light gray text has a contrast ratio of 2.3:1 on the white background.",
+        "Use the ACT passing pattern as a reference: This dark gray text has a contrast ratio of 12.6:1 on the white background."
+      ],
+      "implementation_notes": [
+        "Passing ACT example: This dark gray text has a contrast ratio of 12.6:1 on the white background.",
+        "Failing ACT example: This light gray text has a contrast ratio of 2.3:1 on the white background."
+      ]
+    },
+    "b33eff": {
+      "act_rule_id": "b33eff",
+      "title": "Orientation of the page is not restricted using CSS transform property",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/b33eff/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag21:1.3.4",
+          "title": "WCAG 2.1 1.3.4",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Orientation of the page is not restricted using CSS transform property",
+      "suggested_fixes": [
+        "Avoid failing patterns like: A page where CSS transform property has rotate transform function conditionally applied on the orientation media feature which restricts the element to landscape",
+        "Use the ACT passing pattern as a reference: A page where CSS transform property has rotateZ transform function conditionally applied on the orientation media feature which does not restrict the element to either portrait"
+      ],
+      "implementation_notes": [
+        "Passing ACT example: A page where CSS transform property has rotateZ transform function conditionally applied on the orientation media feature which does not restrict the element to either portrait",
+        "Failing ACT example: A page where CSS transform property has rotate transform function conditionally applied on the orientation media feature which restricts the element to landscape"
+      ]
+    },
+    "2779a5": {
+      "act_rule_id": "2779a5",
+      "title": "HTML page has non-empty title",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/2779a5/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:2.4.2",
+          "title": "WCAG 2.0 2.4.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G88",
+          "title": "WCAG technique G88",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:H25",
+          "title": "WCAG technique H25",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "HTML page has non-empty title",
+      "suggested_fixes": [
+        "Avoid failing patterns like: This page does not have a title"
+      ],
+      "implementation_notes": [
+        "Failing ACT example: This page does not have a title"
+      ]
+    },
+    "ffd0e9": {
+      "act_rule_id": "ffd0e9",
+      "title": "Heading has non-empty accessible name",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/ffd0e9/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.3.1",
+          "title": "WCAG 2.0 1.3.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:H42",
+          "title": "WCAG technique H42",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Heading has non-empty accessible name",
+      "suggested_fixes": [
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label."
+      ],
+      "implementation_notes": []
+    },
+    "akn7bn": {
+      "act_rule_id": "akn7bn",
+      "title": "Iframe with negative tabindex has no interactive elements",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/akn7bn/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:2.1.1",
+          "title": "WCAG 2.0 2.1.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G202",
+          "title": "WCAG technique G202",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Iframe with negative tabindex has no interactive elements",
+      "suggested_fixes": [],
+      "implementation_notes": []
+    },
+    "4b1c6c": {
+      "act_rule_id": "4b1c6c",
+      "title": "Iframe elements with identical accessible names have equivalent purpose",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/4b1c6c/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:4.1.2",
+          "title": "WCAG 2.0 4.1.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Iframe elements with identical accessible names have equivalent purpose",
+      "suggested_fixes": [
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label."
+      ],
+      "implementation_notes": []
+    },
+    "cae760": {
+      "act_rule_id": "cae760",
+      "title": "Iframe element has non-empty accessible name",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/cae760/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:4.1.2",
+          "title": "WCAG 2.0 4.1.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Iframe element has non-empty accessible name",
+      "suggested_fixes": [
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label."
+      ],
+      "implementation_notes": []
+    },
+    "b5c3f8": {
+      "act_rule_id": "b5c3f8",
+      "title": "HTML page has lang attribute",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/b5c3f8/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:3.1.1",
+          "title": "WCAG 2.0 3.1.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:H57",
+          "title": "WCAG technique H57",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "HTML page has lang attribute",
+      "suggested_fixes": [
+        "Set a valid language code that matches the actual language of the content being announced.",
+        "Keep page-level and element-level language metadata consistent when both are present."
+      ],
+      "implementation_notes": []
+    },
+    "bf051a": {
+      "act_rule_id": "bf051a",
+      "title": "HTML page lang attribute has valid language tag",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/bf051a/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:3.1.1",
+          "title": "WCAG 2.0 3.1.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:H57",
+          "title": "WCAG technique H57",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "HTML page lang attribute has valid language tag",
+      "suggested_fixes": [
+        "Set a valid language code that matches the actual language of the content being announced.",
+        "Keep page-level and element-level language metadata consistent when both are present."
+      ],
+      "implementation_notes": []
+    },
+    "5b7ae0": {
+      "act_rule_id": "5b7ae0",
+      "title": "HTML page lang and xml:lang attributes have matching values",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/5b7ae0/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:3.1.1",
+          "title": "WCAG 2.0 3.1.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "HTML page lang and xml:lang attributes have matching values",
+      "suggested_fixes": [
+        "Set a valid language code that matches the actual language of the content being announced.",
+        "Keep page-level and element-level language metadata consistent when both are present."
+      ],
+      "implementation_notes": []
+    },
+    "b20e66": {
+      "act_rule_id": "b20e66",
+      "title": "Links with identical accessible names have equivalent purpose",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/b20e66/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:2.4.9",
+          "title": "WCAG 2.0 2.4.9",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Links with identical accessible names have equivalent purpose",
+      "suggested_fixes": [
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label.",
+        "Avoid failing patterns like: These two links have the same accessible name but go to different resources. They open completely different pages."
+      ],
+      "implementation_notes": [
+        "Failing ACT example: These two links have the same accessible name but go to different resources. They open completely different pages."
+      ]
+    },
+    "23a2a8": {
+      "act_rule_id": "23a2a8",
+      "title": "Image has non-empty accessible name",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/23a2a8/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.1.1",
+          "title": "WCAG 2.0 1.1.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G94",
+          "title": "WCAG technique G94",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G95",
+          "title": "WCAG technique G95",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Image has non-empty accessible name",
+      "suggested_fixes": [
+        "Provide a meaningful accessible name for informative images using `alt`, `aria-label`, or `aria-labelledby`.",
+        "Keep decorative images out of the accessibility tree instead of giving them misleading alternative text.",
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label."
+      ],
+      "implementation_notes": []
+    },
+    "59796f": {
+      "act_rule_id": "59796f",
+      "title": "Image button has non-empty accessible name",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/59796f/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.1.1",
+          "title": "WCAG 2.0 1.1.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag20:4.1.2",
+          "title": "WCAG 2.0 4.1.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G94",
+          "title": "WCAG technique G94",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G95",
+          "title": "WCAG technique G95",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Image button has non-empty accessible name",
+      "suggested_fixes": [
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label.",
+        "Avoid failing patterns like: The image button element has an accessible name equal to the default “Submit Query”. The name",
+        "Use the ACT passing pattern as a reference: The image button has an accessible name through the alt"
+      ],
+      "implementation_notes": [
+        "Passing ACT example: The image button has an accessible name through the alt",
+        "Failing ACT example: The image button element has an accessible name equal to the default “Submit Query”. The name"
+      ]
+    },
+    "2ee8b8": {
+      "act_rule_id": "2ee8b8",
+      "title": "Visible label is part of accessible name",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/2ee8b8/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag21:2.5.3",
+          "title": "WCAG 2.1 2.5.3",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G208",
+          "title": "WCAG technique G208",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Visible label is part of accessible name",
+      "suggested_fixes": [
+        "Keep the accessible name aligned with the visible label so speech-input users can activate the control using the words they see on screen.",
+        "When extra context is needed in the accessible name, keep the full visible label intact at the start of that name.",
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label.",
+        "Avoid failing patterns like: This link has visible text that is different from the accessible name.",
+        "Use the ACT passing pattern as a reference: This link has visible text that matches the accessible name."
+      ],
+      "implementation_notes": [
+        "Passing ACT example: This link has visible text that matches the accessible name.",
+        "Failing ACT example: This link has visible text that is different from the accessible name."
+      ]
+    },
+    "bisz58": {
+      "act_rule_id": "bisz58",
+      "title": "Meta element has no refresh delay (no exception)",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/bisz58/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:2.2.4",
+          "title": "WCAG 2.0 2.2.4",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag20:3.2.5",
+          "title": "WCAG 2.0 3.2.5",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G110",
+          "title": "WCAG technique G110",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:H76",
+          "title": "WCAG technique H76",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Meta element has no refresh delay (no exception)",
+      "suggested_fixes": [
+        "Avoid automatic redirects or refresh behavior that changes the page before users can read or interact with it.",
+        "If refresh behavior is required, provide user control and enough time to complete the current task."
+      ],
+      "implementation_notes": []
+    },
+    "bc659a": {
+      "act_rule_id": "bc659a",
+      "title": "Meta element has no refresh delay",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/bc659a/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:2.2.1",
+          "title": "WCAG 2.0 2.2.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag20:2.2.4",
+          "title": "WCAG 2.0 2.2.4",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag20:3.2.5",
+          "title": "WCAG 2.0 3.2.5",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G110",
+          "title": "WCAG technique G110",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:H76",
+          "title": "WCAG technique H76",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Meta element has no refresh delay",
+      "suggested_fixes": [
+        "Remove viewport settings that prevent zoom, especially `user-scalable=no` and restrictive `maximum-scale` values.",
+        "Verify the page still works when users zoom to at least 200% on mobile browsers.",
+        "Avoid failing patterns like: This page refreshes after 30 seconds.",
+        "Use the ACT passing pattern as a reference: This page redirects to a new page immediately."
+      ],
+      "implementation_notes": [
+        "Passing ACT example: This page redirects to a new page immediately.",
+        "Failing ACT example: This page refreshes after 30 seconds."
+      ]
+    },
+    "b4f0c3": {
+      "act_rule_id": "b4f0c3",
+      "title": "Meta viewport allows for zoom",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/b4f0c3/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.4.4",
+          "title": "WCAG 2.0 1.4.4",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Meta viewport allows for zoom",
+      "suggested_fixes": [
+        "Remove restrictive viewport settings that block zoom or cap the usable scale too aggressively.",
+        "Confirm the page remains usable when zoomed without forcing two-dimensional scrolling for the core content."
+      ],
+      "implementation_notes": []
+    },
+    "307n5z": {
+      "act_rule_id": "307n5z",
+      "title": "Element with presentational children has no focusable content",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/307n5z/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:4.1.2",
+          "title": "WCAG 2.0 4.1.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Element with presentational children has no focusable content",
+      "suggested_fixes": [
+        "Make sure users can reach the reported region or control using the keyboard without getting trapped or skipped.",
+        "Apply focusability only where it preserves a predictable tab sequence and exposes meaningful context."
+      ],
+      "implementation_notes": []
+    },
+    "80f0bf": {
+      "act_rule_id": "80f0bf",
+      "title": "Audio or video element avoids automatically playing audio",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/80f0bf/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.4.2",
+          "title": "Input Rules",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-text:cc5",
+          "title": "wcag-text cc5",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G60",
+          "title": "WCAG technique G60",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G170",
+          "title": "WCAG technique G170",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G171",
+          "title": "WCAG technique G171",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Audio or video element avoids automatically playing audio",
+      "suggested_fixes": [],
+      "implementation_notes": []
+    },
+    "8fc3b6": {
+      "act_rule_id": "8fc3b6",
+      "title": "Object element rendering non-text content has non-empty accessible name",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/8fc3b6/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.1.1",
+          "title": "WCAG 2.0 1.1.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Object element rendering non-text content has non-empty accessible name",
+      "suggested_fixes": [
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label."
+      ],
+      "implementation_notes": []
+    },
+    "46ca7f": {
+      "act_rule_id": "46ca7f",
+      "title": "Element marked as decorative is not exposed",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/46ca7f/",
+      "accessibility_requirements": [],
+      "summary": "Element marked as decorative is not exposed",
+      "suggested_fixes": [
+        "Hide only genuinely decorative content from assistive technology; otherwise provide a meaningful accessible name or text alternative.",
+        "Do not mark content as decorative when it conveys information, state, or a control purpose."
+      ],
+      "implementation_notes": []
+    },
+    "0ssw9k": {
+      "act_rule_id": "0ssw9k",
+      "title": "Scrollable element is keyboard accessible",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/0ssw9k/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:2.1.1",
+          "title": "WCAG 2.0 2.1.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag20:2.1.3",
+          "title": "WCAG 2.0 2.1.3",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G202",
+          "title": "WCAG technique G202",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Scrollable element is keyboard accessible",
+      "suggested_fixes": [
+        "Make scrollable regions keyboard reachable so users can move focus into the region before attempting to scroll it.",
+        "Add focusability only where it preserves a predictable tab order and exposes meaningful context to assistive technology.",
+        "Make sure users can reach the reported region or control using the keyboard without getting trapped or skipped.",
+        "Apply focusability only where it preserves a predictable tab sequence and exposes meaningful context.",
+        "Avoid failing patterns like: This vertically scrollable section"
+      ],
+      "implementation_notes": [
+        "Failing ACT example: This vertically scrollable section"
+      ]
+    },
+    "7d6734": {
+      "act_rule_id": "7d6734",
+      "title": "SVG element with explicit role has non-empty accessible name",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/7d6734/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.1.1",
+          "title": "WCAG 2.0 1.1.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "SVG element with explicit role has non-empty accessible name",
+      "suggested_fixes": [
+        "Give SVG or graphics used as images an accessible name with visible text, `<title>`, `aria-label`, or `aria-labelledby`.",
+        "If the graphic is purely decorative, remove it from the accessibility tree rather than leaving it unnamed.",
+        "Provide a non-empty accessible name using visible text, an associated label, `aria-label`, or `aria-labelledby`, depending on the control type.",
+        "Keep the programmatic name aligned with what users see on screen when the control has a visible label."
+      ],
+      "implementation_notes": []
+    },
+    "a25f45": {
+      "act_rule_id": "a25f45",
+      "title": "Headers attribute specified on a cell refers to cells in the same table element",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/a25f45/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.3.1",
+          "title": "WCAG 2.0 1.3.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:H43",
+          "title": "WCAG technique H43",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Headers attribute specified on a cell refers to cells in the same table element",
+      "suggested_fixes": [
+        "Use `headers` only when it reflects real data-to-header relationships in complex tables.",
+        "Prefer simpler semantic table structures with `th` and `scope` when they can express the same relationships clearly.",
+        "Use semantic table markup that accurately matches the relationship between headers and data cells.",
+        "Avoid adding header attributes unless the table structure truly requires them and the relationships are correct."
+      ],
+      "implementation_notes": []
+    },
+    "d0f69e": {
+      "act_rule_id": "d0f69e",
+      "title": "Table header cell has assigned cells",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/d0f69e/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.3.1",
+          "title": "WCAG 2.0 1.3.1",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Table header cell has assigned cells",
+      "suggested_fixes": [
+        "Use header cells only when the table actually contains related data cells that depend on those headers.",
+        "Restructure layout tables into semantic content or a proper data table before adding more header markup.",
+        "Use semantic table markup that accurately matches the relationship between headers and data cells.",
+        "Avoid adding header attributes unless the table structure truly requires them and the relationships are correct."
+      ],
+      "implementation_notes": []
+    },
+    "de46e4": {
+      "act_rule_id": "de46e4",
+      "title": "Element with lang attribute has valid language tag",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/de46e4/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:3.1.2",
+          "title": "WCAG 2.0 3.1.2",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:H58",
+          "title": "WCAG technique H58",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Element with lang attribute has valid language tag",
+      "suggested_fixes": [
+        "Set a valid language code that matches the actual language of the page or element content.",
+        "If both `lang` and `xml:lang` are present, keep them synchronized to avoid conflicting language metadata.",
+        "Set a valid language code that matches the actual language of the content being announced.",
+        "Keep page-level and element-level language metadata consistent when both are present."
+      ],
+      "implementation_notes": []
+    },
+    "eac66b": {
+      "act_rule_id": "eac66b",
+      "title": "Video element auditory content has accessible alternative",
+      "status": "approved",
+      "rule_url": "https://www.w3.org/WAI/standards-guidelines/act/rules/eac66b/",
+      "accessibility_requirements": [
+        {
+          "id": "wcag20:1.2.2",
+          "title": "Input Rules",
+          "for_conformance": true,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G87",
+          "title": "WCAG technique G87",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:G93",
+          "title": "WCAG technique G93",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        },
+        {
+          "id": "wcag-technique:H95",
+          "title": "WCAG technique H95",
+          "for_conformance": false,
+          "failed": "not satisfied",
+          "passed": "further testing needed",
+          "inapplicable": "further testing needed"
+        }
+      ],
+      "summary": "Video element auditory content has accessible alternative",
+      "suggested_fixes": [
+        "Avoid failing patterns like: A video element without any form of captions.",
+        "Use the ACT passing pattern as a reference: A video element with an associated track element that contains captions for all the audio."
+      ],
+      "implementation_notes": [
+        "Passing ACT example: A video element with an associated track element that contains captions for all the audio.",
+        "Failing ACT example: A video element without any form of captions."
+      ]
+    }
+  }
+}

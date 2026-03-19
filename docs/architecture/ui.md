@@ -14,6 +14,7 @@ The frontend for the accessibility scanner is a strictly decoupled **NextJS** ap
 ### Data Flow
 
 - **Server Components** read data directly from PostgreSQL via Drizzle ORM
+- **Server Components** also read the shared ACT catalog at render time for issue-detail enrichment
 - **Client Components** call the Shopkeeper API for writes and live updates (POST/DELETE for scan actions, GET for polling)
 - Shopkeeper owns all DB writes; the NextJS app only reads
 
@@ -25,7 +26,7 @@ The frontend for the accessibility scanner is a strictly decoupled **NextJS** ap
 | `/scans` | Server Component | All scans list with status badges and progress |
 | `/scans/new` | Static | Dedicated new scan page with form |
 | `/scans/[id]` | Server + Client | Scan detail with progress bar, issues summary, live polling |
-| `/scans/[id]/issues` | Server Component | Issues viewer with expandable collapsible rows |
+| `/scans/[id]/issues` | Server Component | Issues viewer with expandable collapsible rows, ACT rules, WCAG mappings, and deterministic suggested changes |
 
 ### Key Components
 
@@ -74,3 +75,14 @@ Completed and failed scans expose client-side actions to:
 - delete the old scan record and its screenshot assets
 
 Active scans do not expose these actions, which prevents conflicts with the running Go scan pipeline.
+
+### ACT-Enriched Issue Details
+
+- ACT context is intentionally shown on `/scans/[id]/issues`, not on the dashboard or compact scan tables.
+- The issue details page enriches each DB-backed issue by resolving its Sweetner-generated `violationType` against the shared `data/act-rules.json` catalog.
+- Each expanded issue can show:
+  - ACT rule ID badges near the issue heading
+  - W3C ACT rule links and status badges (`Approved` / `Proposed`)
+  - mapped accessibility requirements / WCAG references
+  - deterministic suggested changes aggregated from the mapped ACT rules
+- The ACT guidance is rule-level and local. It is not generated on the fly and it is not DOM-specific in this phase.

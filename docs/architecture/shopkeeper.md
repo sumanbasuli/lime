@@ -19,6 +19,7 @@
 shopkeeper/
 ├── cmd/shopkeeper/main.go          — Entrypoint: DB connect, migrations, chromedp allocator, server
 ├── internal/
+│   ├── actrules/resolver.go        — Loads shared ACT catalog and enriches issues at read time
 │   ├── config/config.go            — Env-based config (DATABASE_URL, SHOPKEEPER_PORT)
 │   ├── database/database.go        — pgxpool connection + golang-migrate runner
 │   ├── models/models.go            — Domain structs: Scan, URL, Issue, IssueOccurrence, Stats
@@ -36,6 +37,10 @@ shopkeeper/
 └── migrations/
     ├── 000001_init_schema.up.sql
     └── 000001_init_schema.down.sql
+
+repo root
+├── data/act-rules.json             — Shared checked-in ACT catalog used by Go + Next at read time
+└── scripts/refresh-act-data.mjs    — Refreshes the ACT catalog from axe metadata + official ACT sources
 ```
 
 ### API Endpoints
@@ -49,7 +54,7 @@ shopkeeper/
 | POST | `/api/scans/{id}/rescan` | RescanScan | Create a fresh scan from a completed/failed scan |
 | GET | `/api/scans/{id}` | GetScan | Single scan detail |
 | DELETE | `/api/scans/{id}` | DeleteScan | Delete a completed/failed scan and related data |
-| GET | `/api/scans/{id}/issues` | GetScanIssues | Issues with occurrences for a scan |
+| GET | `/api/scans/{id}/issues` | GetScanIssues | Issues with occurrences for a scan, enriched with ACT context and suggested fixes |
 
 ### Dependency Injection
 
@@ -73,6 +78,24 @@ The `scanner.Scanner` implements this interface. The handler launches scans asyn
 8. Status is set to `completed`. On any error, status is set to `failed`.
 
 The async execution is backend-owned. Browser navigation only affects UI polling, not the actual scan job.
+
+## ACT Enrichment Model
+
+- Sweetner remains the canonical writer for issue records. It stores the axe-core `violation_type` and base issue metadata only.
+- ACT metadata is added at read time, not persisted in PostgreSQL. This keeps the DB schema unchanged while allowing the ACT catalog to evolve independently.
+- `GET /api/scans/{id}/issues` loads the DB issues first, then resolves `violation_type -> act_rule_ids[] -> act_rules[]` through `internal/actrules/resolver.go`.
+- Suggested fixes are deterministic and local. They come from the checked-in ACT catalog and curated rule-level guidance, not from runtime AI generation and not from live W3C requests.
+- If no ACT mapping exists for an axe rule, the API still returns the original issue shape with `act_rules: []` and `suggested_fixes: []`.
+
+### Catalog Source of Truth
+
+- The checked-in catalog lives at `data/act-rules.json`.
+- The generator script `scripts/refresh-act-data.mjs` combines:
+  - axe-core 4.10.2 `actIds` mappings from the embedded `juicer/axe.min.js`
+  - official ACT metadata from `https://act-rules.github.io/testcases.json`
+  - official W3C ACT rule URLs under `https://www.w3.org/WAI/standards-guidelines/act/rules/`
+  - curated deterministic remediation guidance maintained in-repo
+- Runtime services read the catalog from `ACT_RULES_PATH` when set. Docker mounts it at `/shared-data/act-rules.json`.
 
 ## Scan Lifecycle Management
 
