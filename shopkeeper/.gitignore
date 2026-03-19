@@ -1,0 +1,28 @@
+# Binaries
+shopkeeper
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+tmp/
+bin/
+
+# Test binary
+*.test
+
+# Go workspace
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Air
+tmp/
+
+# Screenshots
+screenshots/

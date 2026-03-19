@@ -1,0 +1,8 @@
+DROP TABLE IF EXISTS issue_occurrences;
+DROP TABLE IF EXISTS issues;
+DROP TABLE IF EXISTS urls;
+DROP TABLE IF EXISTS scans;
+
+DROP TYPE IF EXISTS severity;
+DROP TYPE IF EXISTS url_status;
+DROP TYPE IF EXISTS scan_status;

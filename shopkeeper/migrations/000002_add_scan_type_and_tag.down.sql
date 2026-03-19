@@ -1,0 +1,4 @@
+DROP INDEX IF EXISTS idx_scans_scan_type;
+DROP INDEX IF EXISTS idx_scans_tag;
+ALTER TABLE scans DROP COLUMN IF EXISTS tag;
+ALTER TABLE scans DROP COLUMN IF EXISTS scan_type;

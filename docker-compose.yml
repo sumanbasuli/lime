@@ -1,0 +1,59 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: lime-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lime}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lime_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-lime_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lime} -d ${POSTGRES_DB:-lime_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  shopkeeper:
+    build:
+      context: ./shopkeeper
+      dockerfile: Dockerfile
+    container_name: lime-shopkeeper
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-lime}:${POSTGRES_PASSWORD:-lime_dev_password}@db:5432/${POSTGRES_DB:-lime_db}?sslmode=disable
+      SHOPKEEPER_PORT: 8080
+    ports:
+      - "8080:8080"
+    shm_size: "2gb"
+    volumes:
+      - screenshots:/app/screenshots
+
+  ui:
+    build:
+      context: ./lime
+      dockerfile: Dockerfile
+      target: dev
+    container_name: lime-ui
+    restart: unless-stopped
+    depends_on:
+      - shopkeeper
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-lime}:${POSTGRES_PASSWORD:-lime_dev_password}@db:5432/${POSTGRES_DB:-lime_db}?sslmode=disable
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./lime:/app
+      - /app/node_modules
+      - /app/.next
+
+volumes:
+  pgdata:
+  screenshots:
