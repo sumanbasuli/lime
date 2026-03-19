@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/campuspress/lime/shopkeeper/internal/models"
+	"github.com/campuspress/lime/shopkeeper/internal/viewport"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -20,7 +21,7 @@ func New(pool *pgxpool.Pool) *Repository {
 }
 
 // scanColumns is the SELECT column list for scans (used in all scan queries).
-const scanColumns = `id, sitemap_url, status, scan_type, tag, total_urls, scanned_urls, created_at, updated_at`
+const scanColumns = `id, sitemap_url, status, scan_type, tag, viewport_preset, viewport_width, viewport_height, total_urls, scanned_urls, created_at, updated_at`
 
 // issueColumns is the SELECT column list for issues (used in single-issue queries).
 const issueColumns = `id, scan_id, violation_type, description, help_url, severity, is_false_positive, created_at`
@@ -30,6 +31,7 @@ func scanRow(row interface{ Scan(dest ...any) error }) (*models.Scan, error) {
 	scan := &models.Scan{}
 	err := row.Scan(
 		&scan.ID, &scan.SitemapURL, &scan.Status, &scan.ScanType, &scan.Tag,
+		&scan.ViewportPreset, &scan.ViewportWidth, &scan.ViewportHeight,
 		&scan.TotalURLs, &scan.ScannedURLs, &scan.CreatedAt, &scan.UpdatedAt,
 	)
 	if err != nil {
@@ -52,13 +54,15 @@ func issueRow(row interface{ Scan(dest ...any) error }) (*models.Issue, error) {
 }
 
 // CreateScan inserts a new scan record and returns it.
-func (r *Repository) CreateScan(ctx context.Context, sitemapURL, scanType string, tag *string) (*models.Scan, error) {
+func (r *Repository) CreateScan(ctx context.Context, sitemapURL, scanType string, tag *string, scanViewport viewport.Settings) (*models.Scan, error) {
 	scan := &models.Scan{}
 	err := r.pool.QueryRow(ctx,
-		`INSERT INTO scans (sitemap_url, status, scan_type, tag) VALUES ($1, 'pending', $2, $3)
+		`INSERT INTO scans (sitemap_url, status, scan_type, tag, viewport_preset, viewport_width, viewport_height)
+		 VALUES ($1, 'pending', $2, $3, $4, $5, $6)
 		 RETURNING `+scanColumns,
-		sitemapURL, scanType, tag,
+		sitemapURL, scanType, tag, scanViewport.Preset, scanViewport.Width, scanViewport.Height,
 	).Scan(&scan.ID, &scan.SitemapURL, &scan.Status, &scan.ScanType, &scan.Tag,
+		&scan.ViewportPreset, &scan.ViewportWidth, &scan.ViewportHeight,
 		&scan.TotalURLs, &scan.ScannedURLs, &scan.CreatedAt, &scan.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scan: %w", err)
@@ -108,6 +112,7 @@ func (r *Repository) ListRecoverableScans(ctx context.Context) ([]models.Scan, e
 	for rows.Next() {
 		var s models.Scan
 		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.ScanType, &s.Tag,
+			&s.ViewportPreset, &s.ViewportWidth, &s.ViewportHeight,
 			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan recoverable scan row: %w", err)
 		}
@@ -166,6 +171,7 @@ func (r *Repository) ListScans(ctx context.Context) ([]models.Scan, error) {
 	for rows.Next() {
 		var s models.Scan
 		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.ScanType, &s.Tag,
+			&s.ViewportPreset, &s.ViewportWidth, &s.ViewportHeight,
 			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
@@ -192,6 +198,7 @@ func (r *Repository) ListScansByTag(ctx context.Context, tag string) ([]models.S
 	for rows.Next() {
 		var s models.Scan
 		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.ScanType, &s.Tag,
+			&s.ViewportPreset, &s.ViewportWidth, &s.ViewportHeight,
 			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}

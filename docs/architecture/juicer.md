@@ -23,8 +23,9 @@ func ScanPages(ctx, allocCtx context.Context, pages []PageInput, scanID string, 
 * **Concurrency Management**: Worker pool using a buffered channel semaphore of size 5.
 * **Politeness**: 500ms delay between requests via `time.Sleep`.
 * **Progress Reporting**: Calls `onProgress(scannedCount)` after each page, enabling real-time scan progress in the UI.
+* **Viewport Control**: Applies the scan's persisted viewport width/height before navigation so layout, screenshots, and rule evaluation all use the same deterministic rendering width.
 * **Visual Stabilization**: Waits for document load, fonts, images, and a short paint-settle window before screenshots are captured.
-* **Context Fallback**: Tiny or visually blank element crops are retried with a wider contextual clip, and the UI can fall back to the saved page screenshot when no reliable element crop is available.
+* **Context Fallback**: Tiny or visually blank element crops are retried with a wider contextual clip, then a visible-viewport context screenshot around the scrolled-to element, and only then can the UI fall back to the saved page screenshot.
 
 ## System Constraints
 
@@ -33,6 +34,7 @@ func ScanPages(ctx, allocCtx context.Context, pages []PageInput, scanID string, 
 * **Delay**: 500ms between requests.
 * **Docker Requirement**: `shm_size: 2gb` in docker-compose for Chromium stability.
 * **Chrome Flags**: `--no-sandbox`, `--disable-gpu`, `--disable-dev-shm-usage` for Docker compatibility.
+* **Viewport Presets**: Shopkeeper currently resolves four presets before Juicer runs: Desktop `1440x900`, Laptop `1280x800`, Tablet `768x1024`, and Mobile `390x844`.
 
 ### Chromedp Allocator
 
@@ -61,5 +63,6 @@ Returns `[]RawResult`, each containing:
 ### Screenshot Reliability Notes
 
 - Juicer no longer captures screenshots immediately after `body` becomes available.
+- Juicer sets an explicit viewport before `Navigate(...)`, so scans no longer depend on Chromium's implicit startup viewport.
 - Element clips are padded and minimum-sized so very small targets do not collapse into unreadable dots.
-- If the element crop still looks unreliable after capture, Juicer prefers a wider context crop; otherwise the UI falls back to the page screenshot instead of showing a misleading white box.
+- If the element crop still looks unreliable after capture, Juicer prefers a wider context crop and then a desktop-width visible-viewport screenshot around the element before the UI falls back to the full page.

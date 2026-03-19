@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/campuspress/lime/shopkeeper/internal/viewport"
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
@@ -64,7 +65,7 @@ type elementBounds struct {
 
 // ScanPages scans multiple pages for accessibility issues using chromedp and axe-core.
 // It uses a worker pool with bounded concurrency (max 5 simultaneous pages).
-func ScanPages(ctx context.Context, allocCtx context.Context, pages []PageInput, scanID string, onProgress ProgressCallback) ([]RawResult, error) {
+func ScanPages(ctx context.Context, allocCtx context.Context, pages []PageInput, scanID string, scanViewport viewport.Settings, onProgress ProgressCallback) ([]RawResult, error) {
 	if len(pages) == 0 {
 		return []RawResult{}, nil
 	}
@@ -97,7 +98,7 @@ func ScanPages(ctx context.Context, allocCtx context.Context, pages []PageInput,
 			defer wg.Done()
 			defer func() { <-sem }() // Release semaphore
 
-			result := scanSinglePage(ctx, allocCtx, p, scanID, screenshotDir)
+			result := scanSinglePage(ctx, allocCtx, p, scanID, screenshotDir, scanViewport)
 
 			mu.Lock()
 			results = append(results, result)
@@ -120,7 +121,7 @@ func ScanPages(ctx context.Context, allocCtx context.Context, pages []PageInput,
 	return results, nil
 }
 
-func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInput, scanID, screenshotDir string) RawResult {
+func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInput, scanID, screenshotDir string, scanViewport viewport.Settings) RawResult {
 	result := RawResult{
 		URLID: page.URLID,
 		URL:   page.URL,
@@ -137,6 +138,7 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 
 	// Navigate to the page
 	err := chromedp.Run(tabCtx,
+		chromedp.EmulateViewport(int64(scanViewport.Width), int64(scanViewport.Height)),
 		chromedp.Navigate(page.URL),
 		chromedp.WaitReady("body"),
 	)
@@ -248,6 +250,18 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 					log.Printf("Juicer: warning: failed to save element screenshot: %v", err)
 				} else {
 					node.ElementScreenshotPath = elemPath
+				}
+			} else {
+				viewportScreenshot, viewportErr := captureVisibleViewport(tabCtx)
+				if viewportErr != nil {
+					log.Printf("Juicer: warning: failed viewport-context screenshot for %q on %s: %v", selector, page.URL, viewportErr)
+				} else if len(viewportScreenshot) >= elementScreenshotMinByteSize {
+					contextPath := filepath.Join(screenshotDir, fmt.Sprintf("%s_context_%d.png", page.URLID, nodeIdx))
+					if err := os.WriteFile(contextPath, viewportScreenshot, 0644); err != nil {
+						log.Printf("Juicer: warning: failed to save viewport-context screenshot: %v", err)
+					} else {
+						node.ElementScreenshotPath = contextPath
+					}
 				}
 			}
 			nodeIdx++
@@ -434,6 +448,24 @@ func captureClip(ctx context.Context, clip *cdppage.Viewport) ([]byte, error) {
 		data, err := cdppage.CaptureScreenshot().
 			WithFormat(cdppage.CaptureScreenshotFormatPng).
 			WithClip(clip).
+			Do(ctx)
+		if err != nil {
+			return err
+		}
+		screenshot = data
+		return nil
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return screenshot, nil
+}
+
+func captureVisibleViewport(ctx context.Context) ([]byte, error) {
+	var screenshot []byte
+	err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		data, err := cdppage.CaptureScreenshot().
+			WithFormat(cdppage.CaptureScreenshotFormatPng).
 			Do(ctx)
 		if err != nil {
 			return err

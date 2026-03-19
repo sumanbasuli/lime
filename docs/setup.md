@@ -86,7 +86,7 @@ make logs-ui
 |--------|------|-------------|
 | GET | `/api/health` | Service health check |
 | GET | `/api/stats` | Dashboard aggregates (total scans/issues/pages) |
-| POST | `/api/scans` | Create a new scan (body: `{"sitemap_url": "...", "scan_type": "sitemap|single", "tag": "optional"}`) |
+| POST | `/api/scans` | Create a new scan (body: `{"sitemap_url": "...", "scan_type": "sitemap|single", "viewport_preset": "desktop|laptop|tablet|mobile", "tag": "optional"}`) |
 | GET | `/api/scans` | List all scans |
 | POST | `/api/scans/{id}/rescan` | Start a fresh scan using the same target URL/type/tag |
 | GET | `/api/scans/{id}` | Get scan detail by ID |
@@ -100,6 +100,7 @@ make logs-ui
 - A scan continues running if the user changes pages or closes the scan detail view; only the frontend polling stops.
 - A scan does not survive a dead Shopkeeper process in-memory, but non-terminal scans are now recovered automatically the next time Shopkeeper starts.
 - Recovery resets partial URLs/issues/screenshots for that scan before rerunning it, so the final stored result is clean.
+- Scans now run with an explicit viewport preset instead of Chromium's implicit default. The current presets are Desktop `1440x900`, Laptop `1280x800`, Tablet `768x1024`, and Mobile `390x844`.
 - For long-running scans in local development, prefer Docker or `make start-shopkeeper` over `make dev-shopkeeper`, because hot reload restarts the Go process frequently.
 - Sitemap discovery now retries transient nested sitemap fetch failures. If Shopkeeper still cannot fetch every sitemap listed in a sitemap index, the scan fails rather than scanning a partial subset of URLs.
 - Screenshot capture now waits for a fuller page-settle point before capturing and falls back to broader context when a tight element crop is blank or too small.

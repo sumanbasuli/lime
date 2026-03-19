@@ -17,6 +17,7 @@ The frontend for the accessibility scanner is a strictly decoupled **NextJS** ap
 - **Server Components** also read the shared ACT catalog at render time for issue-detail enrichment
 - **Client Components** call the Shopkeeper API for writes and live updates (POST/DELETE for scan actions, GET for polling)
   - this now includes issue-level false-positive mark/unmark actions from the issue details page
+  - and scan creation now includes a viewport preset so users can choose the screen size used for rendering
 - Shopkeeper owns all DB writes; the NextJS app only reads
 
 ### Page Routes
@@ -80,12 +81,23 @@ Completed and failed scans expose client-side actions to:
 
 Active scans do not expose these actions, which prevents conflicts with the running Go scan pipeline.
 
+### Screen-Size Selection
+
+- The shared `NewScanForm` exposes a preset-only screen-size picker:
+  - Desktop `1440×900`
+  - Laptop `1280×800`
+  - Tablet `768×1024`
+  - Mobile `390×844`
+- Desktop is the default preset for new scans.
+- The chosen viewport is sent to Shopkeeper as `viewport_preset` and persisted on the scan record.
+- Scan detail pages show the stored screen size near the scan metadata. Dashboard and scan-list rows intentionally do not repeat it.
+
 ### ACT-Enriched Issue Details
 
 - ACT context is intentionally shown on `/scans/[id]/issues`, not on the dashboard or compact scan tables.
 - The issue details page enriches each DB-backed issue by resolving its Sweetner-generated `violationType` against the shared `data/act-rules.json` catalog.
 - Each main issue card also exposes a top-right false-positive action that persists through Shopkeeper and refreshes the server-rendered issue list.
-- When an element-level screenshot is unavailable or rejected as unreliable, the issue details page falls back to the saved page screenshot as page context instead of showing an empty image box.
+- When an element-level screenshot is unavailable or rejected as unreliable, the issue details page first uses the saved visible-viewport context screenshot when available; older or last-resort cases still fall back to the saved page screenshot as page context instead of showing an empty image box.
 - Each expanded issue can show:
   - ACT rule ID badges near the issue heading
   - W3C ACT rule links and status badges (`Approved` / `Proposed`)

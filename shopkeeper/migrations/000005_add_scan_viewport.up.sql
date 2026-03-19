@@ -1,0 +1,4 @@
+ALTER TABLE scans
+    ADD COLUMN viewport_preset TEXT NOT NULL DEFAULT 'desktop',
+    ADD COLUMN viewport_width INTEGER NOT NULL DEFAULT 1440,
+    ADD COLUMN viewport_height INTEGER NOT NULL DEFAULT 900;

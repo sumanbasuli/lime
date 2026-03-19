@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"github.com/campuspress/lime/shopkeeper/internal/actrules"
 	"github.com/campuspress/lime/shopkeeper/internal/models"
 	"github.com/campuspress/lime/shopkeeper/internal/repository"
+	"github.com/campuspress/lime/shopkeeper/internal/viewport"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -20,7 +22,7 @@ const screenshotBaseDir = "/app/screenshots"
 // ScanRunner defines the interface for running async scans.
 // This avoids a circular dependency with the scanner package.
 type ScanRunner interface {
-	RunScan(scanID, targetURL, scanType string)
+	RunScan(scan models.Scan)
 }
 
 // Handler holds dependencies for HTTP handlers.
@@ -89,8 +91,16 @@ func (h *Handler) CreateScan(w http.ResponseWriter, r *http.Request) {
 		req.Tag = nil
 	}
 
+	scanViewport, err := viewport.ResolvePreset(req.ViewportPreset)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("viewport_preset must be one of: %s", strings.Join(viewport.ValidPresetKeys(), ", ")),
+		})
+		return
+	}
+
 	// Create scan record
-	scan, err := h.repo.CreateScan(r.Context(), req.SitemapURL, req.ScanType, req.Tag)
+	scan, err := h.repo.CreateScan(r.Context(), req.SitemapURL, req.ScanType, req.Tag, scanViewport)
 	if err != nil {
 		log.Printf("Failed to create scan: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -101,7 +111,7 @@ func (h *Handler) CreateScan(w http.ResponseWriter, r *http.Request) {
 
 	// Launch async scan pipeline
 	if h.scanner != nil {
-		go h.scanner.RunScan(scan.ID, scan.SitemapURL, scan.ScanType)
+		go h.scanner.RunScan(*scan)
 	}
 
 	writeJSON(w, http.StatusCreated, scan)
@@ -216,7 +226,7 @@ func (h *Handler) UnmarkIssueFalsePositive(w http.ResponseWriter, r *http.Reques
 }
 
 // RescanScan handles POST /api/scans/{id}/rescan.
-// It creates a fresh scan using the same target URL, scan type, and tag.
+// It creates a fresh scan using the same target URL, scan type, tag, and viewport.
 func (h *Handler) RescanScan(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -247,7 +257,13 @@ func (h *Handler) RescanScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newScan, err := h.repo.CreateScan(r.Context(), scan.SitemapURL, scan.ScanType, scan.Tag)
+	newScan, err := h.repo.CreateScan(
+		r.Context(),
+		scan.SitemapURL,
+		scan.ScanType,
+		scan.Tag,
+		viewport.SettingsFromStored(scan.ViewportPreset, scan.ViewportWidth, scan.ViewportHeight),
+	)
 	if err != nil {
 		log.Printf("Failed to create rescan: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -257,7 +273,7 @@ func (h *Handler) RescanScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.scanner != nil {
-		go h.scanner.RunScan(newScan.ID, newScan.SitemapURL, newScan.ScanType)
+		go h.scanner.RunScan(*newScan)
 	}
 
 	writeJSON(w, http.StatusCreated, newScan)

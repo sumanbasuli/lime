@@ -27,6 +27,7 @@ shopkeeper/
 │   ├── handler/handler.go          — HTTP handlers with ScanRunner interface
 │   ├── router/router.go            — Chi router with CORS, middleware, all routes
 │   ├── scanner/scanner.go          — Async scan pipeline orchestrator
+│   ├── viewport/presets.go         — Scan viewport preset validation + stored dimensions
 │   ├── profiler/profiler.go        — Sitemap XML parser
 │   ├── juicer/                     — chromedp + axe-core scanner
 │   │   ├── juicer.go               — Worker pool, page scanning
@@ -63,20 +64,20 @@ repo root
 The handler uses an interface `ScanRunner` to avoid circular dependencies:
 ```go
 type ScanRunner interface {
-    RunScan(scanID, targetURL, scanType string)
+    RunScan(scan models.Scan)
 }
 ```
-The `scanner.Scanner` implements this interface. The handler launches scans asynchronously via `go h.scanner.RunScan(...)`.
+The `scanner.Scanner` implements this interface. The handler launches scans asynchronously via `go h.scanner.RunScan(...)`, passing the persisted scan config so rescans and restart recovery keep the same viewport.
 
 ## Workflow
 
 1. UI sends a POST request containing a `sitemap_url` to Shopkeeper.
-2. Shopkeeper validates the URL and creates a `Scan` record with status `pending`.
+2. Shopkeeper validates the URL, resolves the requested viewport preset, and creates a `Scan` record with status `pending`.
 3. Shopkeeper launches an async goroutine that runs the scan pipeline.
 4. Pipeline updates status to `profiling`, calls Profiler to discover URLs.
 5. Profiler must finish full sitemap discovery before scanning starts. If any nested sitemap still fails after retries, the scan fails instead of continuing with a partial URL set.
 6. Discovered URLs are bulk-inserted into the DB; status moves to `scanning`.
-7. Juicer scans pages with 5-concurrent workers; progress updates in real-time.
+7. Juicer scans pages with 5-concurrent workers using the scan's persisted viewport dimensions; progress updates in real-time.
 8. Status moves to `processing`; Sweetner deduplicates and stores issues.
 9. Status is set to `completed`. On any error, status is set to `failed`.
 
@@ -109,10 +110,11 @@ The async execution is backend-owned. Browser navigation only affects UI polling
 
 ## Scan Lifecycle Management
 
-- Rescans create a brand new `scans` row and re-run the pipeline with the original target URL, scan type, and tag.
+- Each scan now stores `viewport_preset`, `viewport_width`, and `viewport_height` on the `scans` row. Shopkeeper resolves these at create time and reuses them for every page in the scan.
+- Rescans create a brand new `scans` row and re-run the pipeline with the original target URL, scan type, tag, and viewport.
 - Deletes are limited to terminal scans (`completed` or `failed`) so an active background job is never orphaned.
 - Database cleanup relies on `ON DELETE CASCADE`, and Shopkeeper removes the scan's screenshot directory from `/app/screenshots/{scanId}` after a successful delete.
-- On startup, Shopkeeper re-queues any scan left in `pending`, `profiling`, `scanning`, or `processing`. Partial URLs/issues/screenshots are cleared first so the recovered run starts cleanly with the same scan ID.
+- On startup, Shopkeeper re-queues any scan left in `pending`, `profiling`, `scanning`, or `processing`. Partial URLs/issues/screenshots are cleared first so the recovered run starts cleanly with the same scan ID and viewport.
 
 ### Recovery Model
 

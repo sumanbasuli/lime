@@ -11,6 +11,7 @@ import (
 	"github.com/campuspress/lime/shopkeeper/internal/profiler"
 	"github.com/campuspress/lime/shopkeeper/internal/repository"
 	"github.com/campuspress/lime/shopkeeper/internal/sweetner"
+	"github.com/campuspress/lime/shopkeeper/internal/viewport"
 )
 
 // Scanner manages the async scan pipeline.
@@ -55,7 +56,7 @@ func (s *Scanner) RecoverInterruptedScans() error {
 			log.Printf("Scanner: warning: failed to remove screenshots for recovered scan %s: %v", scan.ID, err)
 		}
 
-		go s.RunScan(scan.ID, scan.SitemapURL, scan.ScanType)
+		go s.RunScan(scan)
 	}
 
 	return nil
@@ -65,70 +66,78 @@ func (s *Scanner) RecoverInterruptedScans() error {
 // It is designed to be called as a goroutine from the handler.
 // Pipeline: pending → [profiling] → scanning → processing → completed/failed
 // For single URL scans, the profiling step is skipped.
-func (s *Scanner) RunScan(scanID, targetURL, scanType string) {
+func (s *Scanner) RunScan(scan models.Scan) {
 	ctx := context.Background()
-	log.Printf("Scanner: starting %s scan %s for %s", scanType, scanID, targetURL)
+	log.Printf(
+		"Scanner: starting %s scan %s for %s at %s (%dx%d)",
+		scan.ScanType,
+		scan.ID,
+		scan.SitemapURL,
+		scan.ViewportPreset,
+		scan.ViewportWidth,
+		scan.ViewportHeight,
+	)
 
 	var urlRecords []models.URL
 
-	if scanType == "single" {
+	if scan.ScanType == "single" {
 		// Single URL scan — skip profiler, directly insert the URL
-		records, err := s.repo.BulkInsertURLs(ctx, scanID, []string{targetURL})
+		records, err := s.repo.BulkInsertURLs(ctx, scan.ID, []string{scan.SitemapURL})
 		if err != nil {
-			log.Printf("Scanner: failed to insert URL for scan %s: %v", scanID, err)
-			s.failScan(ctx, scanID)
+			log.Printf("Scanner: failed to insert URL for scan %s: %v", scan.ID, err)
+			s.failScan(ctx, scan.ID)
 			return
 		}
 		urlRecords = records
 
 		// Update scan progress with total URLs (1)
-		if err := s.repo.UpdateScanProgress(ctx, scanID, 0, 1); err != nil {
-			log.Printf("Scanner: failed to update progress for scan %s: %v", scanID, err)
+		if err := s.repo.UpdateScanProgress(ctx, scan.ID, 0, 1); err != nil {
+			log.Printf("Scanner: failed to update progress for scan %s: %v", scan.ID, err)
 		}
 
-		log.Printf("Scanner: single URL scan %s — scanning %s", scanID, targetURL)
+		log.Printf("Scanner: single URL scan %s — scanning %s", scan.ID, scan.SitemapURL)
 	} else {
 		// Sitemap scan — use profiler to discover URLs
-		if err := s.repo.UpdateScanStatus(ctx, scanID, "profiling"); err != nil {
-			log.Printf("Scanner: failed to update status to profiling for scan %s: %v", scanID, err)
-			s.failScan(ctx, scanID)
+		if err := s.repo.UpdateScanStatus(ctx, scan.ID, "profiling"); err != nil {
+			log.Printf("Scanner: failed to update status to profiling for scan %s: %v", scan.ID, err)
+			s.failScan(ctx, scan.ID)
 			return
 		}
 
-		discoveredURLs, err := profiler.Discover(targetURL)
+		discoveredURLs, err := profiler.Discover(scan.SitemapURL)
 		if err != nil {
-			log.Printf("Scanner: profiler failed for scan %s: %v", scanID, err)
-			s.failScan(ctx, scanID)
+			log.Printf("Scanner: profiler failed for scan %s: %v", scan.ID, err)
+			s.failScan(ctx, scan.ID)
 			return
 		}
 
 		if len(discoveredURLs) == 0 {
-			log.Printf("Scanner: no URLs discovered for scan %s", scanID)
-			s.failScan(ctx, scanID)
+			log.Printf("Scanner: no URLs discovered for scan %s", scan.ID)
+			s.failScan(ctx, scan.ID)
 			return
 		}
 
 		// Insert discovered URLs into the database
-		records, err := s.repo.BulkInsertURLs(ctx, scanID, discoveredURLs)
+		records, err := s.repo.BulkInsertURLs(ctx, scan.ID, discoveredURLs)
 		if err != nil {
-			log.Printf("Scanner: failed to insert URLs for scan %s: %v", scanID, err)
-			s.failScan(ctx, scanID)
+			log.Printf("Scanner: failed to insert URLs for scan %s: %v", scan.ID, err)
+			s.failScan(ctx, scan.ID)
 			return
 		}
 		urlRecords = records
 
 		// Update scan progress with total URLs
-		if err := s.repo.UpdateScanProgress(ctx, scanID, 0, len(urlRecords)); err != nil {
-			log.Printf("Scanner: failed to update progress for scan %s: %v", scanID, err)
+		if err := s.repo.UpdateScanProgress(ctx, scan.ID, 0, len(urlRecords)); err != nil {
+			log.Printf("Scanner: failed to update progress for scan %s: %v", scan.ID, err)
 		}
 
-		log.Printf("Scanner: discovered %d URLs for scan %s", len(urlRecords), scanID)
+		log.Printf("Scanner: discovered %d URLs for scan %s", len(urlRecords), scan.ID)
 	}
 
 	// Step 2: Scanning — run axe-core on each URL
-	if err := s.repo.UpdateScanStatus(ctx, scanID, "scanning"); err != nil {
-		log.Printf("Scanner: failed to update status to scanning for scan %s: %v", scanID, err)
-		s.failScan(ctx, scanID)
+	if err := s.repo.UpdateScanStatus(ctx, scan.ID, "scanning"); err != nil {
+		log.Printf("Scanner: failed to update status to scanning for scan %s: %v", scan.ID, err)
+		s.failScan(ctx, scan.ID)
 		return
 	}
 
@@ -143,15 +152,22 @@ func (s *Scanner) RunScan(scanID, targetURL, scanType string) {
 
 	// Progress callback to update scanned_urls count
 	onProgress := func(scannedCount int) {
-		if err := s.repo.UpdateScanProgress(ctx, scanID, scannedCount, len(urlRecords)); err != nil {
-			log.Printf("Scanner: failed to update progress for scan %s: %v", scanID, err)
+		if err := s.repo.UpdateScanProgress(ctx, scan.ID, scannedCount, len(urlRecords)); err != nil {
+			log.Printf("Scanner: failed to update progress for scan %s: %v", scan.ID, err)
 		}
 	}
 
-	rawResults, err := juicer.ScanPages(ctx, s.allocCtx, pages, scanID, onProgress)
+	rawResults, err := juicer.ScanPages(
+		ctx,
+		s.allocCtx,
+		pages,
+		scan.ID,
+		viewport.SettingsFromStored(scan.ViewportPreset, scan.ViewportWidth, scan.ViewportHeight),
+		onProgress,
+	)
 	if err != nil {
-		log.Printf("Scanner: juicer failed for scan %s: %v", scanID, err)
-		s.failScan(ctx, scanID)
+		log.Printf("Scanner: juicer failed for scan %s: %v", scan.ID, err)
+		s.failScan(ctx, scan.ID)
 		return
 	}
 
@@ -167,25 +183,25 @@ func (s *Scanner) RunScan(scanID, targetURL, scanType string) {
 	}
 
 	// Step 3: Processing — deduplicate and store results
-	if err := s.repo.UpdateScanStatus(ctx, scanID, "processing"); err != nil {
-		log.Printf("Scanner: failed to update status to processing for scan %s: %v", scanID, err)
-		s.failScan(ctx, scanID)
+	if err := s.repo.UpdateScanStatus(ctx, scan.ID, "processing"); err != nil {
+		log.Printf("Scanner: failed to update status to processing for scan %s: %v", scan.ID, err)
+		s.failScan(ctx, scan.ID)
 		return
 	}
 
-	if err := sweetner.Process(ctx, s.repo, scanID, rawResults); err != nil {
-		log.Printf("Scanner: sweetner failed for scan %s: %v", scanID, err)
-		s.failScan(ctx, scanID)
+	if err := sweetner.Process(ctx, s.repo, scan.ID, rawResults); err != nil {
+		log.Printf("Scanner: sweetner failed for scan %s: %v", scan.ID, err)
+		s.failScan(ctx, scan.ID)
 		return
 	}
 
 	// Step 4: Complete
-	if err := s.repo.UpdateScanStatus(ctx, scanID, "completed"); err != nil {
-		log.Printf("Scanner: failed to update status to completed for scan %s: %v", scanID, err)
+	if err := s.repo.UpdateScanStatus(ctx, scan.ID, "completed"); err != nil {
+		log.Printf("Scanner: failed to update status to completed for scan %s: %v", scan.ID, err)
 		return
 	}
 
-	log.Printf("Scanner: scan %s completed successfully", scanID)
+	log.Printf("Scanner: scan %s completed successfully", scan.ID)
 }
 
 func (s *Scanner) failScan(ctx context.Context, scanID string) {
