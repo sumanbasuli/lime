@@ -98,6 +98,7 @@ Active scans do not expose these actions, which prevents conflicts with the runn
 - The issue details page enriches each DB-backed issue by resolving its Sweetner-generated `violationType` against the shared `data/act-rules.json` catalog.
 - Each main issue card also exposes a top-right false-positive action that persists through Shopkeeper and refreshes the server-rendered issue list.
 - When an element-level screenshot is unavailable or rejected as unreliable, the issue details page first uses the saved visible-viewport context screenshot when available; older or last-resort cases still fall back to the saved page screenshot as page context instead of showing an empty image box.
+- HTML snippets in the issue details view are now formatted into multiple lines and highlighted with Prism so long one-line fragments are readable without manual copying.
 - Each expanded issue can show:
   - ACT rule ID badges near the issue heading
   - W3C ACT rule links and status badges (`Approved` / `Proposed`)
