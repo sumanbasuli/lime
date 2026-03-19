@@ -3,6 +3,8 @@ package scanner
 import (
 	"context"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/campuspress/lime/shopkeeper/internal/juicer"
 	"github.com/campuspress/lime/shopkeeper/internal/models"
@@ -23,6 +25,40 @@ func New(repo *repository.Repository, allocCtx context.Context) *Scanner {
 		repo:     repo,
 		allocCtx: allocCtx,
 	}
+}
+
+// RecoverInterruptedScans restarts any scan that was left in a non-terminal state.
+// Since the previous process is gone, we reset partial DB/filesystem state and rerun it.
+func (s *Scanner) RecoverInterruptedScans() error {
+	ctx := context.Background()
+
+	scans, err := s.repo.ListRecoverableScans(ctx)
+	if err != nil {
+		return err
+	}
+
+	if len(scans) == 0 {
+		return nil
+	}
+
+	log.Printf("Scanner: recovering %d interrupted scan(s)", len(scans))
+
+	for _, scan := range scans {
+		log.Printf("Scanner: resetting interrupted scan %s (status=%s)", scan.ID, scan.Status)
+
+		if err := s.repo.ResetScan(ctx, scan.ID); err != nil {
+			log.Printf("Scanner: failed to reset interrupted scan %s: %v", scan.ID, err)
+			continue
+		}
+
+		if err := os.RemoveAll(filepath.Join(juicer.ScreenshotDir, scan.ID)); err != nil {
+			log.Printf("Scanner: warning: failed to remove screenshots for recovered scan %s: %v", scan.ID, err)
+		}
+
+		go s.RunScan(scan.ID, scan.SitemapURL, scan.ScanType)
+	}
+
+	return nil
 }
 
 // RunScan executes the full scan pipeline asynchronously.
@@ -157,4 +193,3 @@ func (s *Scanner) failScan(ctx context.Context, scanID string) {
 		log.Printf("Scanner: failed to mark scan %s as failed: %v", scanID, err)
 	}
 }
-

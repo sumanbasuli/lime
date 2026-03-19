@@ -65,6 +65,77 @@ func (r *Repository) GetScan(ctx context.Context, id string) (*models.Scan, erro
 	return scan, nil
 }
 
+// DeleteScan removes a scan and all related rows via ON DELETE CASCADE.
+// It returns true when a scan record was deleted.
+func (r *Repository) DeleteScan(ctx context.Context, id string) (bool, error) {
+	result, err := r.pool.Exec(ctx, `DELETE FROM scans WHERE id = $1`, id)
+	if err != nil {
+		return false, fmt.Errorf("failed to delete scan: %w", err)
+	}
+	return result.RowsAffected() > 0, nil
+}
+
+// ListRecoverableScans returns all scans that were left in a non-terminal state.
+func (r *Repository) ListRecoverableScans(ctx context.Context) ([]models.Scan, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+scanColumns+`
+		 FROM scans
+		 WHERE status IN ('pending', 'profiling', 'scanning', 'processing')
+		 ORDER BY created_at ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list recoverable scans: %w", err)
+	}
+	defer rows.Close()
+
+	var scans []models.Scan
+	for rows.Next() {
+		var s models.Scan
+		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.ScanType, &s.Tag,
+			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan recoverable scan row: %w", err)
+		}
+		scans = append(scans, s)
+	}
+	if scans == nil {
+		scans = []models.Scan{}
+	}
+	return scans, nil
+}
+
+// ResetScan clears all derived data for a scan and resets its progress.
+// This is used to recover interrupted non-terminal scans after a backend restart.
+func (r *Repository) ResetScan(ctx context.Context, id string) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin reset transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM issues WHERE scan_id = $1`, id); err != nil {
+		return fmt.Errorf("failed to delete scan issues: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM urls WHERE scan_id = $1`, id); err != nil {
+		return fmt.Errorf("failed to delete scan URLs: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE scans
+		 SET status = 'pending', total_urls = 0, scanned_urls = 0, updated_at = NOW()
+		 WHERE id = $1`,
+		id,
+	); err != nil {
+		return fmt.Errorf("failed to reset scan state: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit reset transaction: %w", err)
+	}
+
+	return nil
+}
+
 // ListScans returns all scans ordered by creation date descending.
 func (r *Repository) ListScans(ctx context.Context) ([]models.Scan, error) {
 	rows, err := r.pool.Query(ctx,

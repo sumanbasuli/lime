@@ -46,7 +46,9 @@ shopkeeper/
 | GET | `/api/stats` | GetStats | Dashboard aggregates (total scans/issues/pages) |
 | POST | `/api/scans` | CreateScan | Create scan + launch async pipeline |
 | GET | `/api/scans` | ListScans | List all scans (desc by date) |
+| POST | `/api/scans/{id}/rescan` | RescanScan | Create a fresh scan from a completed/failed scan |
 | GET | `/api/scans/{id}` | GetScan | Single scan detail |
+| DELETE | `/api/scans/{id}` | DeleteScan | Delete a completed/failed scan and related data |
 | GET | `/api/scans/{id}/issues` | GetScanIssues | Issues with occurrences for a scan |
 
 ### Dependency Injection
@@ -54,7 +56,7 @@ shopkeeper/
 The handler uses an interface `ScanRunner` to avoid circular dependencies:
 ```go
 type ScanRunner interface {
-    RunScan(scanID, sitemapURL string)
+    RunScan(scanID, targetURL, scanType string)
 }
 ```
 The `scanner.Scanner` implements this interface. The handler launches scans asynchronously via `go h.scanner.RunScan(...)`.
@@ -69,3 +71,18 @@ The `scanner.Scanner` implements this interface. The handler launches scans asyn
 6. Juicer scans pages with 5-concurrent workers; progress updates in real-time.
 7. Status moves to `processing`; Sweetner deduplicates and stores issues.
 8. Status is set to `completed`. On any error, status is set to `failed`.
+
+The async execution is backend-owned. Browser navigation only affects UI polling, not the actual scan job.
+
+## Scan Lifecycle Management
+
+- Rescans create a brand new `scans` row and re-run the pipeline with the original target URL, scan type, and tag.
+- Deletes are limited to terminal scans (`completed` or `failed`) so an active background job is never orphaned.
+- Database cleanup relies on `ON DELETE CASCADE`, and Shopkeeper removes the scan's screenshot directory from `/app/screenshots/{scanId}` after a successful delete.
+- On startup, Shopkeeper re-queues any scan left in `pending`, `profiling`, `scanning`, or `processing`. Partial URLs/issues/screenshots are cleared first so the recovered run starts cleanly with the same scan ID.
+
+### Recovery Model
+
+- Recovery is process-start based, not queue based. If the Shopkeeper process exits while a scan is running, the scan resumes the next time Shopkeeper starts.
+- Recovery keeps the same scan ID so the existing UI route and DB record remain valid.
+- Recovery intentionally discards partial per-scan artifacts before rerunning so the final data set is consistent.

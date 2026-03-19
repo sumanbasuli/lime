@@ -1,0 +1,4 @@
+./driver.go
+./errors.go
+./migration.go
+./parse.go

@@ -47,6 +47,8 @@ make dev-shopkeeper    # Go backend with Air hot reload (in a new terminal)
 make dev-ui            # NextJS with hot reload (in a new terminal)
 ```
 
+Note: scans now recover automatically when Shopkeeper starts again, but `make dev-shopkeeper` still restarts the Go process frequently during code edits. For stable long-running scans, prefer `make start-shopkeeper` or `make start-all`.
+
 ### Individual Services
 
 ```bash
@@ -79,10 +81,30 @@ make logs-ui
 |--------|------|-------------|
 | GET | `/api/health` | Service health check |
 | GET | `/api/stats` | Dashboard aggregates (total scans/issues/pages) |
-| POST | `/api/scans` | Create a new scan (body: `{"sitemap_url": "..."}`) |
+| POST | `/api/scans` | Create a new scan (body: `{"sitemap_url": "...", "scan_type": "sitemap|single", "tag": "optional"}`) |
 | GET | `/api/scans` | List all scans |
+| POST | `/api/scans/{id}/rescan` | Start a fresh scan using the same target URL/type/tag |
 | GET | `/api/scans/{id}` | Get scan detail by ID |
+| DELETE | `/api/scans/{id}` | Delete a completed/failed scan and its saved assets |
 | GET | `/api/scans/{id}/issues` | Get issues with occurrences for a scan |
+
+## Runtime Behavior
+
+- A scan continues running if the user changes pages or closes the scan detail view; only the frontend polling stops.
+- A scan does not survive a dead Shopkeeper process in-memory, but non-terminal scans are now recovered automatically the next time Shopkeeper starts.
+- Recovery resets partial URLs/issues/screenshots for that scan before rerunning it, so the final stored result is clean.
+- For long-running scans in local development, prefer Docker or `make start-shopkeeper` over `make dev-shopkeeper`, because hot reload restarts the Go process frequently.
+
+## Operations
+
+Useful commands while diagnosing scan behavior:
+
+```bash
+make logs-shopkeeper      # backend logs
+make logs-ui              # frontend logs
+docker compose ps         # container state
+docker compose logs -f shopkeeper
+```
 
 ## Frontend Pages
 

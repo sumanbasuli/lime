@@ -19,6 +19,11 @@ The project is divided into several core components:
 * **[Docker & Deployment](deployment/docker.md)**: Instructions and architecture for containerizing the application for easy local execution and deployment.
 * **[Development Roadmap & Build Steps](roadmap.md)**: Step-by-step track of what needs to be built and current progress.
 
+Operational notes for scan lifecycle behavior are documented primarily in:
+- `docs/architecture/shopkeeper.md` for backend ownership, deletion/rescan rules, and restart recovery
+- `docs/architecture/ui.md` for polling and page-navigation behavior
+- `docs/setup.md` for runtime and debugging commands
+
 ## Guidelines for Contributing
 
 * Ensure all new features or modules are documented here first before coding starts.

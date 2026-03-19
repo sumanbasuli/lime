@@ -14,6 +14,8 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+const screenshotBaseDir = "/app/screenshots"
+
 // ScanRunner defines the interface for running async scans.
 // This avoids a circular dependency with the scanner package.
 type ScanRunner interface {
@@ -194,6 +196,108 @@ func (h *Handler) GetScanIssues(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, issues)
 }
 
+// RescanScan handles POST /api/scans/{id}/rescan.
+// It creates a fresh scan using the same target URL, scan type, and tag.
+func (h *Handler) RescanScan(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Scan ID is required",
+		})
+		return
+	}
+
+	scan, err := h.repo.GetScan(r.Context(), id)
+	if err != nil {
+		log.Printf("Failed to get scan: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to get scan",
+		})
+		return
+	}
+	if scan == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "Scan not found",
+		})
+		return
+	}
+	if !isTerminalScanStatus(scan.Status) {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "Only completed or failed scans can be rescanned",
+		})
+		return
+	}
+
+	newScan, err := h.repo.CreateScan(r.Context(), scan.SitemapURL, scan.ScanType, scan.Tag)
+	if err != nil {
+		log.Printf("Failed to create rescan: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to create rescan",
+		})
+		return
+	}
+
+	if h.scanner != nil {
+		go h.scanner.RunScan(newScan.ID, newScan.SitemapURL, newScan.ScanType)
+	}
+
+	writeJSON(w, http.StatusCreated, newScan)
+}
+
+// DeleteScan handles DELETE /api/scans/{id}.
+// Deletion is limited to terminal scans to avoid conflicts with the active scanner.
+func (h *Handler) DeleteScan(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Scan ID is required",
+		})
+		return
+	}
+
+	scan, err := h.repo.GetScan(r.Context(), id)
+	if err != nil {
+		log.Printf("Failed to get scan: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to get scan",
+		})
+		return
+	}
+	if scan == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "Scan not found",
+		})
+		return
+	}
+	if !isTerminalScanStatus(scan.Status) {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "Only completed or failed scans can be deleted",
+		})
+		return
+	}
+
+	deleted, err := h.repo.DeleteScan(r.Context(), id)
+	if err != nil {
+		log.Printf("Failed to delete scan: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to delete scan",
+		})
+		return
+	}
+	if !deleted {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "Scan not found",
+		})
+		return
+	}
+
+	if err := os.RemoveAll(screenshotDir(id)); err != nil {
+		log.Printf("Failed to remove screenshots for scan %s: %v", id, err)
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // GetStats handles GET /api/stats.
 func (h *Handler) GetStats(w http.ResponseWriter, r *http.Request) {
 	stats, err := h.repo.GetStats(r.Context())
@@ -219,7 +323,7 @@ func (h *Handler) ServeScreenshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath := filepath.Join("/app/screenshots", scanID, filename)
+	filePath := filepath.Join(screenshotDir(scanID), filename)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		http.Error(w, "Screenshot not found", http.StatusNotFound)
 		return
@@ -228,6 +332,14 @@ func (h *Handler) ServeScreenshot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeFile(w, r, filePath)
+}
+
+func isTerminalScanStatus(status string) bool {
+	return status == "completed" || status == "failed"
+}
+
+func screenshotDir(scanID string) string {
+	return filepath.Join(screenshotBaseDir, scanID)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

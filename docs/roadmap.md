@@ -35,6 +35,8 @@ This document outlines the sequential steps to build the accessibility scanner s
 - [x] Issues viewer (`src/app/scans/[id]/issues/page.tsx`) — Expandable collapsible rows showing violation details, affected URLs, HTML snippets.
 - [x] Live progress polling (`src/components/scan-progress.tsx`) — Client Component polling every 3s with router.refresh().
 - [x] Sidebar navigation updated with real routes.
+- [x] Scan management actions — Rescan completed/failed scans and delete old terminal scans without touching active jobs.
+- [x] Interrupted scan recovery — Non-terminal scans are automatically reset and resumed when Shopkeeper starts again.
 
 ## Phase 6: Testing & Refinement
 - [ ] End-to-end testing of the entire flow.

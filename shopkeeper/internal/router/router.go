@@ -27,7 +27,7 @@ func Setup(repo *repository.Repository, scanner handler.ScanRunner) http.Handler
 			return origin == "http://localhost:3000" ||
 				len(origin) > 17 && origin[:17] == "http://localhost:"
 		},
-		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Content-Type", "Authorization"},
 		AllowCredentials: true,
 	})
@@ -41,7 +41,9 @@ func Setup(repo *repository.Repository, scanner handler.ScanRunner) http.Handler
 		r.Route("/scans", func(r chi.Router) {
 			r.Post("/", h.CreateScan)
 			r.Get("/", h.ListScans)
+			r.Post("/{id}/rescan", h.RescanScan)
 			r.Get("/{id}", h.GetScan)
+			r.Delete("/{id}", h.DeleteScan)
 			r.Get("/{id}/issues", h.GetScanIssues)
 		})
 
