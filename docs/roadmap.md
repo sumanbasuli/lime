@@ -42,4 +42,4 @@ This document outlines the sequential steps to build the accessibility scanner s
 ## Phase 6: Testing & Refinement
 - [ ] End-to-end testing of the entire flow.
 - [ ] Optimize Juicer's resource usage.
-- [ ] Polish UI.
+- [x] Polish UI — refined scan detail hierarchy, aligned heading/body/code font usage on scan pages, and fixed the issue expander so open/closed state is visually clear.

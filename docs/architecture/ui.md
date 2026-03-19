@@ -86,3 +86,11 @@ Active scans do not expose these actions, which prevents conflicts with the runn
   - mapped accessibility requirements / WCAG references
   - deterministic suggested changes aggregated from the mapped ACT rules
 - The ACT guidance is rule-level and local. It is not generated on the fly and it is not DOM-specific in this phase.
+
+### Visual Conventions
+
+- Primary pages (`/`, `/scans`, `/scans/new`, `/scans/[id]`, `/scans/[id]/issues`) use a flattened header pattern: direct page titles with minimal supporting copy rather than decorative intro cards.
+- Geist Sans is used for narrative body copy, while Geist Mono is reserved for rule IDs, selectors, and code-like snippets.
+- Spacing across scan pages follows a tighter 4pt rhythm with reduced label tracking so metadata, forms, tables, and issue cards read as one consistent system instead of separate visual styles.
+- Scan overview pages keep summary information first: page intro, key metrics or filters, then the primary table or detail content.
+- The issues viewer uses an explicit rotating expander affordance tied to the trigger's open/closed state so users can tell at a glance which issue is expanded.
