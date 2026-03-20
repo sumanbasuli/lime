@@ -41,6 +41,7 @@ This document outlines the sequential steps to build the accessibility scanner s
 - [x] Sitemap discovery hardening — Retry transient nested sitemap fetch failures and avoid partial sitemap-index scans when full discovery is unavailable.
 - [x] Screenshot capture hardening — Wait for pages to settle before capture, reject tiny/blank element crops, and fall back to broader page context in the issue viewer.
 - [x] Viewport-controlled scans — Persist scan viewport presets, run Juicer with an explicit rendering size, and expose screen-size selection in the scan UI.
+- [x] Scan settle/failure hardening — Continue rule execution when a late settle wait times out on an otherwise usable page, and fail scans when every page errors instead of reporting a false completion.
 
 ## Phase 6: Testing & Refinement
 - [ ] End-to-end testing of the entire flow.

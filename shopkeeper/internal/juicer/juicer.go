@@ -149,9 +149,7 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	}
 
 	if err := waitForPageSettle(tabCtx); err != nil {
-		result.Error = fmt.Sprintf("page did not settle for %s: %v", page.URL, err)
-		log.Printf("Juicer: %s", result.Error)
-		return result
+		log.Printf("Juicer: warning: page settle before axe timed out for %s: %v", page.URL, err)
 	}
 
 	// Inject axe-core

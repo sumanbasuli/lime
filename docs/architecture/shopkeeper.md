@@ -77,9 +77,9 @@ The `scanner.Scanner` implements this interface. The handler launches scans asyn
 4. Pipeline updates status to `profiling`, calls Profiler to discover URLs.
 5. Profiler must finish full sitemap discovery before scanning starts. If any nested sitemap still fails after retries, the scan fails instead of continuing with a partial URL set.
 6. Discovered URLs are bulk-inserted into the DB; status moves to `scanning`.
-7. Juicer scans pages with 5-concurrent workers using the scan's persisted viewport dimensions; progress updates in real-time.
-8. Status moves to `processing`; Sweetner deduplicates and stores issues.
-9. Status is set to `completed`. On any error, status is set to `failed`.
+7. Juicer scans pages with 5-concurrent workers using the scan's persisted viewport dimensions; progress updates in real-time. If a late page-settle wait times out after the document is already usable, Juicer continues into rule execution instead of dropping that page immediately.
+8. Status moves to `processing`; Sweetner deduplicates and stores issues from successfully scanned pages.
+9. Status is set to `completed` when at least one page scanned successfully. If every page errors, or a pipeline step fails, status is set to `failed`.
 
 The async execution is backend-owned. Browser navigation only affects UI polling, not the actual scan job.
 

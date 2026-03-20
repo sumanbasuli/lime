@@ -104,6 +104,8 @@ make logs-ui
 - For long-running scans in local development, prefer Docker or `make start-shopkeeper` over `make dev-shopkeeper`, because hot reload restarts the Go process frequently.
 - Sitemap discovery now retries transient nested sitemap fetch failures. If Shopkeeper still cannot fetch every sitemap listed in a sitemap index, the scan fails rather than scanning a partial subset of URLs.
 - Screenshot capture now waits for a fuller page-settle point before capturing and falls back to broader context when a tight element crop is blank or too small.
+- If that extra settle wait times out on a page that is already loaded enough to scan, Shopkeeper still runs the rules and only logs the settle timeout as a warning.
+- A scan is only marked `completed` when at least one page scanned successfully. If every page errors, the scan is marked `failed`.
 - ACT issue guidance is loaded from the local checked-in catalog at read time. There is no runtime dependency on W3C services and no ACT snapshot stored in Postgres.
 - The issue details page is the main ACT UI surface in this phase. Compact scan summaries remain unchanged.
 - False-positive marking is persisted per issue row and is currently a triage flag only. It does not yet filter issues out of counts, summaries, or scan detail tables.

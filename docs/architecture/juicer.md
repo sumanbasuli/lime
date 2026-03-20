@@ -24,7 +24,7 @@ func ScanPages(ctx, allocCtx context.Context, pages []PageInput, scanID string, 
 * **Politeness**: 500ms delay between requests via `time.Sleep`.
 * **Progress Reporting**: Calls `onProgress(scannedCount)` after each page, enabling real-time scan progress in the UI.
 * **Viewport Control**: Applies the scan's persisted viewport width/height before navigation so layout, screenshots, and rule evaluation all use the same deterministic rendering width.
-* **Visual Stabilization**: Waits for document load, fonts, images, and a short paint-settle window before screenshots are captured.
+* **Visual Stabilization**: Uses a fuller settle wait before screenshots and as a best-effort step before rule execution, without treating every late-loading asset as a hard scan failure.
 * **Context Fallback**: Tiny or visually blank element crops are retried with a wider contextual clip, then a visible-viewport context screenshot around the scrolled-to element, and only then can the UI fall back to the saved page screenshot.
 
 ## System Constraints
@@ -64,5 +64,6 @@ Returns `[]RawResult`, each containing:
 
 - Juicer no longer captures screenshots immediately after `body` becomes available.
 - Juicer sets an explicit viewport before `Navigate(...)`, so scans no longer depend on Chromium's implicit startup viewport.
+- If the extra page-settle wait times out after the document is already usable, Juicer now logs a warning and still runs the accessibility rules instead of silently returning zero issues for that page.
 - Element clips are padded and minimum-sized so very small targets do not collapse into unreadable dots.
 - If the element crop still looks unreliable after capture, Juicer prefers a wider context crop and then a desktop-width visible-viewport screenshot around the element before the UI falls back to the full page.

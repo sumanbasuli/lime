@@ -182,6 +182,16 @@ func (s *Scanner) RunScan(scan models.Scan) {
 		}
 	}
 
+	successfulPages, failedPages := summarizePageResults(rawResults)
+	if failedPages > 0 {
+		log.Printf("Scanner: scan %s finished scanning with %d failed page(s) out of %d", scan.ID, failedPages, len(rawResults))
+	}
+	if successfulPages == 0 {
+		log.Printf("Scanner: scan %s failed because no pages scanned successfully", scan.ID)
+		s.failScan(ctx, scan.ID)
+		return
+	}
+
 	// Step 3: Processing — deduplicate and store results
 	if err := s.repo.UpdateScanStatus(ctx, scan.ID, "processing"); err != nil {
 		log.Printf("Scanner: failed to update status to processing for scan %s: %v", scan.ID, err)
@@ -208,4 +218,16 @@ func (s *Scanner) failScan(ctx context.Context, scanID string) {
 	if err := s.repo.UpdateScanStatus(ctx, scanID, "failed"); err != nil {
 		log.Printf("Scanner: failed to mark scan %s as failed: %v", scanID, err)
 	}
+}
+
+func summarizePageResults(results []juicer.RawResult) (successfulPages, failedPages int) {
+	for _, result := range results {
+		if result.Error != "" {
+			failedPages++
+			continue
+		}
+		successfulPages++
+	}
+
+	return successfulPages, failedPages
 }
