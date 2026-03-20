@@ -42,6 +42,8 @@ const (
 	elementContextMinHeight      = 180.0
 	elementScreenshotMinByteSize = 128
 	elementScreenshotScale       = 2.0
+	elementHighlightOutline      = "#FFED00"
+	elementHighlightShadow       = "0 0 0 4px rgba(17, 17, 17, 0.82), 0 0 0 8px rgba(255, 237, 0, 0.55)"
 )
 
 // PageInput represents a URL to scan with its DB record ID.
@@ -217,13 +219,13 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 				continue
 			}
 
-			clip := buildViewportClip(bounds, elementScreenshotPadding, elementScreenshotMinWidth, elementScreenshotMinHeight)
+			clip := buildViewportClip(bounds, elementContextPadding, elementContextMinWidth, elementContextMinHeight)
 			if clip == nil {
 				nodeIdx++
 				continue
 			}
 
-			elemScreenshot, err := captureClip(tabCtx, clip)
+			elemScreenshot, err := captureHighlightedClip(tabCtx, selector, clip)
 			if err != nil {
 				log.Printf("Juicer: warning: failed to screenshot element %q on %s: %v", selector, page.URL, err)
 				nodeIdx++
@@ -231,35 +233,20 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 			}
 
 			if screenshotNeedsContext(elemScreenshot) {
-				contextClip := buildViewportClip(bounds, elementContextPadding, elementContextMinWidth, elementContextMinHeight)
-				if contextClip != nil {
-					contextScreenshot, contextErr := captureClip(tabCtx, contextClip)
-					if contextErr != nil {
-						log.Printf("Juicer: warning: failed fallback screenshot for %q on %s: %v", selector, page.URL, contextErr)
-					} else if !screenshotNeedsContext(contextScreenshot) {
-						elemScreenshot = contextScreenshot
-					}
+				viewportScreenshot, viewportErr := captureHighlightedViewport(tabCtx, selector)
+				if viewportErr != nil {
+					log.Printf("Juicer: warning: failed focused viewport screenshot for %q on %s: %v", selector, page.URL, viewportErr)
+				} else if len(viewportScreenshot) >= elementScreenshotMinByteSize {
+					elemScreenshot = viewportScreenshot
 				}
 			}
 
 			if len(elemScreenshot) >= elementScreenshotMinByteSize && !screenshotNeedsContext(elemScreenshot) {
-				elemPath := filepath.Join(screenshotDir, fmt.Sprintf("%s_elem_%d.png", page.URLID, nodeIdx))
+				elemPath := filepath.Join(screenshotDir, fmt.Sprintf("%s_focus_%d.png", page.URLID, nodeIdx))
 				if err := os.WriteFile(elemPath, elemScreenshot, 0644); err != nil {
 					log.Printf("Juicer: warning: failed to save element screenshot: %v", err)
 				} else {
 					node.ElementScreenshotPath = elemPath
-				}
-			} else {
-				viewportScreenshot, viewportErr := captureVisibleViewport(tabCtx)
-				if viewportErr != nil {
-					log.Printf("Juicer: warning: failed viewport-context screenshot for %q on %s: %v", selector, page.URL, viewportErr)
-				} else if len(viewportScreenshot) >= elementScreenshotMinByteSize {
-					contextPath := filepath.Join(screenshotDir, fmt.Sprintf("%s_context_%d.png", page.URLID, nodeIdx))
-					if err := os.WriteFile(contextPath, viewportScreenshot, 0644); err != nil {
-						log.Printf("Juicer: warning: failed to save viewport-context screenshot: %v", err)
-					} else {
-						node.ElementScreenshotPath = contextPath
-					}
 				}
 			}
 			nodeIdx++
@@ -349,6 +336,99 @@ func waitForPageSettle(ctx context.Context) error {
 	return chromedp.Run(timeoutCtx, chromedp.Evaluate(script, nil, func(ep *runtime.EvaluateParams) *runtime.EvaluateParams {
 		return ep.WithAwaitPromise(true)
 	}))
+}
+
+func waitForAnimationFrames(ctx context.Context) error {
+	return chromedp.Run(ctx, chromedp.Evaluate(`new Promise((resolve) => {
+		requestAnimationFrame(() => requestAnimationFrame(resolve));
+	})`, nil, func(ep *runtime.EvaluateParams) *runtime.EvaluateParams {
+		return ep.WithAwaitPromise(true)
+	}))
+}
+
+func captureHighlightedClip(ctx context.Context, selector string, clip *cdppage.Viewport) ([]byte, error) {
+	return withHighlightedElement(ctx, selector, func() ([]byte, error) {
+		return captureClip(ctx, clip)
+	})
+}
+
+func captureHighlightedViewport(ctx context.Context, selector string) ([]byte, error) {
+	return withHighlightedElement(ctx, selector, func() ([]byte, error) {
+		return captureVisibleViewport(ctx)
+	})
+}
+
+func withHighlightedElement(ctx context.Context, selector string, capture func() ([]byte, error)) ([]byte, error) {
+	highlighted, err := setElementHighlight(ctx, selector, true)
+	if err != nil {
+		return nil, err
+	}
+	if highlighted {
+		if err := waitForAnimationFrames(ctx); err != nil {
+			log.Printf("Juicer: warning: failed to wait for highlight paint on %q: %v", selector, err)
+		}
+		defer func() {
+			if _, clearErr := setElementHighlight(ctx, selector, false); clearErr != nil {
+				log.Printf("Juicer: warning: failed to clear highlight on %q: %v", selector, clearErr)
+			}
+		}()
+	}
+
+	return capture()
+}
+
+func setElementHighlight(ctx context.Context, selector string, enabled bool) (bool, error) {
+	var highlighted bool
+
+	script := fmt.Sprintf(`(() => {
+		const el = document.querySelector(%q);
+		if (!el) {
+			return false;
+		}
+
+		if (%t) {
+			if (el.dataset.limeHighlightApplied !== "true") {
+				el.dataset.limeHighlightApplied = "true";
+				el.dataset.limeHighlightRestore = JSON.stringify({
+					outline: el.style.outline || "",
+					outlineOffset: el.style.outlineOffset || "",
+					boxShadow: el.style.boxShadow || "",
+					position: el.style.position || "",
+					zIndex: el.style.zIndex || "",
+				});
+			}
+
+			el.style.outline = "3px solid %s";
+			el.style.outlineOffset = "4px";
+			el.style.boxShadow = %q;
+			if (!el.style.position) {
+				el.style.position = "relative";
+			}
+			el.style.zIndex = "2147483646";
+			return true;
+		}
+
+		if (el.dataset.limeHighlightApplied !== "true") {
+			return false;
+		}
+
+		const restore = JSON.parse(el.dataset.limeHighlightRestore || "{}");
+		el.style.outline = restore.outline || "";
+		el.style.outlineOffset = restore.outlineOffset || "";
+		el.style.boxShadow = restore.boxShadow || "";
+		el.style.position = restore.position || "";
+		el.style.zIndex = restore.zIndex || "";
+		delete el.dataset.limeHighlightApplied;
+		delete el.dataset.limeHighlightRestore;
+		return true;
+	})()`, selector, enabled, elementHighlightOutline, elementHighlightShadow)
+
+	err := chromedp.Run(ctx, chromedp.Evaluate(script, &highlighted))
+	if err != nil {
+		return false, err
+	}
+
+	return highlighted, nil
 }
 
 func locateElement(ctx context.Context, selector string) (elementBounds, error) {

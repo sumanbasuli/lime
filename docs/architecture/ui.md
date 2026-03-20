@@ -97,7 +97,8 @@ Active scans do not expose these actions, which prevents conflicts with the runn
 - ACT context is intentionally shown on `/scans/[id]/issues`, not on the dashboard or compact scan tables.
 - The issue details page enriches each DB-backed issue by resolving its Sweetner-generated `violationType` against the shared `data/act-rules.json` catalog.
 - Each main issue card also exposes a top-right false-positive action that persists through Shopkeeper and refreshes the server-rendered issue list.
-- When an element-level screenshot is unavailable or rejected as unreliable, the issue details page first uses the saved visible-viewport context screenshot when available; older or last-resort cases still fall back to the saved page screenshot as page context instead of showing an empty image box.
+- The issue details page now shows the focused issue screenshot inline and opens it in a lightbox on click so users can inspect the image at full size without leaving the issue flow.
+- The generic saved page capture is no longer shown inline as the default fallback. If a focused screenshot is unavailable, the page capture is only exposed as an on-demand secondary view.
 - HTML snippets in the issue details view are now formatted into multiple lines and highlighted with Prism so long one-line fragments are readable without manual copying.
 - Each expanded issue can show:
   - ACT rule ID badges near the issue heading
