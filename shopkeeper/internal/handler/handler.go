@@ -413,7 +413,9 @@ func (h *Handler) ServeScreenshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "image/png")
+	if contentType, err := detectFileContentType(filePath); err == nil && contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	http.ServeFile(w, r, filePath)
 }
@@ -424,6 +426,22 @@ func isTerminalScanStatus(status string) bool {
 
 func screenshotDir(scanID string) string {
 	return filepath.Join(screenshotBaseDir, scanID)
+}
+
+func detectFileContentType(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	buf := make([]byte, 512)
+	n, err := file.Read(buf)
+	if err != nil {
+		return "", err
+	}
+
+	return http.DetectContentType(buf[:n]), nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

@@ -103,7 +103,10 @@ make logs-ui
 - Scans now run with an explicit viewport preset instead of Chromium's implicit default. The current presets are Desktop `1440x900`, Laptop `1280x800`, Tablet `768x1024`, and Mobile `390x844`.
 - For long-running scans in local development, prefer Docker or `make start-shopkeeper` over `make dev-shopkeeper`, because hot reload restarts the Go process frequently.
 - Sitemap discovery now retries transient nested sitemap fetch failures. If Shopkeeper still cannot fetch every sitemap listed in a sitemap index, the scan fails rather than scanning a partial subset of URLs.
-- Screenshot capture now waits for a fuller page-settle point before capturing and prefers a highlighted focused context around the affected element instead of a detached tight crop.
+- Accessibility rule execution now follows a Lighthouse-aligned axe configuration instead of the broad default axe run. That means WCAG A/AA tag filtering, Lighthouse-style rule overrides, node references, failure summaries, and scroll reset behavior are applied before screenshots are captured.
+- Screenshot capture now waits for a fuller page-settle point before capturing and saves both a highlighted visible-view image and a smaller inline preview cropped from that same focused screenshot.
+- Screenshot capture now also resolves duplicate selectors to a best-effort exact DOM match and runs a bounded `focus + hover` preparation pass before deciding that a focused screenshot is unavailable.
+- The spotlight now comes from a dedicated overlay layer rather than per-element inline styles, which keeps the highlight more consistent across issue types and prevents stale highlights from leaking into later captures.
 - The issue details UI opens screenshots in a lightbox and no longer shows the generic page capture inline unless it is explicitly opened as a fallback view.
 - If that extra settle wait times out on a page that is already loaded enough to scan, Shopkeeper still runs the rules and only logs the settle timeout as a warning.
 - A scan is only marked `completed` when at least one page scanned successfully. If every page errors, the scan is marked `failed`.

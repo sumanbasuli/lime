@@ -43,6 +43,8 @@ This document outlines the sequential steps to build the accessibility scanner s
 - [x] Viewport-controlled scans — Persist scan viewport presets, run Juicer with an explicit rendering size, and expose screen-size selection in the scan UI.
 - [x] Scan settle/failure hardening — Continue rule execution when a late settle wait times out on an otherwise usable page, and fail scans when every page errors instead of reporting a false completion.
 - [x] Screenshot UX refinement — Favor highlighted focused issue screenshots, reduce inline generic page-fallback usage, and add click-to-enlarge lightbox viewing in the issue details UI.
+- [x] Interaction-aware screenshot capture — Resolve duplicate selectors to exact DOM matches where possible, use bounded hover/focus preparation, and save focused screenshots as full-page highlighted captures.
+- [x] Lighthouse-aligned accessibility execution — Run axe with Lighthouse-style WCAG tag filtering, rule overrides, node references, failure summaries, and scroll-reset handling so scan results track Lighthouse’s accessibility gatherer more closely.
 
 ## Phase 6: Testing & Refinement
 - [ ] End-to-end testing of the entire flow.
