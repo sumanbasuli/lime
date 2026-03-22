@@ -49,7 +49,7 @@ const (
 	elementScreenshotMinByteSize = 128
 	elementScreenshotScale       = 2.0
 	elementHighlightOutline      = "#FFED00"
-	elementHighlightShadow       = "0 0 0 6px rgba(255, 237, 0, 0.96), 0 0 0 16px rgba(255, 237, 0, 0.34), 0 0 0 9999px rgba(17, 17, 17, 0.58), 0 24px 64px rgba(17, 17, 17, 0.45)"
+	elementHighlightShadow       = "0 0 0 9999px rgba(17, 17, 17, 0.58), 0 18px 48px rgba(17, 17, 17, 0.32)"
 )
 
 // PageInput represents a URL to scan with its DB record ID.
