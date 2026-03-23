@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/campuspress/lime/shopkeeper/internal/actrules"
-	"github.com/campuspress/lime/shopkeeper/internal/models"
-	"github.com/campuspress/lime/shopkeeper/internal/repository"
-	"github.com/campuspress/lime/shopkeeper/internal/viewport"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/actrules"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 	"github.com/go-chi/chi/v5"
 )
 

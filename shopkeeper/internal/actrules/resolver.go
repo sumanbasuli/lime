@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/campuspress/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 )
 
 // Catalog is the JSON payload stored in data/act-rules.json.

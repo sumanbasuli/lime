@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/campuspress/lime/shopkeeper/internal/viewport"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 	cdpinput "github.com/chromedp/cdproto/input"
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"

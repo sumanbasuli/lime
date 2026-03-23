@@ -3,8 +3,8 @@ package router
 import (
 	"net/http"
 
-	"github.com/campuspress/lime/shopkeeper/internal/handler"
-	"github.com/campuspress/lime/shopkeeper/internal/repository"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/handler"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/cors"

@@ -4,8 +4,8 @@ import (
 	"context"
 	"log"
 
-	"github.com/campuspress/lime/shopkeeper/internal/juicer"
-	"github.com/campuspress/lime/shopkeeper/internal/repository"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/juicer"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
 )
 
 // Process takes raw scan results from the Juicer, deduplicates violations,

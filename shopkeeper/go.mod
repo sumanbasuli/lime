@@ -1,4 +1,4 @@
-module github.com/campuspress/lime/shopkeeper
+module github.com/sumanbasuli/lime/shopkeeper
 
 go 1.25.1
 

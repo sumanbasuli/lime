@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/campuspress/lime/shopkeeper/internal/models"
-	"github.com/campuspress/lime/shopkeeper/internal/viewport"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )

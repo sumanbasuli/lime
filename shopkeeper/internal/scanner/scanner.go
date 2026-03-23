@@ -6,12 +6,12 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/campuspress/lime/shopkeeper/internal/juicer"
-	"github.com/campuspress/lime/shopkeeper/internal/models"
-	"github.com/campuspress/lime/shopkeeper/internal/profiler"
-	"github.com/campuspress/lime/shopkeeper/internal/repository"
-	"github.com/campuspress/lime/shopkeeper/internal/sweetner"
-	"github.com/campuspress/lime/shopkeeper/internal/viewport"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/juicer"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/profiler"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/sweetner"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
 
 // Scanner manages the async scan pipeline.

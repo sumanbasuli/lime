@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/campuspress/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 )
 
 func TestCatalogContract(t *testing.T) {

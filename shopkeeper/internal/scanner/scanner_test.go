@@ -3,7 +3,7 @@ package scanner
 import (
 	"testing"
 
-	"github.com/campuspress/lime/shopkeeper/internal/juicer"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/juicer"
 )
 
 func TestSummarizePageResultsCountsSuccessesAndFailures(t *testing.T) {
