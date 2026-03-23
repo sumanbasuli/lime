@@ -15,6 +15,7 @@ The frontend for the accessibility scanner is a strictly decoupled **NextJS** ap
 
 - **Server Components** read data directly from PostgreSQL via Drizzle ORM
 - **Server Components** also read the shared ACT catalog at render time for issue-detail enrichment
+- **Server Components** also read shared `axe-rules.json` and `axe-act-mapping.json` metadata so issue cards can fall back to Deque's procedure-to-ACT mappings first and local axe-core WCAG tags second
 - **Client Components** call the Shopkeeper API for writes and live updates (POST/DELETE for scan actions, GET for polling)
   - this now includes issue-level false-positive mark/unmark actions from the issue details page
   - and scan creation now includes a viewport preset so users can choose the screen size used for rendering
@@ -102,10 +103,13 @@ Active scans do not expose these actions, which prevents conflicts with the runn
 - Focused screenshots now come from an interaction-aware backend capture path that tries the exact matched DOM node first, applies bounded hover/focus preparation, and renders the spotlight through a dedicated overlay. The inline preview is cropped from that same focused screenshot so the preview and lightbox stay visually consistent.
 - HTML snippets in the issue details view are now formatted into multiple lines and highlighted with Prism so long one-line fragments are readable without manual copying.
 - Each expanded issue can show:
-  - ACT rule ID badges near the issue heading
-  - W3C ACT rule links and status badges (`Approved` / `Proposed`)
+  - W3C ACT rule links and status badges (`W3C Recommendation` / `Proposed`)
   - mapped accessibility requirements / WCAG references
   - deterministic suggested changes aggregated from the mapped ACT rules
+- Rules first try the checked-in ACT catalog, then a secondary Deque `act-reports-axe` procedure mapping, and finally the local axe-core standards tags.
+- The same `Accessibility requirements` card style is now used across ACT-backed and fallback rules. ACT cards merge their ACT-derived references with normalized axe standards references, while fallback cards show only the normalized standards references or one single `No direct standards reference` card.
+- WCAG level tags are normalized into readable cards and expanded forward when appropriate, for example `wcag2a` can surface as `WCAG 2.0 A`, `WCAG 2.1 A`, and `WCAG 2.2 A`.
+- Non-ACT issues only show a green `Suggested changes` card when there is an explicit checked-in axe guidance entry for that rule. The UI does not synthesize its own remediation sentence from WCAG tags.
 - The ACT guidance is rule-level and local. It is not generated on the fly and it is not DOM-specific in this phase.
 
 ### Visual Conventions

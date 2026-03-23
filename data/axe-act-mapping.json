@@ -1,0 +1,161 @@
+{
+  "source": "dequelabs/act-reports-axe",
+  "generated_at": "2026-03-23T07:59:35.535Z",
+  "procedure_to_act_rule_ids": {
+    "autocomplete-valid": [
+      "73f2c2"
+    ],
+    "button-name": [
+      "97a4e1",
+      "m6b1q3"
+    ],
+    "aria-command-name": [
+      "97a4e1"
+    ],
+    "valid-lang": [
+      "de46e4"
+    ],
+    "presentation-role-conflict": [
+      "46ca7f"
+    ],
+    "label": [
+      "e086e5"
+    ],
+    "aria-input-field-name": [
+      "e086e5"
+    ],
+    "select-name": [
+      "e086e5"
+    ],
+    "html-lang-valid": [
+      "bf051a"
+    ],
+    "document-title": [
+      "2779a5"
+    ],
+    "input-image-alt": [
+      "59796f"
+    ],
+    "image-alt": [
+      "23a2a8"
+    ],
+    "role-img-alt": [
+      "23a2a8"
+    ],
+    "avoid-inline-spacing": [
+      "24afc2",
+      "78fd32",
+      "9e45ec"
+    ],
+    "link-name": [
+      "c487ae"
+    ],
+    "area-alt": [
+      "c487ae"
+    ],
+    "svg-img-alt": [
+      "7d6734"
+    ],
+    "nested-interactive": [
+      "307n5z"
+    ],
+    "td-headers-attr": [
+      "a25f45"
+    ],
+    "aria-hidden-focus": [
+      "6cfa84"
+    ],
+    "meta-refresh": [
+      "bc659a",
+      "bisz58"
+    ],
+    "meta-viewport": [
+      "b4f0c3"
+    ],
+    "object-alt": [
+      "8fc3b6"
+    ],
+    "html-has-lang": [
+      "b5c3f8"
+    ],
+    "frame-focusable-content": [
+      "akn7bn"
+    ],
+    "scrollable-region-focusable": [
+      "0ssw9k"
+    ],
+    "color-contrast": [
+      "afw4f7",
+      "09o5cg"
+    ],
+    "color-contrast-enhanced": [
+      "09o5cg"
+    ],
+    "aria-valid-attr": [
+      "5f99a7"
+    ],
+    "aria-required-parent": [
+      "ff89c9"
+    ],
+    "aria-required-children": [
+      "ff89c9",
+      "bc4a75"
+    ],
+    "aria-allowed-attr": [
+      "5c01ea"
+    ],
+    "aria-prohibited-attr": [
+      "5c01ea"
+    ],
+    "aria-valid-attr-value": [
+      "6a7281"
+    ],
+    "audio-caption": [
+      "afb423",
+      "2eb176"
+    ],
+    "no-autoplay-audio": [
+      "80f0bf"
+    ],
+    "bypass": [
+      "3e12e1",
+      "cf77f2",
+      "047fe0",
+      "ye5d6e",
+      "b40fd1"
+    ],
+    "css-orientation-lock": [
+      "b33eff"
+    ],
+    "empty-heading": [
+      "ffd0e9"
+    ],
+    "frame-title-unique": [
+      "4b1c6c"
+    ],
+    "frame-title": [
+      "cae760"
+    ],
+    "identical-links-same-purpose": [
+      "b20e66"
+    ],
+    "meta-refresh-no-exceptions": [
+      "bisz58"
+    ],
+    "aria-roles": [
+      "674b10"
+    ],
+    "aria-required-attr": [
+      "4e8ab6"
+    ],
+    "th-has-data-cells": [
+      "d0f69e"
+    ],
+    "video-caption": [
+      "eac66b"
+    ],
+    "label-content-name-mismatch": [
+      "2ee8b8"
+    ]
+  }
+}

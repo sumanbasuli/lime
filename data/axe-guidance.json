@@ -1,0 +1,8 @@
+{
+  "rules": {
+    "link-in-text-block": {
+      "success_criterion": "Ensure color contrast of at least 3:1 for link text.",
+      "source_url": "https://dequeuniversity.com/rules/axe/4.10/link-in-text-block?application=axeAPI"
+    }
+  }
+}
