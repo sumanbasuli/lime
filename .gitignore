@@ -19,5 +19,7 @@ docker-compose.override.yml
 # Screenshots stored locally during scans
 screenshots/
 
-# Local Go build cache used during verification
-shopkeeper/.cache/
+# Local tool and build caches
+.cache/
+**/.cache/
+.claude/
