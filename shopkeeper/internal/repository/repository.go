@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
-	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
 
 // Repository provides database operations for the Shopkeeper API.
@@ -278,13 +278,58 @@ func (r *Repository) UpdateURLStatus(ctx context.Context, urlID string, status s
 	return nil
 }
 
+// GetInheritedFalsePositiveStates returns the latest false-positive state for the
+// given rules from prior terminal scans with the same target and viewport.
+func (r *Repository) GetInheritedFalsePositiveStates(ctx context.Context, scanID string, violationTypes []string) (map[string]bool, error) {
+	if len(violationTypes) == 0 {
+		return map[string]bool{}, nil
+	}
+
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT ON (i.violation_type)
+		    i.violation_type,
+		    i.is_false_positive
+		 FROM scans current_scan
+		 JOIN scans previous_scan
+		   ON previous_scan.sitemap_url = current_scan.sitemap_url
+		  AND previous_scan.scan_type = current_scan.scan_type
+		  AND previous_scan.viewport_preset = current_scan.viewport_preset
+		  AND previous_scan.viewport_width = current_scan.viewport_width
+		  AND previous_scan.viewport_height = current_scan.viewport_height
+		 JOIN issues i ON i.scan_id = previous_scan.id
+		 WHERE current_scan.id = $1
+		   AND previous_scan.id <> current_scan.id
+		   AND previous_scan.status IN ('completed', 'failed')
+		   AND i.violation_type = ANY($2)
+		 ORDER BY i.violation_type, previous_scan.created_at DESC, previous_scan.id DESC`,
+		scanID, violationTypes,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get inherited false-positive states: %w", err)
+	}
+	defer rows.Close()
+
+	states := make(map[string]bool)
+	for rows.Next() {
+		var violationType string
+		var isFalsePositive bool
+		if err := rows.Scan(&violationType, &isFalsePositive); err != nil {
+			return nil, fmt.Errorf("failed to scan inherited false-positive state: %w", err)
+		}
+
+		states[violationType] = isFalsePositive
+	}
+
+	return states, nil
+}
+
 // CreateIssue inserts a new issue record and returns it.
-func (r *Repository) CreateIssue(ctx context.Context, scanID, violationType, description, severity string, helpURL *string) (*models.Issue, error) {
+func (r *Repository) CreateIssue(ctx context.Context, scanID, violationType, description, severity string, helpURL *string, isFalsePositive bool) (*models.Issue, error) {
 	row := r.pool.QueryRow(ctx,
-		`INSERT INTO issues (scan_id, violation_type, description, severity, help_url)
-		 VALUES ($1, $2, $3, $4, $5)
+		`INSERT INTO issues (scan_id, violation_type, description, severity, help_url, is_false_positive)
+		 VALUES ($1, $2, $3, $4, $5, $6)
 		 RETURNING `+issueColumns,
-		scanID, violationType, description, severity, helpURL,
+		scanID, violationType, description, severity, helpURL, isFalsePositive,
 	)
 	issue, err := issueRow(row)
 	if err != nil {
@@ -324,6 +369,77 @@ func (r *Repository) CreateIssueOccurrence(ctx context.Context, issueID, urlID s
 	if err != nil {
 		return fmt.Errorf("failed to create issue occurrence: %w", err)
 	}
+	return nil
+}
+
+// CreateURLAudits inserts one audit outcome per page/rule pair.
+func (r *Repository) CreateURLAudits(ctx context.Context, audits []models.URLAudit) error {
+	if len(audits) == 0 {
+		return nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin URL audit transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	for _, audit := range audits {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO url_audits (url_id, rule_id, outcome)
+			 VALUES ($1, $2, $3)
+			 ON CONFLICT (url_id, rule_id)
+			 DO UPDATE SET outcome = EXCLUDED.outcome`,
+			audit.URLID, audit.RuleID, audit.Outcome,
+		); err != nil {
+			return fmt.Errorf("failed to insert URL audit %s for URL %s: %w", audit.RuleID, audit.URLID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit URL audit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// CreateURLAuditOccurrences inserts node-level context for automated audit outcomes.
+func (r *Repository) CreateURLAuditOccurrences(ctx context.Context, occurrences []models.URLAuditOccurrence) error {
+	if len(occurrences) == 0 {
+		return nil
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin URL audit occurrence transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	for _, occurrence := range occurrences {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO url_audit_occurrences (url_id, rule_id, outcome, html_snippet, screenshot_path, element_screenshot_path, css_selector)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			occurrence.URLID,
+			occurrence.RuleID,
+			occurrence.Outcome,
+			occurrence.HTMLSnippet,
+			occurrence.ScreenshotPath,
+			occurrence.ElementScreenshotPath,
+			occurrence.CSSSelector,
+		); err != nil {
+			return fmt.Errorf(
+				"failed to insert URL audit occurrence %s for URL %s: %w",
+				occurrence.RuleID,
+				occurrence.URLID,
+				err,
+			)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit URL audit occurrence transaction: %w", err)
+	}
+
 	return nil
 }
 

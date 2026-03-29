@@ -36,6 +36,7 @@ All environment configuration is managed through `.env` files:
 
 ```bash
 make start-all      # Build and start all services
+make migrate-all    # Apply DB migrations without stopping services
 make stop-all       # Stop all services
 make clean          # Stop and remove all data volumes
 ```
@@ -56,6 +57,7 @@ For faster iteration, run only the database in Docker and the apps natively:
 
 ```bash
 make start-db          # Start PostgreSQL in Docker
+make migrate-all       # Apply DB migrations in a one-off Shopkeeper container
 make dev-shopkeeper    # Go backend with Air hot reload (in a new terminal)
 make dev-ui            # NextJS with hot reload (in a new terminal)
 ```
@@ -72,6 +74,7 @@ ACT catalog note:
 
 ```bash
 make start-db          # PostgreSQL only
+make migrate-all       # Apply DB migrations only
 make start-shopkeeper  # Go backend (auto-starts DB)
 make start-ui          # NextJS frontend
 ```

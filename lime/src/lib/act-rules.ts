@@ -60,6 +60,14 @@ interface RawAxeRule {
   tags?: string[];
 }
 
+export interface AxeRuleMetadata {
+  ruleId: string;
+  description: string;
+  help: string;
+  helpUrl: string;
+  tags: string[];
+}
+
 interface RawAxeCatalogRule {
   rule_id: string;
   description: string;
@@ -433,6 +441,23 @@ export async function resolveAxeRuleContext(violationType: string): Promise<{
     ruleDescription: axeRule?.description?.trim() || null,
   };
 }
+
+export const getAxeRuleCatalog = cache(async (): Promise<Record<string, AxeRuleMetadata>> => {
+  const axeRules = await loadAxeRules();
+
+  return Object.fromEntries(
+    axeRules.map((rule) => [
+      rule.ruleId,
+      {
+        ruleId: rule.ruleId,
+        description: rule.description,
+        help: rule.help,
+        helpUrl: rule.helpUrl,
+        tags: rule.tags || [],
+      },
+    ])
+  );
+});
 
 export async function resolveACTContext(violationType: string): Promise<{
   actRules: ACTRule[];

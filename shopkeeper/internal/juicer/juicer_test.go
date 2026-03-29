@@ -32,7 +32,11 @@ func TestLighthouseAxeRunConfigMatchesExpectedShape(t *testing.T) {
 	if len(config.RunOnly.Values) != 2 || config.RunOnly.Values[0] != "wcag2a" || config.RunOnly.Values[1] != "wcag2aa" {
 		t.Fatalf("unexpected runOnly values: %#v", config.RunOnly.Values)
 	}
-	if len(config.ResultTypes) != 2 || config.ResultTypes[0] != "violations" || config.ResultTypes[1] != "inapplicable" {
+	if len(config.ResultTypes) != 4 ||
+		config.ResultTypes[0] != "violations" ||
+		config.ResultTypes[1] != "passes" ||
+		config.ResultTypes[2] != "incomplete" ||
+		config.ResultTypes[3] != "inapplicable" {
 		t.Fatalf("unexpected result types: %#v", config.ResultTypes)
 	}
 

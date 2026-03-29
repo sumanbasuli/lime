@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 	cdpinput "github.com/chromedp/cdproto/input"
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
 
 const (
@@ -289,6 +289,9 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	if err := assignCaptureIndices(tabCtx, result.Violations); err != nil {
 		log.Printf("Juicer: warning: failed to assign exact capture indices for %s: %v", page.URL, err)
 	}
+	if err := assignCaptureIndices(tabCtx, result.Incomplete); err != nil {
+		log.Printf("Juicer: warning: failed to assign exact capture indices for incomplete results on %s: %v", page.URL, err)
+	}
 
 	if err := waitForPageSettle(tabCtx); err != nil {
 		log.Printf("Juicer: warning: page settle before screenshots timed out for %s: %v", page.URL, err)
@@ -298,49 +301,8 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	// (FullScreenshot changes the viewport/device metrics and can break subsequent element screenshots)
 	// Use CDP Page.CaptureScreenshot with clip for reliable element capture
 	nodeIdx := 0
-	for vi := range result.Violations {
-		for ni := range result.Violations[vi].Nodes {
-			node := &result.Violations[vi].Nodes[ni]
-			if len(node.Target) == 0 {
-				nodeIdx++
-				continue
-			}
-			locator := captureLocatorForNode(*node)
-			selector := locator.Selector
-
-			bounds, err := prepareElementForCapture(tabCtx, locator)
-			if err != nil || !bounds.Visible || bounds.Width == 0 || bounds.Height == 0 {
-				if err != nil {
-					log.Printf("Juicer: warning: failed to get bounds for %q: %v", selector, err)
-				}
-				nodeIdx++
-				continue
-			}
-
-			elemScreenshot, previewScreenshot, err := captureHighlightedScreenshots(tabCtx, locator, bounds)
-			if err != nil {
-				log.Printf("Juicer: warning: failed to screenshot element %q on %s: %v", selector, page.URL, err)
-				nodeIdx++
-				continue
-			}
-
-			if len(elemScreenshot) >= elementScreenshotMinByteSize {
-				elemPath := filepath.Join(screenshotDir, fmt.Sprintf("%s_focus_%d.png", page.URLID, nodeIdx))
-				if err := os.WriteFile(elemPath, elemScreenshot, 0644); err != nil {
-					log.Printf("Juicer: warning: failed to save element screenshot: %v", err)
-				} else {
-					node.ElementScreenshotPath = elemPath
-
-					if len(previewScreenshot) >= elementScreenshotMinByteSize {
-						if err := os.WriteFile(focusedPreviewPath(elemPath), previewScreenshot, 0644); err != nil {
-							log.Printf("Juicer: warning: failed to save preview screenshot: %v", err)
-						}
-					}
-				}
-			}
-			nodeIdx++
-		}
-	}
+	nodeIdx = captureViolationNodeScreenshots(tabCtx, result.Violations, screenshotDir, page, nodeIdx)
+	nodeIdx = captureViolationNodeScreenshots(tabCtx, result.Incomplete, screenshotDir, page, nodeIdx)
 
 	// Take a full-page screenshot (last, since it alters viewport metrics)
 	screenshot, err = captureFullPage(tabCtx)
@@ -366,6 +328,58 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	return result
 }
 
+func captureViolationNodeScreenshots(ctx context.Context, violations []Violation, screenshotDir string, page PageInput, startIndex int) int {
+	nodeIdx := startIndex
+
+	for vi := range violations {
+		for ni := range violations[vi].Nodes {
+			node := &violations[vi].Nodes[ni]
+			if len(node.Target) == 0 {
+				nodeIdx++
+				continue
+			}
+
+			locator := captureLocatorForNode(*node)
+			selector := locator.Selector
+
+			bounds, err := prepareElementForCapture(ctx, locator)
+			if err != nil || !bounds.Visible || bounds.Width == 0 || bounds.Height == 0 {
+				if err != nil {
+					log.Printf("Juicer: warning: failed to get bounds for %q: %v", selector, err)
+				}
+				nodeIdx++
+				continue
+			}
+
+			elemScreenshot, previewScreenshot, err := captureHighlightedScreenshots(ctx, locator, bounds)
+			if err != nil {
+				log.Printf("Juicer: warning: failed to screenshot element %q on %s: %v", selector, page.URL, err)
+				nodeIdx++
+				continue
+			}
+
+			if len(elemScreenshot) >= elementScreenshotMinByteSize {
+				elemPath := filepath.Join(screenshotDir, fmt.Sprintf("%s_focus_%d.png", page.URLID, nodeIdx))
+				if err := os.WriteFile(elemPath, elemScreenshot, 0644); err != nil {
+					log.Printf("Juicer: warning: failed to save element screenshot: %v", err)
+				} else {
+					node.ElementScreenshotPath = elemPath
+
+					if len(previewScreenshot) >= elementScreenshotMinByteSize {
+						if err := os.WriteFile(focusedPreviewPath(elemPath), previewScreenshot, 0644); err != nil {
+							log.Printf("Juicer: warning: failed to save preview screenshot: %v", err)
+						}
+					}
+				}
+			}
+
+			nodeIdx++
+		}
+	}
+
+	return nodeIdx
+}
+
 func lighthouseAxeRunOptions() axeRunOptions {
 	return axeRunOptions{
 		ElementRef: true,
@@ -373,7 +387,7 @@ func lighthouseAxeRunOptions() axeRunOptions {
 			Type:   "tag",
 			Values: []string{"wcag2a", "wcag2aa"},
 		},
-		ResultTypes: []string{"violations", "inapplicable"},
+		ResultTypes: []string{"violations", "passes", "incomplete", "inapplicable"},
 		Rules:       lighthouseAxeRuleOverrides,
 	}
 }
