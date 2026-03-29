@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lime_dev_password}
       POSTGRES_DB: ${POSTGRES_DB:-lime_db}
     ports:
-      - "5432:5432"
+      - "${LIME_DB_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -31,7 +31,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-lime}:${POSTGRES_PASSWORD:-lime_dev_password}@db:5432/${POSTGRES_DB:-lime_db}?sslmode=disable
       SHOPKEEPER_PORT: 8080
     ports:
-      - "8080:8080"
+      - "${LIME_API_PORT:-8080}:8080"
     shm_size: "2gb"
     volumes:
       - ./data:/shared-data:ro
@@ -49,9 +49,9 @@ services:
     environment:
       ACT_RULES_PATH: /shared-data/act-rules.json
       DATABASE_URL: postgresql://${POSTGRES_USER:-lime}:${POSTGRES_PASSWORD:-lime_dev_password}@db:5432/${POSTGRES_DB:-lime_db}?sslmode=disable
-      NEXT_PUBLIC_API_URL: http://localhost:8080
+      SHOPKEEPER_URL: http://shopkeeper:8080
     ports:
-      - "3000:3000"
+      - "${LIME_UI_PORT:-3000}:3000"
     volumes:
       - ./data:/shared-data:ro
       - ./lime:/app

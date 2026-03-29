@@ -16,9 +16,10 @@ The frontend for the accessibility scanner is a strictly decoupled **NextJS** ap
 - **Server Components** read data directly from PostgreSQL via Drizzle ORM
 - **Server Components** also read the shared ACT catalog at render time for issue-detail enrichment
 - **Server Components** also read shared `axe-rules.json` and `axe-act-mapping.json` metadata so issue cards can fall back to Deque's procedure-to-ACT mappings first and local axe-core WCAG tags second
-- **Client Components** call the Shopkeeper API for writes and live updates (POST/DELETE for scan actions, GET for polling)
+- **Client Components** call same-origin `/api/...` routes for writes and live updates (POST/DELETE for scan actions, GET for polling)
   - this now includes issue-level false-positive mark/unmark actions from the issue details page
   - and scan creation now includes a viewport preset so users can choose the screen size used for rendering
+- **Route Handlers** under `src/app/api/[...path]/route.ts` proxy those requests to Shopkeeper using the runtime `SHOPKEEPER_URL` env
 - Shopkeeper owns all DB writes; the NextJS app only reads
 
 ### Page Routes
@@ -63,7 +64,7 @@ Uses shadcn/ui sidebar-08 layout with:
 
 **File**: `src/lib/api.ts`
 
-Typed fetch wrapper using `process.env.NEXT_PUBLIC_API_URL`:
+Typed fetch wrapper using same-origin `/api/...` paths:
 - `createScan(sitemapUrl)` — POST /api/scans
 - `rescanScan(id)` — POST /api/scans/{id}/rescan
 - `deleteScan(id)` — DELETE /api/scans/{id}
@@ -73,6 +74,8 @@ Typed fetch wrapper using `process.env.NEXT_PUBLIC_API_URL`:
 - `getScan(id)` — GET /api/scans/{id}
 - `getScanIssues(id)` — GET /api/scans/{id}/issues
 - `getStats()` — GET /api/stats
+
+The browser never needs a deployment-specific backend URL. The Next server proxies these paths to `SHOPKEEPER_URL` at runtime, which keeps the images reverse-proxy friendly and removes build-time API URL coupling.
 
 ### Scan Management
 
@@ -101,6 +104,7 @@ Active scans do not expose these actions, which prevents conflicts with the runn
 - The issue details page now shows only the focused preview inline and opens the highlighted visible-view screenshot on click so users can inspect the current scrolled view without leaving the issue flow.
 - The generic saved page capture is no longer shown inline as the default fallback. If a focused screenshot is unavailable, the page capture is only exposed as an on-demand secondary view.
 - Focused screenshots now come from an interaction-aware backend capture path that tries the exact matched DOM node first, applies bounded hover/focus preparation, and renders the spotlight through a dedicated overlay. The inline preview is cropped from that same focused screenshot so the preview and lightbox stay visually consistent.
+- Screenshot URLs are also same-origin `/api/screenshots/...` paths, so expanded screenshots and API writes share the same runtime proxy behavior.
 - HTML snippets in the issue details view are now formatted into multiple lines and highlighted with Prism so long one-line fragments are readable without manual copying.
 - Each expanded issue can show:
   - W3C ACT rule links and status badges (`W3C Recommendation` / `Proposed`)

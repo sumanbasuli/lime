@@ -51,3 +51,4 @@ This document outlines the sequential steps to build the accessibility scanner s
 - [ ] Optimize Juicer's resource usage.
 - [x] Polish UI — refined scan detail hierarchy, aligned heading/body/code font usage on scan pages, and fixed the issue expander so open/closed state is visually clear.
 - [x] Issue triage groundwork — persisted false-positive mark/unmark controls on issue cards without changing scan aggregation behavior yet.
+- [x] Production build and release pipeline — added `make build`, `make build-docker`, a release-ready Docker bundle, GHCR release publishing on GitHub Releases, runtime-only Shopkeeper proxying in the UI, and an external-DB production release model with generic images.
