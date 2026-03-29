@@ -1,9 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
-import { scans, issues, issueOccurrences, urls } from "@/db/schema";
-import { eq } from "drizzle-orm";
-import { SeverityBadge } from "@/components/status-badge";
+import {
+  scans,
+  issues,
+  issueOccurrences,
+  urlAuditOccurrences,
+  urlAudits,
+  urls,
+} from "@/db/schema";
+import { and, eq } from "drizzle-orm";
+import { AuditStatusBadge, SeverityBadge } from "@/components/status-badge";
 import {
   Collapsible,
   CollapsibleContent,
@@ -15,12 +22,16 @@ import { IssueScreenshotLightbox } from "@/components/issue-screenshot-lightbox"
 import { CodeSnippet } from "@/components/code-snippet";
 import {
   enrichIssueWithACT,
+  getAxeRuleCatalog,
   mergeAccessibilityReferences,
   normalizeACTAccessibilityRequirements,
+  resolveACTContext,
   resolveAxeRuleContext,
   type ACTRule,
   type AccessibilityReference,
 } from "@/lib/act-rules";
+import { getLighthouseAccessibilityWeight } from "@/lib/scan-scoring";
+import { getScanAuditReports } from "@/lib/scan-score-data";
 import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +40,69 @@ interface IssuesPageProps {
   params: Promise<{ id: string }>;
 }
 
+interface ReviewOccurrence {
+  id: string;
+  urlId: string;
+  ruleId: string;
+  htmlSnippet: string | null;
+  screenshotPath: string | null;
+  elementScreenshotPath: string | null;
+  cssSelector: string | null;
+  pageUrl: string;
+}
+
+interface NeedsReviewIssueGroup {
+  ruleId: string;
+  title: string;
+  helpUrl: string | null;
+  ruleDescription: string | null;
+  actRules: ACTRule[];
+  suggestedFixes: string[];
+  complianceReferences: AccessibilityReference[];
+  axeSuggestedChange: string | null;
+  occurrences: ReviewOccurrence[];
+}
+
 const alternativeACTRulePairs = new Set(["09o5cg:afw4f7"]);
+
+function getErrorDetails(error: unknown): { code?: string; message: string } {
+  if (error instanceof Error) {
+    const cause = error.cause;
+    if (
+      cause &&
+      typeof cause === "object" &&
+      "message" in cause &&
+      typeof cause.message === "string"
+    ) {
+      const code =
+        "code" in cause && typeof cause.code === "string"
+          ? cause.code
+          : undefined;
+
+      return { code, message: cause.message };
+    }
+
+    return { message: error.message };
+  }
+
+  return { message: String(error) };
+}
+
+function isMissingAuditOccurrenceStorageError(error: unknown): boolean {
+  const { code, message } = getErrorDetails(error);
+
+  if (code === "42P01" || code === "42704") {
+    return true;
+  }
+
+  return (
+    message.includes("url_audit_occurrences") &&
+    (message.includes("does not exist") ||
+      message.includes("doesn't exist") ||
+      message.includes("relation") ||
+      message.includes("Failed query"))
+  );
+}
 
 function actStatusBadgeVariant(
   status: ACTRule["status"]
@@ -393,12 +466,61 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
   if (!scan) {
     notFound();
   }
+  const auditReports = await getScanAuditReports([
+    { id: scan.id, status: scan.status ?? "pending" },
+  ]);
+  const scoreSummary = auditReports[scan.id].summary;
 
   // Fetch all issues for this scan
   const scanIssues = await db
     .select()
     .from(issues)
     .where(eq(issues.scanId, id));
+
+  const scanIncompleteAuditRows = await db
+    .select({
+      ruleId: urlAudits.ruleId,
+      urlId: urls.id,
+      pageUrl: urls.url,
+    })
+    .from(urlAudits)
+    .innerJoin(urls, eq(urls.id, urlAudits.urlId))
+    .where(
+      and(
+        eq(urls.scanId, id),
+        eq(urls.status, "completed"),
+        eq(urlAudits.outcome, "incomplete")
+      )
+    );
+
+  let scanIncompleteOccurrenceRows: ReviewOccurrence[] = [];
+
+  try {
+    scanIncompleteOccurrenceRows = await db
+      .select({
+        id: urlAuditOccurrences.id,
+        urlId: urlAuditOccurrences.urlId,
+        ruleId: urlAuditOccurrences.ruleId,
+        htmlSnippet: urlAuditOccurrences.htmlSnippet,
+        screenshotPath: urlAuditOccurrences.screenshotPath,
+        elementScreenshotPath: urlAuditOccurrences.elementScreenshotPath,
+        cssSelector: urlAuditOccurrences.cssSelector,
+        pageUrl: urls.url,
+      })
+      .from(urlAuditOccurrences)
+      .innerJoin(urls, eq(urls.id, urlAuditOccurrences.urlId))
+      .where(
+        and(
+          eq(urls.scanId, id),
+          eq(urls.status, "completed"),
+          eq(urlAuditOccurrences.outcome, "incomplete")
+        )
+      );
+  } catch (error) {
+    if (!isMissingAuditOccurrenceStorageError(error)) {
+      throw error;
+    }
+  }
 
   // Build issues with occurrences
   const issuesWithOccurrences = await Promise.all(
@@ -432,13 +554,98 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
     })
   );
 
-  // Sort by severity priority
+  const failedRuleIds = new Set(scanIssues.map((issue) => issue.violationType));
+  const incompleteOccurrencesByRuleId = scanIncompleteOccurrenceRows.reduce(
+    (groups, row) => {
+      if (failedRuleIds.has(row.ruleId)) {
+        return groups;
+      }
+
+      const currentGroup = groups.get(row.ruleId) ?? [];
+      currentGroup.push(row);
+      groups.set(row.ruleId, currentGroup);
+      return groups;
+    },
+    new Map<string, ReviewOccurrence[]>()
+  );
+  const incompleteAuditRowsByRuleId = scanIncompleteAuditRows.reduce(
+    (groups, row) => {
+      if (failedRuleIds.has(row.ruleId)) {
+        return groups;
+      }
+
+      const currentGroup = groups.get(row.ruleId) ?? [];
+      currentGroup.push({
+        id: `${row.ruleId}-${row.urlId}`,
+        urlId: row.urlId,
+        ruleId: row.ruleId,
+        htmlSnippet: null,
+        screenshotPath: null,
+        elementScreenshotPath: null,
+        cssSelector: null,
+        pageUrl: row.pageUrl,
+      });
+      groups.set(row.ruleId, currentGroup);
+      return groups;
+    },
+    new Map<string, ReviewOccurrence[]>()
+  );
+  const axeRuleCatalog = await getAxeRuleCatalog();
+  const needsReviewIssues = await Promise.all(
+    Array.from(
+      new Set([
+        ...incompleteAuditRowsByRuleId.keys(),
+        ...incompleteOccurrencesByRuleId.keys(),
+      ])
+    )
+      .filter((ruleId) => ruleId && !failedRuleIds.has(ruleId))
+      .map(
+      async (ruleId) => {
+        const occurrences =
+          incompleteOccurrencesByRuleId.get(ruleId) ??
+          incompleteAuditRowsByRuleId.get(ruleId) ??
+          [];
+        const [actContext, axeContext] = await Promise.all([
+          resolveACTContext(ruleId),
+          resolveAxeRuleContext(ruleId),
+        ]);
+        const ruleMetadata = axeRuleCatalog[ruleId];
+
+        return {
+          ruleId,
+          title: ruleMetadata?.help || ruleId,
+          helpUrl: ruleMetadata?.helpUrl || null,
+          ruleDescription: axeContext.ruleDescription,
+          actRules: actContext.actRules,
+          suggestedFixes: actContext.suggestedFixes,
+          complianceReferences: axeContext.accessibilityRequirements,
+          axeSuggestedChange: axeContext.successCriterion,
+          occurrences,
+        } satisfies NeedsReviewIssueGroup;
+      }
+    )
+  );
+
+  // Sort by Lighthouse audit weight first, then severity.
   const severityOrder = { critical: 0, serious: 1, moderate: 2, minor: 3 };
   issuesWithOccurrences.sort(
     (a, b) =>
+      getLighthouseAccessibilityWeight(b.issue.violationType) -
+        getLighthouseAccessibilityWeight(a.issue.violationType) ||
       (severityOrder[a.issue.severity as keyof typeof severityOrder] ?? 3) -
-      (severityOrder[b.issue.severity as keyof typeof severityOrder] ?? 3)
+        (severityOrder[b.issue.severity as keyof typeof severityOrder] ?? 3)
   );
+  needsReviewIssues.sort(
+    (a, b) =>
+      getLighthouseAccessibilityWeight(b.ruleId) -
+        getLighthouseAccessibilityWeight(a.ruleId) ||
+      a.title.localeCompare(b.title)
+  );
+  const excludedIssueCount = issuesWithOccurrences.filter(
+    ({ issue }) => issue.isFalsePositive
+  ).length;
+  const activeIssueCount = issuesWithOccurrences.length - excludedIssueCount;
+  const totalIssueCardCount = issuesWithOccurrences.length + needsReviewIssues.length;
 
   return (
     <div className="space-y-4">
@@ -460,13 +667,23 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
       <h1 className="font-heading text-3xl font-bold leading-[0.95] sm:text-4xl">
         Issue details{" "}
         <span className="font-sans text-sm font-medium text-muted-foreground">
-          ({issuesWithOccurrences.length})
+          ({totalIssueCardCount})
         </span>
       </h1>
+      <p className="text-sm leading-5 text-muted-foreground">
+        {activeIssueCount} failed {activeIssueCount === 1 ? "check" : "checks"}
+        {needsReviewIssues.length > 0 &&
+          `, ${needsReviewIssues.length} ${needsReviewIssues.length === 1 ? "check needs" : "checks need"} review`}
+        {excludedIssueCount > 0 &&
+          `, ${excludedIssueCount} excluded from the score`}
+        {scoreSummary.isPartialScan &&
+          `, based on ${scoreSummary.completedUrlCount} of ${scoreSummary.totalUrlCount} completed pages`}
+        . Passed and not applicable checks remain on the scan details page.
+      </p>
 
-      {issuesWithOccurrences.length === 0 ? (
+      {totalIssueCardCount === 0 ? (
         <section className="rounded-xl border bg-card p-12 text-center text-muted-foreground">
-          No issues found for this scan.
+          No failed or review-required checks found for this scan.
         </section>
       ) : (
         <div className="space-y-3">
@@ -490,6 +707,7 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
             return (
               <Collapsible key={issue.id}>
                 <section
+                  id={`rule-${issue.violationType}`}
                   data-issue-card
                   data-false-positive={issue.isFalsePositive ? "true" : "false"}
                   className="overflow-hidden rounded-xl border bg-card"
@@ -510,6 +728,13 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
                           <SeverityBadge
                             severity={issue.severity ?? "moderate"}
                           />
+                          {getLighthouseAccessibilityWeight(issue.violationType) > 0 ? (
+                            <Badge variant="outline">
+                              Weight {getLighthouseAccessibilityWeight(issue.violationType)}
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary">Not scored</Badge>
+                          )}
                           {issue.isFalsePositive && (
                             <Badge variant="secondary">False positive</Badge>
                           )}
@@ -693,6 +918,231 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
               </Collapsible>
             );
           })}
+
+          {needsReviewIssues.map(
+            ({
+              ruleId,
+              title,
+              helpUrl,
+              ruleDescription,
+              actRules,
+              suggestedFixes,
+              complianceReferences,
+              axeSuggestedChange,
+              occurrences,
+            }) => {
+              const suggestedChangesSummary =
+                buildSuggestedChangesSummary(suggestedFixes) ?? axeSuggestedChange;
+              const hasAlternativeRulePair =
+                actRules.length === 2 &&
+                areAlternativeACTRules(actRules[0], actRules[1]);
+
+              return (
+                <Collapsible key={`needs-review-${ruleId}`}>
+                  <section
+                    id={`rule-${ruleId}`}
+                    className="overflow-hidden rounded-xl border bg-card"
+                  >
+                    <div className="relative">
+                      <CollapsibleTrigger
+                        aria-label={`Toggle details for ${title}`}
+                        className="issue-card-trigger peer absolute inset-0 rounded-xl transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      />
+
+                      <div className="issue-card-header pointer-events-none relative z-10 flex items-start gap-3 p-4">
+                        <div className="issue-expander mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-all duration-200">
+                          <ChevronRightIcon className="h-4 w-4 transition-transform duration-200" />
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <AuditStatusBadge status="needs_review" />
+                            {getLighthouseAccessibilityWeight(ruleId) > 0 ? (
+                              <Badge variant="outline">
+                                Weight {getLighthouseAccessibilityWeight(ruleId)}
+                              </Badge>
+                            ) : (
+                            <Badge variant="secondary">Not scored</Badge>
+                          )}
+                          <span className="text-[11px] font-medium text-muted-foreground">
+                              {formatOccurrenceLabel(occurrences.length)}
+                          </span>
+                        </div>
+
+                          {helpUrl ? (
+                            <a
+                              href={helpUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="pointer-events-auto mt-2 inline-flex max-w-full items-start gap-1 font-heading text-[15px] font-bold leading-tight text-foreground hover:underline"
+                            >
+                              <span className="issue-card-heading truncate sm:whitespace-normal">
+                                {title}
+                              </span>
+                              <ExternalLinkIcon className="mt-0.5 h-3 w-3 shrink-0" />
+                            </a>
+                          ) : (
+                            <h2 className="issue-card-heading mt-2 font-heading text-[15px] font-bold leading-tight text-foreground">
+                              {title}
+                            </h2>
+                          )}
+
+                          {shouldShowRuleDescription(title, ruleDescription) && (
+                            <p className="mt-1 max-w-3xl text-sm leading-5 text-muted-foreground">
+                              {ruleDescription}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <CollapsibleContent>
+                      <div className="space-y-4 border-t px-4 pb-4 pt-3">
+                        {suggestedChangesSummary && (
+                          <section className="rounded-lg border border-[#0E5A4A]/20 bg-[#E7FFF6] p-4 text-[#0F172A]">
+                            <h3 className="font-heading text-base font-bold text-[#0F172A]">
+                              What to review
+                            </h3>
+                            <p className="mt-2 text-sm leading-5 text-[#0F172A]/80">
+                              {suggestedChangesSummary}
+                            </p>
+                          </section>
+                        )}
+
+                        {actRules.length > 0 ? (
+                          <section className="space-y-2">
+                            {hasAlternativeRulePair ? (
+                              <div className="flex flex-col items-center gap-3 lg:flex-row lg:items-stretch">
+                                <div className="w-full lg:flex-1">
+                                  <ACTRuleCard
+                                    actRule={actRules[0]}
+                                    complianceReferences={complianceReferences}
+                                  />
+                                </div>
+                                <AlternativeRuleBinder />
+                                <div className="w-full lg:flex-1">
+                                  <ACTRuleCard
+                                    actRule={actRules[1]}
+                                    complianceReferences={complianceReferences}
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="grid gap-3 lg:grid-cols-2">
+                                {actRules.map((actRule) => (
+                                  <ACTRuleCard
+                                    key={actRule.actRuleId}
+                                    actRule={actRule}
+                                    complianceReferences={complianceReferences}
+                                  />
+                                ))}
+                              </div>
+                            )}
+                          </section>
+                        ) : (
+                          <section>
+                            <BaseRuleGuidanceCard
+                              description={title}
+                              helpUrl={helpUrl}
+                              accessibilityRequirements={complianceReferences}
+                            />
+                          </section>
+                        )}
+
+                        <section className="space-y-2">
+                          <h3 className="font-heading text-base font-bold">
+                            Affected elements
+                          </h3>
+
+                          {occurrences.map((occurrence) => {
+                            const screenshot = occurrenceScreenshot(occurrence);
+                            const pageCapture = occurrencePageCapture(occurrence);
+
+                            return (
+                              <div
+                                key={occurrence.id}
+                                className="rounded-xl border bg-muted/30 p-3"
+                              >
+                                <p className="text-[11px] font-medium text-muted-foreground">
+                                  URL
+                                </p>
+                                <a
+                                  href={occurrence.pageUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="mt-1.5 inline-flex break-all text-sm leading-5 text-primary hover:underline"
+                                >
+                                  {occurrence.pageUrl}
+                                </a>
+
+                                {occurrence.cssSelector && (
+                                  <p className="mt-2 text-[11px] text-muted-foreground">
+                                    Selector:{" "}
+                                    <code className="rounded bg-muted px-1 font-mono">
+                                      {occurrence.cssSelector}
+                                    </code>
+                                  </p>
+                                )}
+
+                                {occurrence.htmlSnippet && (
+                                  <div className="mt-2">
+                                    <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                                      HTML snippet
+                                    </p>
+                                    <CodeSnippet code={occurrence.htmlSnippet} />
+                                  </div>
+                                )}
+
+                                {screenshot && (
+                                  <div className="mt-2">
+                                    <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                                      {screenshot.label}
+                                    </p>
+                                    <IssueScreenshotLightbox
+                                      src={elementScreenshotUrl(screenshot.path)}
+                                      previewSrc={elementScreenshotUrl(
+                                        focusedPreviewPath(screenshot.path)
+                                      )}
+                                      alt={`Screenshot of ${ruleId} review item`}
+                                      label={`${ruleId} screenshot`}
+                                      previewClassName="block max-h-64 w-auto max-w-full rounded-lg object-contain object-center"
+                                    />
+                                  </div>
+                                )}
+
+                                {!screenshot && pageCapture && (
+                                  <div className="mt-2 space-y-2">
+                                    <p className="text-[11px] text-muted-foreground">
+                                      A focused screenshot was not available for
+                                      this occurrence.
+                                    </p>
+                                    <IssueScreenshotLightbox
+                                      src={elementScreenshotUrl(pageCapture.path)}
+                                      alt={`Page capture for ${ruleId} review item`}
+                                      label={pageCapture.label}
+                                      triggerLabel="Open page capture"
+                                    />
+                                  </div>
+                                )}
+
+                                {!occurrence.htmlSnippet && !screenshot && !pageCapture && (
+                                  <p className="mt-2 text-[11px] text-muted-foreground">
+                                    axe-core marked this check for manual review on
+                                    this page, but no stored element context is
+                                    available for this older scan.
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </section>
+                      </div>
+                    </CollapsibleContent>
+                  </section>
+                </Collapsible>
+              );
+            }
+          )}
         </div>
       )}
     </div>

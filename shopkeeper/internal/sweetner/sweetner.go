@@ -5,6 +5,7 @@ import (
 	"log"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/juicer"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
 )
 
@@ -18,6 +19,14 @@ import (
 func Process(ctx context.Context, repo *repository.Repository, scanID string, results []juicer.RawResult) error {
 	// Map of violation ID → created issue DB ID
 	issueMap := make(map[string]string)
+	inheritedFalsePositiveStates, err := repo.GetInheritedFalsePositiveStates(
+		ctx,
+		scanID,
+		uniqueViolationTypes(results),
+	)
+	if err != nil {
+		return err
+	}
 
 	totalOccurrences := 0
 
@@ -25,6 +34,13 @@ func Process(ctx context.Context, repo *repository.Repository, scanID string, re
 		if result.Error != "" {
 			// Skip pages that errored during scanning
 			continue
+		}
+
+		if err := repo.CreateURLAudits(ctx, buildURLAudits(result)); err != nil {
+			return err
+		}
+		if err := repo.CreateURLAuditOccurrences(ctx, buildURLAuditOccurrences(result)); err != nil {
+			return err
 		}
 
 		for _, violation := range result.Violations {
@@ -36,7 +52,15 @@ func Process(ctx context.Context, repo *repository.Repository, scanID string, re
 				if violation.HelpURL != "" {
 					helpURL = &violation.HelpURL
 				}
-				issue, err := repo.CreateIssue(ctx, scanID, violation.ID, violation.Help, severity, helpURL)
+				issue, err := repo.CreateIssue(
+					ctx,
+					scanID,
+					violation.ID,
+					violation.Help,
+					severity,
+					helpURL,
+					inheritedFalsePositiveStates[violation.ID],
+				)
 				if err != nil {
 					log.Printf("Sweetner: failed to create issue for violation %s: %v", violation.ID, err)
 					continue
@@ -93,6 +117,136 @@ func Process(ctx context.Context, repo *repository.Repository, scanID string, re
 
 	log.Printf("Sweetner: processed scan %s — %d unique issues, %d total occurrences", scanID, len(issueMap), totalOccurrences)
 	return nil
+}
+
+func uniqueViolationTypes(results []juicer.RawResult) []string {
+	seen := make(map[string]struct{})
+	types := make([]string, 0)
+
+	for _, result := range results {
+		for _, violation := range result.Violations {
+			if violation.ID == "" {
+				continue
+			}
+			if _, exists := seen[violation.ID]; exists {
+				continue
+			}
+
+			seen[violation.ID] = struct{}{}
+			types = append(types, violation.ID)
+		}
+	}
+
+	return types
+}
+
+func buildURLAudits(result juicer.RawResult) []models.URLAudit {
+	outcomes := make(map[string]string)
+
+	setOutcome := func(ruleID, outcome string) {
+		if ruleID == "" {
+			return
+		}
+
+		current, exists := outcomes[ruleID]
+		if !exists || auditOutcomePriority(outcome) > auditOutcomePriority(current) {
+			outcomes[ruleID] = outcome
+		}
+	}
+
+	for _, rule := range result.Passes {
+		setOutcome(rule.ID, "passed")
+	}
+	for _, rule := range result.NotApplicable {
+		setOutcome(rule.ID, "not_applicable")
+	}
+	for _, violation := range result.Incomplete {
+		setOutcome(violation.ID, "incomplete")
+	}
+	for _, violation := range result.Violations {
+		setOutcome(violation.ID, "failed")
+	}
+
+	audits := make([]models.URLAudit, 0, len(outcomes))
+	for ruleID, outcome := range outcomes {
+		audits = append(audits, models.URLAudit{
+			URLID:   result.URLID,
+			RuleID:  ruleID,
+			Outcome: outcome,
+		})
+	}
+
+	return audits
+}
+
+func buildURLAuditOccurrences(result juicer.RawResult) []models.URLAuditOccurrence {
+	occurrences := make([]models.URLAuditOccurrence, 0)
+
+	for _, violation := range result.Incomplete {
+		for _, node := range violation.Nodes {
+			htmlSnippet := node.HTML
+			var htmlPtr *string
+			if htmlSnippet != "" {
+				htmlPtr = &htmlSnippet
+			}
+
+			var screenshotPtr *string
+			if result.ScreenshotPath != "" {
+				screenshotPtr = &result.ScreenshotPath
+			}
+
+			var elemScreenshotPtr *string
+			if node.ElementScreenshotPath != "" {
+				elemScreenshotPtr = &node.ElementScreenshotPath
+			}
+
+			var cssSelectorPtr *string
+			if len(node.Target) > 0 {
+				cssSelectorPtr = &node.Target[0]
+			}
+
+			occurrences = append(occurrences, models.URLAuditOccurrence{
+				URLID:                 result.URLID,
+				RuleID:                violation.ID,
+				Outcome:               "incomplete",
+				HTMLSnippet:           htmlPtr,
+				ScreenshotPath:        screenshotPtr,
+				ElementScreenshotPath: elemScreenshotPtr,
+				CSSSelector:           cssSelectorPtr,
+			})
+		}
+
+		if len(violation.Nodes) == 0 {
+			var screenshotPtr *string
+			if result.ScreenshotPath != "" {
+				screenshotPtr = &result.ScreenshotPath
+			}
+
+			occurrences = append(occurrences, models.URLAuditOccurrence{
+				URLID:          result.URLID,
+				RuleID:         violation.ID,
+				Outcome:        "incomplete",
+				ScreenshotPath: screenshotPtr,
+			})
+		}
+	}
+
+	return occurrences
+}
+
+func auditOutcomePriority(outcome string) int {
+	switch outcome {
+	case "failed":
+		return 4
+	case "incomplete":
+		return 3
+	case "not_applicable":
+		return 2
+	case "passed":
+		return 1
+	default:
+		return 0
+	}
 }
 
 // mapImpactToSeverity maps axe-core impact levels to our severity enum.

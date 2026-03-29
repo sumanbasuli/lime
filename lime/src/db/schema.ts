@@ -32,6 +32,13 @@ export const severityEnum = pgEnum("severity", [
   "minor",
 ]);
 
+export const auditOutcomeEnum = pgEnum("audit_outcome", [
+  "passed",
+  "failed",
+  "not_applicable",
+  "incomplete",
+]);
+
 // Tables
 
 export const scans = pgTable("scans", {
@@ -80,6 +87,30 @@ export const issueOccurrences = pgTable("issue_occurrences", {
   urlId: uuid("url_id")
     .notNull()
     .references(() => urls.id, { onDelete: "cascade" }),
+  htmlSnippet: text("html_snippet"),
+  screenshotPath: text("screenshot_path"),
+  elementScreenshotPath: text("element_screenshot_path"),
+  cssSelector: text("css_selector"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const urlAudits = pgTable("url_audits", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  urlId: uuid("url_id")
+    .notNull()
+    .references(() => urls.id, { onDelete: "cascade" }),
+  ruleId: text("rule_id").notNull(),
+  outcome: auditOutcomeEnum("outcome").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const urlAuditOccurrences = pgTable("url_audit_occurrences", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  urlId: uuid("url_id")
+    .notNull()
+    .references(() => urls.id, { onDelete: "cascade" }),
+  ruleId: text("rule_id").notNull(),
+  outcome: auditOutcomeEnum("outcome").notNull(),
   htmlSnippet: text("html_snippet"),
   screenshotPath: text("screenshot_path"),
   elementScreenshotPath: text("element_screenshot_path"),

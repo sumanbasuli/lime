@@ -29,6 +29,29 @@ type URL struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// URLAudit stores the outcome of one automated accessibility audit on one scanned page.
+type URLAudit struct {
+	ID        string    `json:"id"`
+	URLID     string    `json:"url_id"`
+	RuleID    string    `json:"rule_id"`
+	Outcome   string    `json:"outcome"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// URLAuditOccurrence stores node-level context for review-required automated audits.
+type URLAuditOccurrence struct {
+	ID                    string    `json:"id"`
+	URLID                 string    `json:"url_id"`
+	RuleID                string    `json:"rule_id"`
+	Outcome               string    `json:"outcome"`
+	HTMLSnippet           *string   `json:"html_snippet"`
+	ScreenshotPath        *string   `json:"screenshot_path"`
+	ElementScreenshotPath *string   `json:"element_screenshot_path"`
+	CSSSelector           *string   `json:"css_selector"`
+	CreatedAt             time.Time `json:"created_at"`
+	PageURL               string    `json:"page_url,omitempty"`
+}
+
 // Issue represents a deduplicated accessibility violation found during a scan.
 type Issue struct {
 	ID              string    `json:"id"`

@@ -4,8 +4,15 @@ import { scans, issues } from "@/db/schema";
 import { desc, count, sql } from "drizzle-orm";
 import { NewScanForm } from "@/components/new-scan-form";
 import { ScanActions } from "@/components/scan-actions";
-import { StatusBadge, ScanTypeBadge, TagBadge } from "@/components/status-badge";
+import {
+  StatusBadge,
+  ScanScoreBadge,
+  ScanTypeBadge,
+  TagBadge,
+} from "@/components/status-badge";
 import { ArrowRightIcon } from "lucide-react";
+import { getScanScoreSummaries } from "@/lib/scan-score-data";
+import type { ScanScoreSummary } from "@/lib/scan-scoring";
 
 export const dynamic = "force-dynamic";
 
@@ -17,12 +24,33 @@ function formatDate(value: string | Date | null | undefined): string {
   return new Date(value).toLocaleDateString();
 }
 
+function formatScanCoverage(
+  scan: { status: string | null; scannedUrls: number | null; totalUrls: number | null },
+  summary: ScanScoreSummary
+): string {
+  if (summary.isPartialScan) {
+    return `${summary.completedUrlCount} completed, ${summary.failedUrlCount} failed`;
+  }
+
+  if (summary.totalUrlCount > 0 && (scan.status === "completed" || scan.status === "failed")) {
+    return `${summary.completedUrlCount}/${summary.totalUrlCount} completed`;
+  }
+
+  return `${scan.scannedUrls ?? 0}/${scan.totalUrls ?? 0} pages`;
+}
+
 export default async function Home() {
   const recentScans = await db
     .select()
     .from(scans)
     .orderBy(desc(scans.createdAt))
     .limit(10);
+  const scoreSummaries = await getScanScoreSummaries(
+    recentScans.map((scan) => ({
+      id: scan.id,
+      status: scan.status ?? "pending",
+    }))
+  );
 
   const [scanCount] = await db.select({ value: count() }).from(scans);
   const [issueCount] = await db.select({ value: count() }).from(issues);
@@ -98,6 +126,7 @@ export default async function Home() {
                 <th className="pb-3 pr-4 text-[11px] font-medium">Type</th>
                 <th className="pb-3 pr-4 text-[11px] font-medium">Tag</th>
                 <th className="pb-3 pr-4 text-[11px] font-medium">Status</th>
+                <th className="pb-3 pr-4 text-[11px] font-medium">Score</th>
                 <th className="pb-3 pr-4 text-[11px] font-medium">Progress</th>
                 <th className="pb-3 text-[11px] font-medium">Started</th>
                 <th className="pb-3 pl-4 text-right text-[11px] font-medium">
@@ -109,14 +138,17 @@ export default async function Home() {
               {recentScans.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="py-12 text-center text-muted-foreground"
                   >
                     No scans yet. Start a scan above to see results here.
                   </td>
                 </tr>
               ) : (
-                recentScans.map((scan) => (
+                recentScans.map((scan) => {
+                  const scoreSummary = scoreSummaries[scan.id];
+
+                  return (
                   <tr key={scan.id} className="border-b last:border-0">
                     <td className="max-w-xs py-3 pr-4 truncate">
                       <Link
@@ -137,10 +169,19 @@ export default async function Home() {
                       )}
                     </td>
                     <td className="py-3 pr-4">
-                      <StatusBadge status={scan.status ?? "pending"} />
+                      <StatusBadge
+                        status={scan.status ?? "pending"}
+                        summary={scoreSummary}
+                      />
                     </td>
                     <td className="py-3 pr-4">
-                      {scan.scannedUrls}/{scan.totalUrls} pages
+                      <ScanScoreBadge
+                        status={scan.status ?? "pending"}
+                        summary={scoreSummary}
+                      />
+                    </td>
+                    <td className="py-3 pr-4">
+                      {formatScanCoverage(scan, scoreSummary)}
                     </td>
                     <td className="py-3 text-muted-foreground">
                       {formatDate(scan.createdAt)}
@@ -153,7 +194,7 @@ export default async function Home() {
                       />
                     </td>
                   </tr>
-                ))
+                )})
               )}
             </tbody>
           </table>

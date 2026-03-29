@@ -24,6 +24,12 @@ See the [docs](./docs/index.md) folder for detailed architecture and design docu
 make start-all
 ```
 
+To apply migrations without stopping running services:
+
+```bash
+make migrate-all
+```
+
 Copy [/.env.example](/Users/txsadhu/Documents/Campuspress/lime/.env.example) to `.env` before first run. For local Docker, the root `.env` controls the published UI/API ports and the native-development runtime values. The Docker services themselves use Compose service names internally, so the images stay generic.
 
 ### Access the application
@@ -61,6 +67,7 @@ make dev-ui            # NextJS with hot reload
 | `make start-shopkeeper` | Start Go backend (starts DB if needed) |
 | `make start-ui` | Start NextJS frontend |
 | `make start-all` | Start entire stack |
+| `make migrate-all` | Apply database migrations via Shopkeeper and exit |
 | `make stop-all` | Stop all services |
 | `make logs-db` | Tail database logs |
 | `make logs-shopkeeper` | Tail backend logs |

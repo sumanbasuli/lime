@@ -13,6 +13,7 @@ LIME_UI_PORT ?= 3000
 .PHONY: start-db start-shopkeeper start-ui start-all stop-all \
        logs-db logs-shopkeeper logs-ui \
        dev-ui dev-shopkeeper \
+       migrate-all \
        build build-ui build-shopkeeper build-release-bundle \
        build-docker build-docker-ui build-docker-shopkeeper \
        clean
@@ -25,15 +26,19 @@ start-db:
 	@docker compose exec db sh -c 'until pg_isready -U "$${POSTGRES_USER:-lime}" -d "$${POSTGRES_DB:-lime_db}"; do sleep 1; done'
 	@echo "PostgreSQL is ready."
 
+migrate-all: start-db
+	docker compose run --rm --build --no-deps shopkeeper ./shopkeeper --migrate
+	@echo "Database migrations completed."
+
 start-shopkeeper: start-db
 	docker compose up -d --build shopkeeper
 	@echo "Shopkeeper is starting on port $(LIME_API_PORT)..."
 
-start-ui:
+start-ui: start-db
 	docker compose up -d --build ui
 	@echo "UI is starting on port $(LIME_UI_PORT)..."
 
-start-all:
+start-all: start-db
 	docker compose up -d --build
 	@echo "All services starting..."
 	@echo "  DB:         bundled local PostgreSQL on localhost:5432"

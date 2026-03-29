@@ -24,6 +24,7 @@ Use:
 
 ```bash
 make start-db
+make migrate-all
 make start-shopkeeper
 make start-ui
 make start-all
@@ -46,6 +47,7 @@ The root [Makefile](/Users/txsadhu/Documents/Campuspress/lime/Makefile) exposes:
 
 - `make build` for production artifacts in `dist/`
 - `make build-docker` for local production image builds tagged from [VERSION](/Users/txsadhu/Documents/Campuspress/lime/VERSION)
+- `make migrate-all` to run `./shopkeeper --migrate` in a one-off Shopkeeper container against the local Docker database
 
 Local image names:
 - `lime-shopkeeper:v<version>`

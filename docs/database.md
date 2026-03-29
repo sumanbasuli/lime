@@ -30,6 +30,7 @@ All primary keys are UUIDs (`gen_random_uuid()`). Foreign keys use `ON DELETE CA
 | `scan_status` | `pending`, `profiling`, `scanning`, `processing`, `completed`, `failed` |
 | `url_status` | `pending`, `scanning`, `completed`, `failed` |
 | `severity` | `critical`, `serious`, `moderate`, `minor` |
+| `audit_outcome` | `passed`, `failed`, `not_applicable`, `incomplete` |
 
 ### Tables
 
@@ -73,6 +74,15 @@ All primary keys are UUIDs (`gen_random_uuid()`). Foreign keys use `ON DELETE CA
 | `screenshot_path` | TEXT | Nullable |
 | `created_at` | TIMESTAMP | Default: NOW() |
 
+#### `url_audits`
+| Column | Type | Notes |
+|--------|------|-------|
+| `id` | UUID | Primary key |
+| `url_id` | UUID | FK -> urls(id), CASCADE |
+| `rule_id` | TEXT | axe/Lighthouse-style audit rule ID |
+| `outcome` | `audit_outcome` | `passed`, `failed`, `not_applicable`, `incomplete` |
+| `created_at` | TIMESTAMP | Default: NOW() |
+
 ### Indexes
 
 * `idx_urls_scan_id` on `urls(scan_id)`
@@ -80,6 +90,8 @@ All primary keys are UUIDs (`gen_random_uuid()`). Foreign keys use `ON DELETE CA
 * `idx_issues_severity` on `issues(severity)`
 * `idx_issue_occurrences_issue_id` on `issue_occurrences(issue_id)`
 * `idx_issue_occurrences_url_id` on `issue_occurrences(url_id)`
+* `idx_url_audits_url_id` on `url_audits(url_id)`
+* `idx_url_audits_rule_id` on `url_audits(rule_id)`
 
 ## Schema Sync Strategy
 
