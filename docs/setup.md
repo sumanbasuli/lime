@@ -14,19 +14,21 @@ All environment configuration is managed through `.env` files:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `POSTGRES_USER` | `lime` | PostgreSQL username |
-| `POSTGRES_PASSWORD` | `lime_dev_password` | PostgreSQL password |
-| `POSTGRES_DB` | `lime_db` | PostgreSQL database name |
-| `DATABASE_URL` | `postgresql://lime:lime_dev_password@db:5432/lime_db?sslmode=disable` | Full connection string (Docker) |
-| `SHOPKEEPER_PORT` | `8080` | Port for the Go backend API |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:8080` | Shopkeeper API URL for the frontend |
+| `POSTGRES_USER` | `lime` | Bundled PostgreSQL bootstrap username |
+| `POSTGRES_PASSWORD` | `lime_dev_password` | Bundled PostgreSQL bootstrap password |
+| `POSTGRES_DB` | `lime_db` | Bundled PostgreSQL bootstrap database name |
+| `DATABASE_URL` | `postgresql://lime:lime_dev_password@localhost:5432/lime_db?sslmode=disable` | Application-level database connection string used by Shopkeeper and the UI in native local development |
+| `SHOPKEEPER_URL` | `http://localhost:8080` | Runtime proxy target used by the Next server in native local development |
+| `LIME_API_PORT` | `8080` | Public host port for the Go backend API |
+| `LIME_UI_PORT` | `3000` | Public host port for the NextJS UI |
 | `ACT_RULES_PATH` | auto-resolved | Optional explicit path to `data/act-rules.json` for Shopkeeper and Next |
 
 ### File Locations
 
-- **Root `.env`**: Used by `docker-compose.yml` for container configuration.
+- **Root `.env`**: Native local-development runtime values plus published UI/API ports used by `docker-compose.yml` and Make targets.
 - **Root `.env.example`**: Template — copy to `.env` for new setups.
-- **`lime/.env.local`**: Used by NextJS in local development. Uses `localhost` instead of `db` for the database host.
+- **`lime/.env.local`**: Optional NextJS-native override file if you run `npm run dev` manually inside `lime/` instead of using `make dev-ui`.
+- **`deploy/release/.env.example`**: Template used by the release bundle for running published images against an external PostgreSQL database.
 
 ## Running the Stack
 
@@ -38,6 +40,16 @@ make stop-all       # Stop all services
 make clean          # Stop and remove all data volumes
 ```
 
+### Production Build Outputs
+
+```bash
+make build          # build dist/shopkeeper, dist/ui, and the release bundle
+make build-docker   # build versioned production Docker images locally
+```
+
+The repo-wide version source is `VERSION`, using plain semver such as `0.1.0`.
+These builds create generic artifacts and generic Docker images. They do not bake in a deployment-specific API URL. Runtime deployments must provide `DATABASE_URL` and `SHOPKEEPER_URL`.
+
 ### Local Development (Hybrid)
 
 For faster iteration, run only the database in Docker and the apps natively:
@@ -47,6 +59,8 @@ make start-db          # Start PostgreSQL in Docker
 make dev-shopkeeper    # Go backend with Air hot reload (in a new terminal)
 make dev-ui            # NextJS with hot reload (in a new terminal)
 ```
+
+`make dev-ui` automatically points the Next proxy at `http://localhost:<LIME_API_PORT>`, so native UI development stays aligned with the local Go backend even though the Dockerized UI container talks to `http://shopkeeper:8080` internally.
 
 Note: scans now recover automatically when Shopkeeper starts again, but `make dev-shopkeeper` still restarts the Go process frequently during code edits. For stable long-running scans, prefer `make start-shopkeeper` or `make start-all`.
 
@@ -70,15 +84,67 @@ make logs-shopkeeper
 make logs-ui
 ```
 
+## Release Workflow
+
+- GitHub Release publishing is the trigger for Docker package publishing.
+- The release tag must match `VERSION` after `v` normalization, for example:
+  - `VERSION`: `0.1.0`
+  - Git tag / GitHub Release: `v0.1.0`
+- A published release pushes:
+  - `ghcr.io/sumanbasuli/lime-shopkeeper:v0.1.0`
+  - `ghcr.io/sumanbasuli/lime-ui:v0.1.0`
+- Stable releases also update `latest`.
+- The same workflow uploads a bundle asset like `lime-v0.1.0-release.tar.gz`.
+
+## Release Bundle
+
+The release bundle is built from:
+- `docker-compose.release.yml`
+- `deploy/release/.env.example`
+- `deploy/release/README.md`
+- `data/*.json`
+
+Users can run the published stack from the extracted bundle with:
+
+```bash
+docker compose --env-file .env -f docker-compose.release.yml up -d
+```
+
+The release `.env` file is the source of truth for:
+- published image tag
+- `DATABASE_URL`
+- `SHOPKEEPER_URL`
+- public UI/API ports
+- optional direct Shopkeeper exposure on `LIME_API_PORT`
+
+The browser still talks to the UI origin only. The Next server proxies `/api/...` requests to `SHOPKEEPER_URL` at runtime, so release images stay generic and reverse-proxy friendly.
+
+## Database Configuration
+
+LIME uses `DATABASE_URL` as the application-level source of truth for database access in native development and in release deployments.
+
+- In native local development, the root `.env.example` points `DATABASE_URL` at `localhost:5432`, which matches `make start-db`.
+- In the local Docker stack, `docker-compose.yml` overrides `DATABASE_URL` and `SHOPKEEPER_URL` internally to use Docker service names (`db` and `shopkeeper`) so the containers can talk to each other reliably.
+- In the release bundle, `DATABASE_URL` must point at an external PostgreSQL instance.
+- `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` are only used to initialize the bundled PostgreSQL container in local development.
+- The NextJS app reads PostgreSQL directly for server-rendered pages, so both the UI runtime and Shopkeeper must be able to reach the same database described by `DATABASE_URL`.
+
+### External PostgreSQL for the Release Bundle
+
+Set `DATABASE_URL` in the release `.env` file to the external connection string, then start the published stack:
+
+```bash
+docker compose --env-file .env -f docker-compose.release.yml up -d
+```
+
 ## Service URLs
 
 | Service | URL |
 |---------|-----|
-| NextJS UI | http://localhost:3000 |
-| Shopkeeper API | http://localhost:8080 |
-| Health Check | http://localhost:8080/api/health |
-| Dashboard Stats | http://localhost:8080/api/stats |
-| PostgreSQL | localhost:5432 |
+| NextJS UI | `http://localhost:<LIME_UI_PORT>` |
+| Shopkeeper API | `http://localhost:<LIME_API_PORT>` |
+| Health Check | `http://localhost:<LIME_API_PORT>/api/health` |
+| Dashboard Stats | `http://localhost:<LIME_API_PORT>/api/stats` |
 
 ## API Endpoints
 
@@ -158,12 +224,15 @@ docker compose logs -f shopkeeper
 ```
 lime/                    (project root)
 ├── docs/                Documentation
+├── deploy/              Release bundle templates
 ├── data/                Shared ACT catalog used by Shopkeeper and Next
 ├── lime/                NextJS frontend (App Router, shadcn/ui, Drizzle ORM)
 ├── shopkeeper/          Go backend (Chi, pgx, golang-migrate)
-├── scripts/             Maintenance scripts such as ACT catalog refresh
-├── docker-compose.yml   Multi-container orchestration
+├── scripts/             Maintenance scripts such as ACT catalog refresh and release bundle generation
+├── docker-compose.yml   Local development Docker stack
+├── docker-compose.release.yml  Published-image Docker stack
 ├── Makefile             Developer commands
+├── VERSION              Repo-wide release version
 └── .env                 Environment variables
 ```
 

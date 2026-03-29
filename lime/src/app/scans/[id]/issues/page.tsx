@@ -25,8 +25,6 @@ import { ChevronRightIcon, ExternalLinkIcon } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
-
 interface IssuesPageProps {
   params: Promise<{ id: string }>;
 }
@@ -345,7 +343,7 @@ function elementScreenshotUrl(path: string): string {
   // we serve via /api/screenshots/{scanId}/{filename}
   const parts = path.replace(/^\/app\/screenshots\//, "").split("/");
   if (parts.length >= 2) {
-    return `${API_BASE}/api/screenshots/${parts[0]}/${parts[1]}`;
+    return `/api/screenshots/${parts[0]}/${parts[1]}`;
   }
   return "";
 }

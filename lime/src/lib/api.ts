@@ -2,7 +2,7 @@ import type { ViewportPreset } from "@/lib/viewport-presets";
 
 // API client for the Shopkeeper backend
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+const API_BASE = "";
 
 // Types matching Go backend response models
 

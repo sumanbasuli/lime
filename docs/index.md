@@ -16,7 +16,7 @@ The project is divided into several core components:
 
 * **[Local Development Setup](setup.md)**: How to set up and run the project locally, including environment variables and available commands.
 * **[Database Architecture](database.md)**: Details regarding the chosen database schema, technologies (PostgreSQL, Drizzle), and the Go backend DB strategy.
-* **[Docker & Deployment](deployment/docker.md)**: Instructions and architecture for containerizing the application for easy local execution and deployment.
+* **[Docker & Deployment](deployment/docker.md)**: Local Docker workflow, production build targets, GHCR release publishing, and the release bundle format.
 * **[Development Roadmap & Build Steps](roadmap.md)**: Step-by-step track of what needs to be built and current progress.
 
 Operational notes for scan lifecycle behavior are documented primarily in:
@@ -29,6 +29,15 @@ ACT enrichment notes are documented primarily in:
 - `docs/architecture/sweetner.md` for how Sweetner's canonical axe rule IDs feed ACT lookups later
 - `docs/architecture/ui.md` for where ACT guidance appears in the interface
 - `docs/setup.md` for ACT catalog refresh and runtime path resolution
+
+Release and production build notes are documented primarily in:
+- `docs/deployment/docker.md` for GHCR publishing, release bundles, and production Docker usage
+- `docs/setup.md` for `make build`, `make build-docker`, native local env expectations, and release runtime env requirements
+- `README.md` for the quick-start release workflow
+
+Runtime proxy notes are documented primarily in:
+- `docs/architecture/ui.md` for the same-origin `/api/...` proxy behavior and screenshot delivery model
+- `docs/deployment/docker.md` for `SHOPKEEPER_URL`, external-DB release usage, and reverse-proxy deployment behavior
 
 ## Guidelines for Contributing
 

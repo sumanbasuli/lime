@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.next
+node_modules
+coverage
+dist
+out
+*.log
+*.tsbuildinfo
+next-env.d.ts

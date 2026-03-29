@@ -1,0 +1,34 @@
+services:
+  shopkeeper:
+    image: ghcr.io/sumanbasuli/lime-shopkeeper:${LIME_IMAGE_TAG:?set LIME_IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      ACT_RULES_PATH: /shared-data/act-rules.json
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      SHOPKEEPER_PORT: 8080
+    ports:
+      - "${LIME_API_PORT:-8080}:8080"
+    shm_size: "2gb"
+    volumes:
+      - ./data:/shared-data:ro
+      - screenshots:/app/screenshots
+
+  ui:
+    image: ghcr.io/sumanbasuli/lime-ui:${LIME_IMAGE_TAG:?set LIME_IMAGE_TAG}
+    restart: unless-stopped
+    depends_on:
+      - shopkeeper
+    environment:
+      ACT_RULES_PATH: /shared-data/act-rules.json
+      AXE_RULES_PATH: /shared-data/axe-rules.json
+      AXE_ACT_MAPPING_PATH: /shared-data/axe-act-mapping.json
+      AXE_GUIDANCE_PATH: /shared-data/axe-guidance.json
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      SHOPKEEPER_URL: ${SHOPKEEPER_URL:?set SHOPKEEPER_URL}
+    ports:
+      - "${LIME_UI_PORT:-3000}:3000"
+    volumes:
+      - ./data:/shared-data:ro
+
+volumes:
+  screenshots:

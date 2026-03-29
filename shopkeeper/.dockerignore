@@ -1,0 +1,11 @@
+.git
+.gitignore
+.env
+.env.*
+.cache
+bin
+tmp
+dist
+screenshots
+*.log
+*.test
