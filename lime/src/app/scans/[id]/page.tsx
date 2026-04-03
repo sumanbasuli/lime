@@ -84,8 +84,10 @@ const scoreCardStyles: Record<
 };
 
 function getScoreSummaryCopy(summary: ScanScoreSummary, status: string): string {
+  const terminalVerb = status === "paused" ? "stopped" : "finished";
+
   if (summary.isPartialScan && summary.hasScore && summary.score !== null) {
-    return `This scan finished with ${summary.completedUrlCount} of ${summary.totalUrlCount} pages completed and ${summary.failedUrlCount} failed. The current accessibility score is based on completed pages only and may change after a full rerun.`;
+    return `This scan ${terminalVerb} with ${summary.completedUrlCount} of ${summary.totalUrlCount} pages completed and ${summary.failedUrlCount} failed. The current accessibility score is based on completed pages only and may change after a full rerun.`;
   }
 
   if (summary.hasScore && summary.score !== null) {
@@ -94,7 +96,11 @@ function getScoreSummaryCopy(summary: ScanScoreSummary, status: string): string 
   }
 
   if (summary.isPartialScan) {
-    return `This scan finished with ${summary.completedUrlCount} of ${summary.totalUrlCount} pages completed and ${summary.failedUrlCount} failed. The accessibility score is withheld for partial scans.`;
+    return `This scan ${terminalVerb} with ${summary.completedUrlCount} of ${summary.totalUrlCount} pages completed and ${summary.failedUrlCount} failed. The accessibility score is withheld for partial scans.`;
+  }
+
+  if (status === "paused") {
+    return "This scan was paused before a final accessibility score could be calculated.";
   }
 
   if (status === "failed") {
@@ -155,6 +161,10 @@ function getAuditResultsCopy(summary: ScanScoreSummary, status: string): string 
     return `Checks below are based on ${summary.completedUrlCount} of ${summary.totalUrlCount} completed pages. ${summary.failedUrlCount} page${summary.failedUrlCount === 1 ? "" : "s"} failed to scan, so the score reflects completed pages only.`;
   }
 
+  if (status === "paused") {
+    return "This scan was paused before all pages finished. Any results below reflect only the pages that completed before the pause took effect.";
+  }
+
   if (status !== "completed") {
     return "Passed, failed, and review-required automated checks will appear here as pages finish processing.";
   }
@@ -211,7 +221,9 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
       : 0;
 
   const isActive =
-    scan.status !== "completed" && scan.status !== "failed";
+    scan.status !== "completed" &&
+    scan.status !== "paused" &&
+    scan.status !== "failed";
   const excludedIssueCount = scanIssues.filter(
     (issue) => issue.isFalsePositive
   ).length;
@@ -271,6 +283,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
           <ScanActions
             scanId={scan.id}
             status={scan.status ?? "pending"}
+            pauseRequested={scan.pauseRequested ?? false}
             redirectOnDelete="/scans"
           />
         </div>
@@ -284,8 +297,9 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
                 Scan progress
               </h2>
               <p className="mt-2 text-sm leading-5 text-[#0A0A0A]/80">
-                Progress appears here while pages are still being profiled,
-                scanned, or processed.
+                {scan.pauseRequested
+                  ? "Pause requested. The scanner is finishing any in-flight work before it settles the scan."
+                  : "Progress appears here while pages are still being profiled, scanned, or processed."}
               </p>
             </div>
             <div className="text-right">
@@ -456,7 +470,9 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
           <div className="mt-4 rounded-2xl border border-dashed border-black/10 p-6 text-sm text-[#0A0A0A]/80">
             {scan.status === "completed"
               ? "This scan was created before audit outcomes were stored. Run a fresh scan to see passed checks and an out-of-100 Lighthouse-style score."
-              : "Audit results will appear here once completed pages have been processed."}
+              : scan.status === "paused"
+                ? "This scan was paused before any completed pages were processed into audit results."
+                : "Audit results will appear here once completed pages have been processed."}
           </div>
         ) : (
           <div className="mt-4">

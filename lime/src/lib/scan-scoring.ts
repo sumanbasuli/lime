@@ -66,6 +66,7 @@ export type DisplayScanStatus =
   | "profiling"
   | "scanning"
   | "processing"
+  | "paused"
   | "completed"
   | "failed"
   | "partial";
@@ -170,11 +171,10 @@ export function getAccessibilityScoreBand(score: number): AccessibilityScoreBand
 }
 
 function aggregateAuditStatus(
-  pageCounts: Record<StoredAuditOutcome, number>,
-  isFalsePositive: boolean
+  pageCounts: Record<StoredAuditOutcome, number>
 ): AggregatedAuditStatus {
   if (pageCounts.failed > 0) {
-    return isFalsePositive ? "excluded" : "failed";
+    return "failed";
   }
   if (pageCounts.incomplete > 0) {
     return "needs_review";
@@ -194,6 +194,9 @@ function summarizeScanScore(
     totalUrlCount: number;
   }
 ): ScanScoreSummary {
+  const isSettled = scanStatus === "completed" || scanStatus === "paused";
+  const hasAttemptedCoverage =
+    coverage.completedUrlCount > 0 || coverage.failedUrlCount > 0;
   const passedCount = audits.filter((audit) => audit.status === "passed").length;
   const failedCount = audits.filter((audit) => audit.status === "failed").length;
   const notApplicableCount = audits.filter(
@@ -212,16 +215,17 @@ function summarizeScanScore(
   const weightedTotal = weightedPassed + weightedFailed;
   const hasAuditData = audits.length > 0;
   const hasFullCoverage =
-    scanStatus === "completed" &&
+    isSettled &&
     coverage.totalUrlCount > 0 &&
     coverage.failedUrlCount === 0 &&
     coverage.completedUrlCount === coverage.totalUrlCount;
   const isPartialScan =
-    scanStatus === "completed" &&
+    isSettled &&
     coverage.totalUrlCount > 0 &&
+    hasAttemptedCoverage &&
     !hasFullCoverage;
   const hasScore =
-    scanStatus === "completed" &&
+    isSettled &&
     coverage.completedUrlCount > 0 &&
     weightedTotal > 0;
 
@@ -267,6 +271,7 @@ export function buildScanAuditReport(options: {
 
   const falsePositiveRuleIds = new Set(options.falsePositiveRuleIds ?? []);
   const audits = Array.from(grouped.entries())
+    .filter(([ruleId]) => !falsePositiveRuleIds.has(ruleId))
     .map(([ruleId, pageCounts]) => {
       const metadata = options.definitions?.[ruleId];
       const weight = getLighthouseAccessibilityWeight(ruleId);
@@ -278,7 +283,7 @@ export function buildScanAuditReport(options: {
         helpUrl: metadata?.helpUrl || null,
         weight,
         scored: weight > 0,
-        status: aggregateAuditStatus(pageCounts, falsePositiveRuleIds.has(ruleId)),
+        status: aggregateAuditStatus(pageCounts),
         pageCounts,
       } satisfies ScanAuditResult;
     })

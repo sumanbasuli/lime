@@ -1,6 +1,8 @@
 package profiler
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -55,7 +57,7 @@ func TestDiscoverRetriesTransientNestedSitemapFailures(t *testing.T) {
 	defer server.Close()
 
 	withTestHTTPClient(t, server.Client(), func() {
-		urls, err := Discover(server.URL + "/index.xml")
+		urls, err := Discover(context.Background(), server.URL+"/index.xml")
 		if err != nil {
 			t.Fatalf("Discover returned error: %v", err)
 		}
@@ -94,7 +96,7 @@ func TestDiscoverFailsWhenNestedSitemapRemainsUnavailable(t *testing.T) {
 	defer server.Close()
 
 	withTestHTTPClient(t, server.Client(), func() {
-		_, err := Discover(server.URL + "/index.xml")
+		_, err := Discover(context.Background(), server.URL+"/index.xml")
 		if err == nil {
 			t.Fatal("Discover succeeded unexpectedly")
 		}
@@ -102,6 +104,65 @@ func TestDiscoverFailsWhenNestedSitemapRemainsUnavailable(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
+}
+
+func TestDiscoverFallsBackWhenScannerProfileIsForbidden(t *testing.T) {
+	var mu sync.Mutex
+	requests := map[string]int{}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userAgent := r.Header.Get("User-Agent")
+
+		mu.Lock()
+		requests[userAgent]++
+		mu.Unlock()
+
+		switch userAgent {
+		case sitemapFetchProfiles[0].userAgent:
+			http.Error(w, "blocked by WAF", http.StatusForbidden)
+		case sitemapFetchProfiles[1].userAgent:
+			w.Header().Set("Content-Type", "application/xml")
+			fmt.Fprint(w, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/fallback</loc></url></urlset>`)
+		default:
+			t.Fatalf("unexpected user agent: %q", userAgent)
+		}
+	}))
+	defer server.Close()
+
+	withTestHTTPClient(t, server.Client(), func() {
+		urls, err := Discover(context.Background(), server.URL)
+		if err != nil {
+			t.Fatalf("Discover returned error: %v", err)
+		}
+
+		expected := []string{"https://example.com/fallback"}
+		if !slices.Equal(urls, expected) {
+			t.Fatalf("unexpected URLs: got %v want %v", urls, expected)
+		}
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if requests[sitemapFetchProfiles[0].userAgent] != 1 {
+		t.Fatalf("expected one request with scanner profile, got %d", requests[sitemapFetchProfiles[0].userAgent])
+	}
+	if requests[sitemapFetchProfiles[1].userAgent] != 1 {
+		t.Fatalf("expected one request with browser fallback profile, got %d", requests[sitemapFetchProfiles[1].userAgent])
+	}
+}
+
+func TestDiscoverHonorsCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := Discover(ctx, "https://example.com/sitemap.xml")
+	if err == nil {
+		t.Fatal("Discover succeeded unexpectedly")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
+	}
 }
 
 func withTestHTTPClient(t *testing.T, client *http.Client, fn func()) {

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { scans, issues } from "@/db/schema";
 import { desc, count, sql } from "drizzle-orm";
+import { ActiveScansRefresh } from "@/components/active-scans-refresh";
 import { NewScanForm } from "@/components/new-scan-form";
 import { ScanActions } from "@/components/scan-actions";
 import {
@@ -32,7 +33,10 @@ function formatScanCoverage(
     return `${summary.completedUrlCount} completed, ${summary.failedUrlCount} failed`;
   }
 
-  if (summary.totalUrlCount > 0 && (scan.status === "completed" || scan.status === "failed")) {
+  if (
+    summary.totalUrlCount > 0 &&
+    (scan.status === "completed" || scan.status === "paused" || scan.status === "failed")
+  ) {
     return `${summary.completedUrlCount}/${summary.totalUrlCount} completed`;
   }
 
@@ -51,6 +55,13 @@ export default async function Home() {
       status: scan.status ?? "pending",
     }))
   );
+  const hasActiveScans = recentScans.some(
+    (scan) =>
+      scan.pauseRequested ||
+      (scan.status !== "completed" &&
+        scan.status !== "paused" &&
+        scan.status !== "failed")
+  );
 
   const [scanCount] = await db.select({ value: count() }).from(scans);
   const [issueCount] = await db.select({ value: count() }).from(issues);
@@ -66,6 +77,8 @@ export default async function Home() {
 
   return (
     <div className="space-y-4">
+      <ActiveScansRefresh enabled={hasActiveScans} />
+
       <h1 className="font-heading text-3xl font-bold leading-[0.95] sm:text-4xl">
         Dashboard
       </h1>
@@ -190,6 +203,7 @@ export default async function Home() {
                       <ScanActions
                         scanId={scan.id}
                         status={scan.status ?? "pending"}
+                        pauseRequested={scan.pauseRequested ?? false}
                         className="items-end"
                       />
                     </td>

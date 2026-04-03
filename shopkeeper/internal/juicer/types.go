@@ -11,6 +11,7 @@ type RawResult struct {
 	Version        string      `json:"version,omitempty"`
 	ScreenshotPath string      `json:"screenshot_path"`
 	Error          string      `json:"error,omitempty"`
+	Canceled       bool        `json:"-"`
 }
 
 // Violation represents a single axe-core accessibility violation.

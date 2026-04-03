@@ -14,8 +14,10 @@ export interface Scan {
     | "profiling"
     | "scanning"
     | "processing"
+    | "paused"
     | "completed"
     | "failed";
+  pause_requested: boolean;
   scan_type: "sitemap" | "single";
   tag: string | null;
   viewport_preset: ViewportPreset;
@@ -91,7 +93,7 @@ export interface CreateScanOptions {
 }
 
 export function isTerminalScanStatus(status: Scan["status"]): boolean {
-  return status === "completed" || status === "failed";
+  return status === "completed" || status === "paused" || status === "failed";
 }
 
 // API functions
@@ -134,6 +136,28 @@ export async function rescanScan(id: string): Promise<Scan> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Failed to rescan (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function pauseScan(id: string): Promise<Scan> {
+  const res = await fetch(`${API_BASE}/api/scans/${id}/pause`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to pause scan (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function resumeScan(id: string): Promise<Scan> {
+  const res = await fetch(`${API_BASE}/api/scans/${id}/resume`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to resume scan (${res.status})`);
   }
   return res.json();
 }

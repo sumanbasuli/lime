@@ -21,7 +21,7 @@ func New(pool *pgxpool.Pool) *Repository {
 }
 
 // scanColumns is the SELECT column list for scans (used in all scan queries).
-const scanColumns = `id, sitemap_url, status, scan_type, tag, viewport_preset, viewport_width, viewport_height, total_urls, scanned_urls, created_at, updated_at`
+const scanColumns = `id, sitemap_url, status, pause_requested, scan_type, tag, viewport_preset, viewport_width, viewport_height, total_urls, scanned_urls, created_at, updated_at`
 
 // issueColumns is the SELECT column list for issues (used in single-issue queries).
 const issueColumns = `id, scan_id, violation_type, description, help_url, severity, is_false_positive, created_at`
@@ -30,7 +30,7 @@ const issueColumns = `id, scan_id, violation_type, description, help_url, severi
 func scanRow(row interface{ Scan(dest ...any) error }) (*models.Scan, error) {
 	scan := &models.Scan{}
 	err := row.Scan(
-		&scan.ID, &scan.SitemapURL, &scan.Status, &scan.ScanType, &scan.Tag,
+		&scan.ID, &scan.SitemapURL, &scan.Status, &scan.PauseRequested, &scan.ScanType, &scan.Tag,
 		&scan.ViewportPreset, &scan.ViewportWidth, &scan.ViewportHeight,
 		&scan.TotalURLs, &scan.ScannedURLs, &scan.CreatedAt, &scan.UpdatedAt,
 	)
@@ -61,7 +61,7 @@ func (r *Repository) CreateScan(ctx context.Context, sitemapURL, scanType string
 		 VALUES ($1, 'pending', $2, $3, $4, $5, $6)
 		 RETURNING `+scanColumns,
 		sitemapURL, scanType, tag, scanViewport.Preset, scanViewport.Width, scanViewport.Height,
-	).Scan(&scan.ID, &scan.SitemapURL, &scan.Status, &scan.ScanType, &scan.Tag,
+	).Scan(&scan.ID, &scan.SitemapURL, &scan.Status, &scan.PauseRequested, &scan.ScanType, &scan.Tag,
 		&scan.ViewportPreset, &scan.ViewportWidth, &scan.ViewportHeight,
 		&scan.TotalURLs, &scan.ScannedURLs, &scan.CreatedAt, &scan.UpdatedAt)
 	if err != nil {
@@ -111,7 +111,7 @@ func (r *Repository) ListRecoverableScans(ctx context.Context) ([]models.Scan, e
 	var scans []models.Scan
 	for rows.Next() {
 		var s models.Scan
-		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.ScanType, &s.Tag,
+		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.PauseRequested, &s.ScanType, &s.Tag,
 			&s.ViewportPreset, &s.ViewportWidth, &s.ViewportHeight,
 			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan recoverable scan row: %w", err)
@@ -143,7 +143,7 @@ func (r *Repository) ResetScan(ctx context.Context, id string) error {
 
 	if _, err := tx.Exec(ctx,
 		`UPDATE scans
-		 SET status = 'pending', total_urls = 0, scanned_urls = 0, updated_at = NOW()
+		 SET status = 'pending', pause_requested = false, total_urls = 0, scanned_urls = 0, updated_at = NOW()
 		 WHERE id = $1`,
 		id,
 	); err != nil {
@@ -170,7 +170,7 @@ func (r *Repository) ListScans(ctx context.Context) ([]models.Scan, error) {
 	var scans []models.Scan
 	for rows.Next() {
 		var s models.Scan
-		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.ScanType, &s.Tag,
+		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.PauseRequested, &s.ScanType, &s.Tag,
 			&s.ViewportPreset, &s.ViewportWidth, &s.ViewportHeight,
 			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
@@ -197,7 +197,7 @@ func (r *Repository) ListScansByTag(ctx context.Context, tag string) ([]models.S
 	var scans []models.Scan
 	for rows.Next() {
 		var s models.Scan
-		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.ScanType, &s.Tag,
+		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.PauseRequested, &s.ScanType, &s.Tag,
 			&s.ViewportPreset, &s.ViewportWidth, &s.ViewportHeight,
 			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
@@ -213,11 +213,73 @@ func (r *Repository) ListScansByTag(ctx context.Context, tag string) ([]models.S
 // UpdateScanStatus updates the status of a scan.
 func (r *Repository) UpdateScanStatus(ctx context.Context, id string, status string) error {
 	_, err := r.pool.Exec(ctx,
-		`UPDATE scans SET status = $1, updated_at = NOW() WHERE id = $2`,
+		`UPDATE scans
+		 SET status = $1::scan_status,
+		     pause_requested = CASE
+		         WHEN $1::text IN ('completed', 'failed', 'paused') THEN false
+		         ELSE pause_requested
+		     END,
+		     updated_at = NOW()
+		 WHERE id = $2`,
 		status, id,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to update scan status: %w", err)
+	}
+	return nil
+}
+
+// RequestPause marks an active scan so the running scanner can stop at the next safe point.
+func (r *Repository) RequestPause(ctx context.Context, id string) (*models.Scan, error) {
+	row := r.pool.QueryRow(ctx,
+		`UPDATE scans
+		 SET pause_requested = true, updated_at = NOW()
+		 WHERE id = $1
+		   AND status IN ('pending', 'profiling', 'scanning', 'processing')
+		   AND pause_requested = false
+		 RETURNING `+scanColumns,
+		id,
+	)
+	scan, err := scanRow(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to request scan pause: %w", err)
+	}
+	return scan, nil
+}
+
+// ResumeScan reactivates a paused scan so it can continue from persisted state.
+func (r *Repository) ResumeScan(ctx context.Context, id string) (*models.Scan, error) {
+	row := r.pool.QueryRow(ctx,
+		`UPDATE scans
+		 SET status = 'pending', pause_requested = false, updated_at = NOW()
+		 WHERE id = $1
+		   AND status = 'paused'
+		 RETURNING `+scanColumns,
+		id,
+	)
+	scan, err := scanRow(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to resume scan: %w", err)
+	}
+	return scan, nil
+}
+
+// FinalizePausedScan marks a scan as paused and clears any pending pause request.
+func (r *Repository) FinalizePausedScan(ctx context.Context, id string) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE scans
+		 SET status = 'paused', pause_requested = false, updated_at = NOW()
+		 WHERE id = $1`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to finalize paused scan: %w", err)
 	}
 	return nil
 }
@@ -299,7 +361,7 @@ func (r *Repository) GetInheritedFalsePositiveStates(ctx context.Context, scanID
 		 JOIN issues i ON i.scan_id = previous_scan.id
 		 WHERE current_scan.id = $1
 		   AND previous_scan.id <> current_scan.id
-		   AND previous_scan.status IN ('completed', 'failed')
+		   AND previous_scan.status IN ('completed', 'paused', 'failed')
 		   AND i.violation_type = ANY($2)
 		 ORDER BY i.violation_type, previous_scan.created_at DESC, previous_scan.id DESC`,
 		scanID, violationTypes,
@@ -321,6 +383,34 @@ func (r *Repository) GetInheritedFalsePositiveStates(ctx context.Context, scanID
 	}
 
 	return states, nil
+}
+
+// GetScanIssueMap returns existing issue IDs for a scan keyed by violation type.
+func (r *Repository) GetScanIssueMap(ctx context.Context, scanID string) (map[string]string, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT DISTINCT ON (violation_type) violation_type, id
+		 FROM issues
+		 WHERE scan_id = $1
+		 ORDER BY violation_type, created_at ASC, id ASC`,
+		scanID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get scan issue map: %w", err)
+	}
+	defer rows.Close()
+
+	issueMap := make(map[string]string)
+	for rows.Next() {
+		var violationType string
+		var issueID string
+		if err := rows.Scan(&violationType, &issueID); err != nil {
+			return nil, fmt.Errorf("failed to scan issue map row: %w", err)
+		}
+
+		issueMap[violationType] = issueID
+	}
+
+	return issueMap, nil
 }
 
 // CreateIssue inserts a new issue record and returns it.

@@ -14,6 +14,7 @@ export const scanStatusEnum = pgEnum("scan_status", [
   "profiling",
   "scanning",
   "processing",
+  "paused",
   "completed",
   "failed",
 ]);
@@ -45,6 +46,7 @@ export const scans = pgTable("scans", {
   id: uuid("id").primaryKey().defaultRandom(),
   sitemapUrl: text("sitemap_url").notNull(),
   status: scanStatusEnum("status").notNull().default("pending"),
+  pauseRequested: boolean("pause_requested").notNull().default(false),
   scanType: text("scan_type").notNull().default("sitemap"),
   tag: text("tag"),
   viewportPreset: text("viewport_preset").notNull().default("desktop"),
