@@ -9,6 +9,7 @@ type Scan struct {
 	ID             string    `json:"id"`
 	SitemapURL     string    `json:"sitemap_url"`
 	Status         string    `json:"status"`
+	PauseRequested bool      `json:"pause_requested"`
 	ScanType       string    `json:"scan_type"`
 	Tag            *string   `json:"tag"`
 	ViewportPreset string    `json:"viewport_preset"`

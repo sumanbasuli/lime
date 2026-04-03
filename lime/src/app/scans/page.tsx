@@ -2,6 +2,7 @@ import Link from "next/link";
 import { db } from "@/db";
 import { scans } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
+import { ActiveScansRefresh } from "@/components/active-scans-refresh";
 import { ScanActions } from "@/components/scan-actions";
 import {
   StatusBadge,
@@ -30,7 +31,10 @@ function formatScanCoverage(
     return `${summary.completedUrlCount} completed, ${summary.failedUrlCount} failed`;
   }
 
-  if (summary.totalUrlCount > 0 && (scan.status === "completed" || scan.status === "failed")) {
+  if (
+    summary.totalUrlCount > 0 &&
+    (scan.status === "completed" || scan.status === "paused" || scan.status === "failed")
+  ) {
     return `${summary.completedUrlCount}/${summary.totalUrlCount} completed`;
   }
 
@@ -63,6 +67,13 @@ export default async function ScansPage({
       status: scan.status ?? "pending",
     }))
   );
+  const hasActiveScans = allScans.some(
+    (scan) =>
+      scan.pauseRequested ||
+      (scan.status !== "completed" &&
+        scan.status !== "paused" &&
+        scan.status !== "failed")
+  );
 
   const uniqueTags = [
     ...new Set(
@@ -74,6 +85,8 @@ export default async function ScansPage({
 
   return (
     <div className="space-y-4">
+      <ActiveScansRefresh enabled={hasActiveScans} />
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="font-heading text-3xl font-bold leading-[0.95] sm:text-4xl">
           {tagFilter ? `Scans tagged "${tagFilter}"` : "All scans"}
@@ -210,6 +223,7 @@ export default async function ScansPage({
                       <ScanActions
                         scanId={scan.id}
                         status={scan.status ?? "pending"}
+                        pauseRequested={scan.pauseRequested ?? false}
                         className="items-end"
                       />
                     </td>

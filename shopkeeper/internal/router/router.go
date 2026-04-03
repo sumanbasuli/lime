@@ -3,17 +3,21 @@ package router
 import (
 	"net/http"
 
-	"github.com/sumanbasuli/lime/shopkeeper/internal/handler"
-	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/cors"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/handler"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
 )
 
 // Setup creates and configures the Chi router with all routes.
-func Setup(repo *repository.Repository, scanner handler.ScanRunner) http.Handler {
+func Setup(
+	repo *repository.Repository,
+	scanner handler.ScanRunner,
+	reporter handler.IssueReportGenerator,
+) http.Handler {
 	r := chi.NewRouter()
-	h := handler.New(repo, scanner)
+	h := handler.New(repo, scanner, reporter)
 
 	// Middleware
 	r.Use(middleware.Logger)
@@ -41,10 +45,13 @@ func Setup(repo *repository.Repository, scanner handler.ScanRunner) http.Handler
 		r.Route("/scans", func(r chi.Router) {
 			r.Post("/", h.CreateScan)
 			r.Get("/", h.ListScans)
+			r.Post("/{id}/pause", h.PauseScan)
+			r.Post("/{id}/resume", h.ResumeScan)
 			r.Post("/{id}/rescan", h.RescanScan)
 			r.Get("/{id}", h.GetScan)
 			r.Delete("/{id}", h.DeleteScan)
 			r.Get("/{id}/issues", h.GetScanIssues)
+			r.Get("/{id}/issues/report.pdf", h.DownloadIssueReport)
 			r.Post("/{id}/issues/{issueId}/false-positive", h.MarkIssueFalsePositive)
 			r.Delete("/{id}/issues/{issueId}/false-positive", h.UnmarkIssueFalsePositive)
 		})

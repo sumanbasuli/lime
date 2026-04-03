@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/juicer"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 )
 
 func TestSummarizePageResultsCountsSuccessesAndFailures(t *testing.T) {
@@ -32,5 +33,40 @@ func TestSummarizePageResultsTreatsAllErroredPagesAsFailures(t *testing.T) {
 	}
 	if failedPages != 2 {
 		t.Fatalf("expected 2 failed pages, got %d", failedPages)
+	}
+}
+
+func TestSummarizePersistedURLStatusesCountsCompletedAndFailedOnly(t *testing.T) {
+	completedPages, failedPages := summarizePersistedURLStatuses([]models.URL{
+		{ID: "1", URL: "https://example.com/a", Status: "completed"},
+		{ID: "2", URL: "https://example.com/b", Status: "failed"},
+		{ID: "3", URL: "https://example.com/c", Status: "pending"},
+		{ID: "4", URL: "https://example.com/d", Status: "scanning"},
+	})
+
+	if completedPages != 1 {
+		t.Fatalf("expected 1 completed page, got %d", completedPages)
+	}
+	if failedPages != 1 {
+		t.Fatalf("expected 1 failed page, got %d", failedPages)
+	}
+}
+
+func TestBuildPendingPagesIncludesPendingAndScanningURLs(t *testing.T) {
+	pages := buildPendingPages([]models.URL{
+		{ID: "1", URL: "https://example.com/a", Status: "completed"},
+		{ID: "2", URL: "https://example.com/b", Status: "pending"},
+		{ID: "3", URL: "https://example.com/c", Status: "failed"},
+		{ID: "4", URL: "https://example.com/d", Status: "scanning"},
+	})
+
+	if len(pages) != 2 {
+		t.Fatalf("expected 2 pending pages, got %d", len(pages))
+	}
+	if pages[0].URLID != "2" || pages[0].URL != "https://example.com/b" {
+		t.Fatalf("unexpected first pending page: %#v", pages[0])
+	}
+	if pages[1].URLID != "4" || pages[1].URL != "https://example.com/d" {
+		t.Fatalf("unexpected second pending page: %#v", pages[1])
 	}
 }

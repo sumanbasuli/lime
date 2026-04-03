@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
 import { IssueFalsePositiveButton } from "@/components/issue-false-positive-button";
+import { IssueReportDownloadButton } from "@/components/issue-report-download-button";
 import { IssueScreenshotLightbox } from "@/components/issue-screenshot-lightbox";
 import { CodeSnippet } from "@/components/code-snippet";
 import {
@@ -664,22 +665,28 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
         <span>Issues</span>
       </div>
 
-      <h1 className="font-heading text-3xl font-bold leading-[0.95] sm:text-4xl">
-        Issue details{" "}
-        <span className="font-sans text-sm font-medium text-muted-foreground">
-          ({totalIssueCardCount})
-        </span>
-      </h1>
-      <p className="text-sm leading-5 text-muted-foreground">
-        {activeIssueCount} failed {activeIssueCount === 1 ? "check" : "checks"}
-        {needsReviewIssues.length > 0 &&
-          `, ${needsReviewIssues.length} ${needsReviewIssues.length === 1 ? "check needs" : "checks need"} review`}
-        {excludedIssueCount > 0 &&
-          `, ${excludedIssueCount} excluded from the score`}
-        {scoreSummary.isPartialScan &&
-          `, based on ${scoreSummary.completedUrlCount} of ${scoreSummary.totalUrlCount} completed pages`}
-        . Passed and not applicable checks remain on the scan details page.
-      </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="space-y-2">
+          <h1 className="font-heading text-3xl font-bold leading-[0.95] sm:text-4xl">
+            Issue details{" "}
+            <span className="font-sans text-sm font-medium text-muted-foreground">
+              ({totalIssueCardCount})
+            </span>
+          </h1>
+          <p className="max-w-3xl text-sm leading-5 text-muted-foreground">
+            {activeIssueCount} failed {activeIssueCount === 1 ? "check" : "checks"}
+            {needsReviewIssues.length > 0 &&
+              `, ${needsReviewIssues.length} ${needsReviewIssues.length === 1 ? "check needs" : "checks need"} review`}
+            {excludedIssueCount > 0 &&
+              `, ${excludedIssueCount} excluded from the score`}
+            {scoreSummary.isPartialScan &&
+              `, based on ${scoreSummary.completedUrlCount} of ${scoreSummary.totalUrlCount} completed pages`}
+            . Passed and not applicable checks remain on the scan details page.
+          </p>
+        </div>
+
+        <IssueReportDownloadButton scanId={id} />
+      </div>
 
       {totalIssueCardCount === 0 ? (
         <section className="rounded-xl border bg-card p-12 text-center text-muted-foreground">

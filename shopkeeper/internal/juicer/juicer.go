@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/draw"
@@ -174,22 +175,23 @@ func ScanPages(ctx context.Context, allocCtx context.Context, pages []PageInput,
 	scannedCount := 0
 
 	var wg sync.WaitGroup
+scheduleLoop:
 	for _, page := range pages {
-		// Check for cancellation
 		select {
 		case <-ctx.Done():
-			return results, ctx.Err()
-		default:
+			break scheduleLoop
+		case sem <- struct{}{}:
 		}
 
 		wg.Add(1)
-		sem <- struct{}{} // Acquire semaphore
-
 		go func(p PageInput) {
 			defer wg.Done()
 			defer func() { <-sem }() // Release semaphore
 
 			result := scanSinglePage(ctx, allocCtx, p, scanID, screenshotDir, scanViewport)
+			if result.Canceled {
+				return
+			}
 
 			mu.Lock()
 			results = append(results, result)
@@ -202,13 +204,20 @@ func ScanPages(ctx context.Context, allocCtx context.Context, pages []PageInput,
 			}
 
 			// Politeness delay
-			time.Sleep(DelayBetweenRequests)
+			select {
+			case <-ctx.Done():
+			case <-time.After(DelayBetweenRequests):
+			}
 		}(page)
 	}
 
 	wg.Wait()
 
 	log.Printf("Juicer: scanned %d pages for scan %s", len(results), scanID)
+	if err := ctx.Err(); err != nil {
+		return results, err
+	}
+
 	return results, nil
 }
 
@@ -219,11 +228,19 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	}
 
 	// Create a new browser tab context with timeout
-	tabCtx, cancel := chromedp.NewContext(allocCtx)
-	defer cancel()
+	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
+	defer browserCancel()
 
-	tabCtx, cancel = context.WithTimeout(tabCtx, PageTimeout)
-	defer cancel()
+	go func() {
+		select {
+		case <-ctx.Done():
+			browserCancel()
+		case <-browserCtx.Done():
+		}
+	}()
+
+	tabCtx, timeoutCancel := context.WithTimeout(browserCtx, PageTimeout)
+	defer timeoutCancel()
 
 	var screenshot []byte
 
@@ -234,12 +251,22 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 		chromedp.WaitReady("body"),
 	)
 	if err != nil {
+		if shouldTreatAsCanceled(ctx, err) {
+			result.Canceled = true
+			return result
+		}
+
 		result.Error = fmt.Sprintf("failed to navigate to %s: %v", page.URL, err)
 		log.Printf("Juicer: %s", result.Error)
 		return result
 	}
 
 	if err := waitForPageSettle(tabCtx); err != nil {
+		if shouldTreatAsCanceled(ctx, err) {
+			result.Canceled = true
+			return result
+		}
+
 		log.Printf("Juicer: warning: page settle before axe timed out for %s: %v", page.URL, err)
 	}
 
@@ -248,6 +275,11 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 		chromedp.Evaluate(axeMinJS, nil),
 	)
 	if err != nil {
+		if shouldTreatAsCanceled(ctx, err) {
+			result.Canceled = true
+			return result
+		}
+
 		result.Error = fmt.Sprintf("failed to inject axe-core on %s: %v", page.URL, err)
 		log.Printf("Juicer: %s", result.Error)
 		return result
@@ -268,6 +300,11 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 		}),
 	)
 	if err != nil {
+		if shouldTreatAsCanceled(ctx, err) {
+			result.Canceled = true
+			return result
+		}
+
 		result.Error = fmt.Sprintf("failed to run axe-core on %s: %v", page.URL, err)
 		log.Printf("Juicer: %s", result.Error)
 		return result
@@ -294,6 +331,11 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	}
 
 	if err := waitForPageSettle(tabCtx); err != nil {
+		if shouldTreatAsCanceled(ctx, err) {
+			result.Canceled = true
+			return result
+		}
+
 		log.Printf("Juicer: warning: page settle before screenshots timed out for %s: %v", page.URL, err)
 	}
 
@@ -307,6 +349,11 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	// Take a full-page screenshot (last, since it alters viewport metrics)
 	screenshot, err = captureFullPage(tabCtx)
 	if err != nil {
+		if shouldTreatAsCanceled(ctx, err) {
+			result.Canceled = true
+			return result
+		}
+
 		log.Printf("Juicer: warning: failed to take screenshot of %s: %v", page.URL, err)
 	} else if len(screenshot) > 0 {
 		screenshotPath := filepath.Join(screenshotDir, page.URLID+".png")
@@ -326,6 +373,16 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 		result.Version,
 	)
 	return result
+}
+
+func shouldTreatAsCanceled(ctx context.Context, err error) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+
+	return errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		strings.Contains(err.Error(), "context canceled")
 }
 
 func captureViolationNodeScreenshots(ctx context.Context, violations []Violation, screenshotDir string, page PageInput, startIndex int) int {

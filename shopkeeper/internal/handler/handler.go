@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,12 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/actrules"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
-	"github.com/go-chi/chi/v5"
 )
 
 const screenshotBaseDir = "/app/screenshots"
@@ -23,17 +25,24 @@ const screenshotBaseDir = "/app/screenshots"
 // This avoids a circular dependency with the scanner package.
 type ScanRunner interface {
 	RunScan(scan models.Scan)
+	RequestPause(scanID string)
+}
+
+// IssueReportGenerator defines the interface for rendering issue reports to PDF.
+type IssueReportGenerator interface {
+	GenerateIssueReportPDF(ctx context.Context, scanID string) ([]byte, error)
 }
 
 // Handler holds dependencies for HTTP handlers.
 type Handler struct {
-	repo    *repository.Repository
-	scanner ScanRunner
+	repo     *repository.Repository
+	scanner  ScanRunner
+	reporter IssueReportGenerator
 }
 
-// New creates a new Handler with the given repository and scanner.
-func New(repo *repository.Repository, scanner ScanRunner) *Handler {
-	return &Handler{repo: repo, scanner: scanner}
+// New creates a new Handler with the given repository, scanner, and reporter.
+func New(repo *repository.Repository, scanner ScanRunner, reporter IssueReportGenerator) *Handler {
+	return &Handler{repo: repo, scanner: scanner, reporter: reporter}
 }
 
 // HealthCheck returns a simple health status.
@@ -252,7 +261,7 @@ func (h *Handler) RescanScan(w http.ResponseWriter, r *http.Request) {
 	}
 	if !isTerminalScanStatus(scan.Status) {
 		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "Only completed or failed scans can be rescanned",
+			"error": "Only completed, paused, or failed scans can be rescanned",
 		})
 		return
 	}
@@ -306,7 +315,7 @@ func (h *Handler) DeleteScan(w http.ResponseWriter, r *http.Request) {
 	}
 	if !isTerminalScanStatus(scan.Status) {
 		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "Only completed or failed scans can be deleted",
+			"error": "Only completed, paused, or failed scans can be deleted",
 		})
 		return
 	}
@@ -331,6 +340,180 @@ func (h *Handler) DeleteScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// PauseScan handles POST /api/scans/{id}/pause.
+// It requests a cooperative pause for an active scan.
+func (h *Handler) PauseScan(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Scan ID is required",
+		})
+		return
+	}
+
+	scan, err := h.repo.GetScan(r.Context(), id)
+	if err != nil {
+		log.Printf("Failed to get scan: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to get scan",
+		})
+		return
+	}
+	if scan == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "Scan not found",
+		})
+		return
+	}
+
+	if !isPausableScanStatus(scan.Status) {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "Only active scans can be paused",
+		})
+		return
+	}
+
+	if scan.PauseRequested {
+		writeJSON(w, http.StatusOK, scan)
+		return
+	}
+
+	updatedScan, err := h.repo.RequestPause(r.Context(), id)
+	if err != nil {
+		log.Printf("Failed to request pause for scan %s: %v", id, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to pause scan",
+		})
+		return
+	}
+	if updatedScan == nil {
+		currentScan, currentErr := h.repo.GetScan(r.Context(), id)
+		if currentErr != nil {
+			log.Printf("Failed to reload scan %s after pause request race: %v", id, currentErr)
+		}
+		if currentScan == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{
+				"error": "Scan not found",
+			})
+			return
+		}
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "Scan is no longer active",
+		})
+		return
+	}
+
+	if h.scanner != nil {
+		h.scanner.RequestPause(id)
+	}
+
+	writeJSON(w, http.StatusOK, updatedScan)
+}
+
+// ResumeScan handles POST /api/scans/{id}/resume.
+// It resumes a paused scan from its persisted URL and result state.
+func (h *Handler) ResumeScan(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Scan ID is required",
+		})
+		return
+	}
+
+	scan, err := h.repo.GetScan(r.Context(), id)
+	if err != nil {
+		log.Printf("Failed to get scan: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to get scan",
+		})
+		return
+	}
+	if scan == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "Scan not found",
+		})
+		return
+	}
+	if scan.Status != "paused" {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "Only paused scans can be resumed",
+		})
+		return
+	}
+
+	updatedScan, err := h.repo.ResumeScan(r.Context(), id)
+	if err != nil {
+		log.Printf("Failed to resume scan %s: %v", id, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to resume scan",
+		})
+		return
+	}
+	if updatedScan == nil {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "Scan is no longer paused",
+		})
+		return
+	}
+
+	if h.scanner != nil {
+		go h.scanner.RunScan(*updatedScan)
+	}
+
+	writeJSON(w, http.StatusOK, updatedScan)
+}
+
+// DownloadIssueReport handles GET /api/scans/{id}/issues/report.pdf.
+func (h *Handler) DownloadIssueReport(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Scan ID is required",
+		})
+		return
+	}
+	if h.reporter == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "Issue report generation is unavailable",
+		})
+		return
+	}
+
+	scan, err := h.repo.GetScan(r.Context(), id)
+	if err != nil {
+		log.Printf("Failed to get scan: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to get scan",
+		})
+		return
+	}
+	if scan == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "Scan not found",
+		})
+		return
+	}
+
+	pdf, err := h.reporter.GenerateIssueReportPDF(r.Context(), id)
+	if err != nil {
+		log.Printf("Failed to generate issue report PDF for scan %s: %v", id, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to generate issue report",
+		})
+		return
+	}
+
+	filename := buildIssueReportFilename(scan.SitemapURL, scan.CreatedAt)
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write(pdf); err != nil {
+		log.Printf("Failed to stream issue report PDF for scan %s: %v", id, err)
+	}
 }
 
 func (h *Handler) updateIssueFalsePositive(w http.ResponseWriter, r *http.Request, isFalsePositive bool) {
@@ -421,7 +604,11 @@ func (h *Handler) ServeScreenshot(w http.ResponseWriter, r *http.Request) {
 }
 
 func isTerminalScanStatus(status string) bool {
-	return status == "completed" || status == "failed"
+	return status == "completed" || status == "paused" || status == "failed"
+}
+
+func isPausableScanStatus(status string) bool {
+	return status == "pending" || status == "profiling" || status == "scanning" || status == "processing"
 }
 
 func screenshotDir(scanID string) string {
@@ -442,6 +629,32 @@ func detectFileContentType(path string) (string, error) {
 	}
 
 	return http.DetectContentType(buf[:n]), nil
+}
+
+func buildIssueReportFilename(rawURL string, createdAt time.Time) string {
+	host := "scan"
+	if parsedURL, err := url.Parse(rawURL); err == nil && parsedURL.Host != "" {
+		host = parsedURL.Host
+	}
+
+	host = strings.ToLower(host)
+	host = strings.ReplaceAll(host, ".", "-")
+
+	var sanitized strings.Builder
+	for _, r := range host {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
+			sanitized.WriteRune(r)
+		}
+	}
+	if sanitized.Len() == 0 {
+		sanitized.WriteString("scan")
+	}
+
+	return fmt.Sprintf(
+		"lime-issue-report-%s-%s.pdf",
+		sanitized.String(),
+		createdAt.UTC().Format("2006-01-02"),
+	)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

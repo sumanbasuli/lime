@@ -21,6 +21,7 @@ const statusConfig: Record<
   profiling: { label: "Profiling", variant: "outline" },
   scanning: { label: "Scanning", variant: "outline" },
   processing: { label: "Processing", variant: "outline" },
+  paused: { label: "Paused", variant: "secondary" },
   completed: { label: "Completed", variant: "default" },
   failed: { label: "Failed", variant: "destructive" },
   partial: {
@@ -168,7 +169,7 @@ export function ScanScoreBadge({
     );
   }
 
-  if (status !== "completed" && status !== "failed") {
+  if (status !== "completed" && status !== "paused" && status !== "failed") {
     return (
       <Badge
         variant="outline"

@@ -55,7 +55,7 @@ function getGaugeLabel(summary: ScanScoreSummary, status: string): {
     return { chipLabel: "Failed", scoreLabel: "—", tone: "neutral" };
   }
 
-  if (status !== "completed") {
+  if (status !== "completed" && status !== "paused") {
     return { chipLabel: "In progress", scoreLabel: "—", tone: "neutral" };
   }
 

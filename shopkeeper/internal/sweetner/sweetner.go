@@ -17,8 +17,12 @@ import (
 //   - We create ONE Issue record per unique violation type per scan.
 //   - Each occurrence (URL + DOM node) becomes an IssueOccurrence record.
 func Process(ctx context.Context, repo *repository.Repository, scanID string, results []juicer.RawResult) error {
-	// Map of violation ID → created issue DB ID
-	issueMap := make(map[string]string)
+	// Map of violation ID → issue DB ID. Seed with any issues already persisted for
+	// this scan so resumed batches append to the existing issue groups.
+	issueMap, err := repo.GetScanIssueMap(ctx, scanID)
+	if err != nil {
+		return err
+	}
 	inheritedFalsePositiveStates, err := repo.GetInheritedFalsePositiveStates(
 		ctx,
 		scanID,

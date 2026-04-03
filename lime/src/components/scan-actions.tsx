@@ -2,11 +2,19 @@
 
 import { startTransition, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2Icon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import {
+  Loader2Icon,
+  PauseIcon,
+  PlayIcon,
+  RefreshCwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   deleteScan,
   isTerminalScanStatus,
+  pauseScan,
+  resumeScan,
   rescanScan,
   type Scan,
 } from "@/lib/api";
@@ -15,6 +23,7 @@ import { cn } from "@/lib/utils";
 interface ScanActionsProps {
   scanId: string;
   status: Scan["status"];
+  pauseRequested?: boolean;
   redirectOnDelete?: string;
   size?: "sm" | "default";
   className?: string;
@@ -23,21 +32,56 @@ interface ScanActionsProps {
 export function ScanActions({
   scanId,
   status,
+  pauseRequested = false,
   redirectOnDelete,
   size = "sm",
   className,
 }: ScanActionsProps) {
   const router = useRouter();
-  const [pendingAction, setPendingAction] = useState<"rescan" | "delete" | null>(
-    null
-  );
+  const [pendingAction, setPendingAction] = useState<
+    "pause" | "resume" | "rescan" | "delete" | null
+  >(null);
+  const [pauseRequestedOverride, setPauseRequestedOverride] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (!isTerminalScanStatus(status)) {
-    return null;
-  }
-
   const isBusy = pendingAction !== null;
+  const isTerminal = isTerminalScanStatus(status);
+  const isPaused = status === "paused";
+  const isPauseRequested = pauseRequested || pauseRequestedOverride;
+
+  const handlePause = async () => {
+    setPendingAction("pause");
+    setError(null);
+
+    try {
+      const scan = await pauseScan(scanId);
+      setPauseRequestedOverride(scan.pause_requested);
+      setPendingAction(null);
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to pause scan");
+      setPendingAction(null);
+    }
+  };
+
+  const handleResume = async () => {
+    setPendingAction("resume");
+    setError(null);
+    setPauseRequestedOverride(false);
+
+    try {
+      await resumeScan(scanId);
+      setPendingAction(null);
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to resume scan");
+      setPendingAction(null);
+    }
+  };
 
   const handleRescan = async () => {
     setPendingAction("rescan");
@@ -84,34 +128,84 @@ export function ScanActions({
   return (
     <div className={cn("flex flex-col items-start gap-2", className)}>
       <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size={size}
-          disabled={isBusy}
-          onClick={handleRescan}
-        >
-          {pendingAction === "rescan" ? (
-            <Loader2Icon className="animate-spin" />
-          ) : (
-            <RefreshCwIcon />
-          )}
-          Rescan
-        </Button>
-        <Button
-          type="button"
-          variant="destructive"
-          size={size}
-          disabled={isBusy}
-          onClick={handleDelete}
-        >
-          {pendingAction === "delete" ? (
-            <Loader2Icon className="animate-spin" />
-          ) : (
-            <Trash2Icon />
-          )}
-          Delete
-        </Button>
+        {!isTerminal ? (
+          <Button
+            type="button"
+            variant="outline"
+            size={size}
+            disabled={isBusy || isPauseRequested}
+            onClick={handlePause}
+          >
+            {pendingAction === "pause" || isPauseRequested ? (
+              <Loader2Icon className="animate-spin" />
+            ) : (
+              <PauseIcon />
+            )}
+            {isPauseRequested ? "Pausing..." : "Pause"}
+          </Button>
+        ) : isPaused ? (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size={size}
+              disabled={isBusy}
+              onClick={handleResume}
+            >
+              {pendingAction === "resume" ? (
+                <Loader2Icon className="animate-spin" />
+              ) : (
+                <PlayIcon />
+              )}
+              Resume
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size={size}
+              disabled={isBusy}
+              onClick={handleDelete}
+            >
+              {pendingAction === "delete" ? (
+                <Loader2Icon className="animate-spin" />
+              ) : (
+                <Trash2Icon />
+              )}
+              Delete
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size={size}
+              disabled={isBusy}
+              onClick={handleRescan}
+            >
+              {pendingAction === "rescan" ? (
+                <Loader2Icon className="animate-spin" />
+              ) : (
+                <RefreshCwIcon />
+              )}
+              Rescan
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size={size}
+              disabled={isBusy}
+              onClick={handleDelete}
+            >
+              {pendingAction === "delete" ? (
+                <Loader2Icon className="animate-spin" />
+              ) : (
+                <Trash2Icon />
+              )}
+              Delete
+            </Button>
+          </>
+        )}
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>

@@ -12,7 +12,7 @@ interface ScanProgressProps {
 /**
  * Client component that polls the API for scan progress updates.
  * When the scan status changes, it calls router.refresh() to update
- * the Server Component data. Auto-stops when scan is completed or failed.
+ * the Server Component data. Auto-stops when scan is completed, paused, or failed.
  */
 export function ScanProgress({ scanId, status }: ScanProgressProps) {
   const router = useRouter();
@@ -20,7 +20,7 @@ export function ScanProgress({ scanId, status }: ScanProgressProps) {
 
   useEffect(() => {
     // Don't poll if the scan is already done
-    if (status === "completed" || status === "failed") {
+    if (status === "completed" || status === "paused" || status === "failed") {
       return;
     }
 
@@ -36,7 +36,11 @@ export function ScanProgress({ scanId, status }: ScanProgressProps) {
         router.refresh();
 
         // Stop polling when done
-        if (scan.status === "completed" || scan.status === "failed") {
+        if (
+          scan.status === "completed" ||
+          scan.status === "paused" ||
+          scan.status === "failed"
+        ) {
           clearInterval(interval);
         }
       } catch {
