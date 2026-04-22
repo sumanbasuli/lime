@@ -116,6 +116,12 @@ type CreateScanRequest struct {
 	ViewportPreset string  `json:"viewport_preset,omitempty"`
 }
 
+// RetryFailedPagesResponse is the response body for POST /api/scans/{id}/retry-failed.
+type RetryFailedPagesResponse struct {
+	Scan            Scan `json:"scan"`
+	RetriedURLCount int  `json:"retried_url_count"`
+}
+
 // Stats holds aggregate dashboard statistics.
 type Stats struct {
 	TotalScans  int `json:"total_scans"`

@@ -158,6 +158,7 @@ docker compose --env-file .env -f docker-compose.release.yml up -d
 | POST | `/api/scans` | Create a new scan (body: `{"sitemap_url": "...", "scan_type": "sitemap|single", "viewport_preset": "desktop|laptop|tablet|mobile", "tag": "optional"}`) |
 | GET | `/api/scans` | List all scans |
 | POST | `/api/scans/{id}/rescan` | Start a fresh scan using the same target URL/type/tag |
+| POST | `/api/scans/{id}/retry-failed` | Requeue failed pages on a completed partial scan and continue the same scan |
 | GET | `/api/scans/{id}` | Get scan detail by ID |
 | DELETE | `/api/scans/{id}` | Delete a completed/failed scan and its saved assets |
 | GET | `/api/scans/{id}/issues` | Get issues with occurrences for a scan, including ACT rules and suggested fixes |
@@ -179,6 +180,7 @@ docker compose --env-file .env -f docker-compose.release.yml up -d
 - The issue details UI opens screenshots in a lightbox and no longer shows the generic page capture inline unless it is explicitly opened as a fallback view.
 - If that extra settle wait times out on a page that is already loaded enough to scan, Shopkeeper still runs the rules and only logs the settle timeout as a warning.
 - A scan is only marked `completed` when at least one page scanned successfully. If every page errors, the scan is marked `failed`.
+- Completed partial scans can now retry only their failed pages in place. That reopens the same scan ID, keeps completed pages intact, and updates the existing report instead of creating a second scan.
 - ACT issue guidance is loaded from the local checked-in catalog at read time. There is no runtime dependency on W3C services and no ACT snapshot stored in Postgres.
 - The issue details page is the main ACT UI surface in this phase. Compact scan summaries remain unchanged.
 - False-positive marking is persisted per issue row and is currently a triage flag only. It does not yet filter issues out of counts, summaries, or scan detail tables.

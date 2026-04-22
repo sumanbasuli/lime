@@ -67,6 +67,7 @@ Uses shadcn/ui sidebar-08 layout with:
 Typed fetch wrapper using same-origin `/api/...` paths:
 - `createScan(sitemapUrl)` — POST /api/scans
 - `rescanScan(id)` — POST /api/scans/{id}/rescan
+- `retryFailedPages(id)` — POST /api/scans/{id}/retry-failed
 - `deleteScan(id)` — DELETE /api/scans/{id}
 - `markIssueFalsePositive(scanId, issueId)` — POST /api/scans/{id}/issues/{issueId}/false-positive
 - `unmarkIssueFalsePositive(scanId, issueId)` — DELETE /api/scans/{id}/issues/{issueId}/false-positive
@@ -82,6 +83,11 @@ The browser never needs a deployment-specific backend URL. The Next server proxi
 Completed and failed scans expose client-side actions to:
 - launch a fresh rescan using the same target URL, scan type, and tag
 - delete the old scan record and its screenshot assets
+
+Completed partial scans also expose a scan-detail recovery bento that can:
+- reopen the same scan record
+- retry only the failed pages
+- keep completed pages and their existing issue/report data intact while new successful pages merge into the same scan
 
 Active scans do not expose these actions, which prevents conflicts with the running Go scan pipeline.
 

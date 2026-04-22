@@ -270,6 +270,84 @@ func (r *Repository) ResumeScan(ctx context.Context, id string) (*models.Scan, e
 	return scan, nil
 }
 
+// RetryFailedURLs requeues failed URLs on a completed partial scan and reopens the
+// existing scan record so the scanner can resume only those pages.
+func (r *Repository) RetryFailedURLs(ctx context.Context, id string) (*models.Scan, int, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to begin retry-failed transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx,
+		`SELECT `+scanColumns+`
+		 FROM scans
+		 WHERE id = $1
+		 FOR UPDATE`,
+		id,
+	)
+	scan, err := scanRow(row)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, 0, nil
+		}
+		return nil, 0, fmt.Errorf("failed to lock scan: %w", err)
+	}
+
+	if scan.Status != "completed" {
+		return scan, 0, nil
+	}
+
+	var completedURLs int
+	var failedURLs int
+	if err := tx.QueryRow(ctx,
+		`SELECT
+		    COUNT(*) FILTER (WHERE status = 'completed'),
+		    COUNT(*) FILTER (WHERE status = 'failed')
+		 FROM urls
+		 WHERE scan_id = $1`,
+		id,
+	).Scan(&completedURLs, &failedURLs); err != nil {
+		return nil, 0, fmt.Errorf("failed to count URL statuses: %w", err)
+	}
+
+	if completedURLs == 0 || failedURLs == 0 {
+		return scan, 0, nil
+	}
+
+	result, err := tx.Exec(ctx,
+		`UPDATE urls
+		 SET status = 'pending'
+		 WHERE scan_id = $1
+		   AND status = 'failed'`,
+		id,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to requeue failed URLs: %w", err)
+	}
+
+	row = tx.QueryRow(ctx,
+		`UPDATE scans
+		 SET status = 'pending',
+		     pause_requested = false,
+		     scanned_urls = $2,
+		     updated_at = NOW()
+		 WHERE id = $1
+		 RETURNING `+scanColumns,
+		id, completedURLs,
+	)
+	updatedScan, err := scanRow(row)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to reopen scan: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, 0, fmt.Errorf("failed to commit retry-failed transaction: %w", err)
+	}
+
+	return updatedScan, int(result.RowsAffected()), nil
+}
+
 // FinalizePausedScan marks a scan as paused and clears any pending pause request.
 func (r *Repository) FinalizePausedScan(ctx context.Context, id string) error {
 	_, err := r.pool.Exec(ctx,

@@ -48,6 +48,7 @@ func Setup(
 			r.Post("/{id}/pause", h.PauseScan)
 			r.Post("/{id}/resume", h.ResumeScan)
 			r.Post("/{id}/rescan", h.RescanScan)
+			r.Post("/{id}/retry-failed", h.RetryFailedPages)
 			r.Get("/{id}", h.GetScan)
 			r.Delete("/{id}", h.DeleteScan)
 			r.Get("/{id}/issues", h.GetScanIssues)

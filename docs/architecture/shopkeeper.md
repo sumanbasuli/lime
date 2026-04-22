@@ -53,6 +53,7 @@ repo root
 | POST | `/api/scans` | CreateScan | Create scan + launch async pipeline |
 | GET | `/api/scans` | ListScans | List all scans (desc by date) |
 | POST | `/api/scans/{id}/rescan` | RescanScan | Create a fresh scan from a completed/failed scan |
+| POST | `/api/scans/{id}/retry-failed` | RetryFailedPages | Requeue failed pages on a completed partial scan and continue the same scan |
 | GET | `/api/scans/{id}` | GetScan | Single scan detail |
 | DELETE | `/api/scans/{id}` | DeleteScan | Delete a completed/failed scan and related data |
 | GET | `/api/scans/{id}/issues` | GetScanIssues | Issues with occurrences for a scan, enriched with ACT context and suggested fixes |
@@ -80,6 +81,7 @@ The `scanner.Scanner` implements this interface. The handler launches scans asyn
 7. Juicer scans pages with 5-concurrent workers using the scan's persisted viewport dimensions; progress updates in real-time. Its accessibility execution is now aligned more closely with Lighthouse’s accessibility gatherer, using WCAG A/AA tags, curated rule overrides, node references, failure summaries, and scroll reset behavior before screenshot work begins. If a late page-settle wait times out after the document is already usable, Juicer still continues into rule execution instead of dropping that page immediately.
 8. Status moves to `processing`; Sweetner deduplicates and stores issues from successfully scanned pages.
 9. Status is set to `completed` when at least one page scanned successfully. If every page errors, or a pipeline step fails, status is set to `failed`.
+10. If a completed scan still has failed URL rows, `POST /api/scans/{id}/retry-failed` can reset only those failed rows to `pending`, reset `scanned_urls` to the completed-page count, and relaunch the same scan ID through the normal resume path.
 
 The async execution is backend-owned. Browser navigation only affects UI polling, not the actual scan job.
 
@@ -112,6 +114,7 @@ The async execution is backend-owned. Browser navigation only affects UI polling
 
 - Each scan now stores `viewport_preset`, `viewport_width`, and `viewport_height` on the `scans` row. Shopkeeper resolves these at create time and reuses them for every page in the scan.
 - Rescans create a brand new `scans` row and re-run the pipeline with the original target URL, scan type, tag, and viewport.
+- Failed-page retries keep the same `scans` row. They are limited to completed partial scans with at least one completed page and at least one failed page.
 - Deletes are limited to terminal scans (`completed` or `failed`) so an active background job is never orphaned.
 - Database cleanup relies on `ON DELETE CASCADE`, and Shopkeeper removes the scan's screenshot directory from `/app/screenshots/{scanId}` after a successful delete.
 - On startup, Shopkeeper re-queues any scan left in `pending`, `profiling`, `scanning`, or `processing`. Partial URLs/issues/screenshots are cleared first so the recovered run starts cleanly with the same scan ID and viewport.

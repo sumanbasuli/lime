@@ -70,3 +70,28 @@ func TestBuildPendingPagesIncludesPendingAndScanningURLs(t *testing.T) {
 		t.Fatalf("unexpected second pending page: %#v", pages[1])
 	}
 }
+
+func TestRetryFailedPagesResumeOnlyRequeuedFailures(t *testing.T) {
+	urls := []models.URL{
+		{ID: "1", URL: "https://example.com/completed-a", Status: "completed"},
+		{ID: "2", URL: "https://example.com/retry-a", Status: "pending"},
+		{ID: "3", URL: "https://example.com/retry-b", Status: "pending"},
+		{ID: "4", URL: "https://example.com/completed-b", Status: "completed"},
+	}
+
+	completedPages, failedPages := summarizePersistedURLStatuses(urls)
+	if completedPages != 2 {
+		t.Fatalf("expected 2 completed pages before retry run, got %d", completedPages)
+	}
+	if failedPages != 0 {
+		t.Fatalf("expected 0 failed pages after requeue, got %d", failedPages)
+	}
+
+	pages := buildPendingPages(urls)
+	if len(pages) != 2 {
+		t.Fatalf("expected 2 requeued failed pages to be pending, got %d", len(pages))
+	}
+	if pages[0].URLID != "2" || pages[1].URLID != "3" {
+		t.Fatalf("expected only requeued failed URLs to remain pending, got %#v", pages)
+	}
+}

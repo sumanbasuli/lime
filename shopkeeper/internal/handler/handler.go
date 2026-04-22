@@ -15,11 +15,24 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/actrules"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
-	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
 
 const screenshotBaseDir = "/app/screenshots"
+
+type ScanRepository interface {
+	CreateScan(ctx context.Context, sitemapURL, scanType string, tag *string, scanViewport viewport.Settings) (*models.Scan, error)
+	ListScans(ctx context.Context) ([]models.Scan, error)
+	ListScansByTag(ctx context.Context, tag string) ([]models.Scan, error)
+	GetScan(ctx context.Context, id string) (*models.Scan, error)
+	GetScanIssues(ctx context.Context, scanID string) ([]models.IssueWithOccurrences, error)
+	RetryFailedURLs(ctx context.Context, id string) (*models.Scan, int, error)
+	DeleteScan(ctx context.Context, id string) (bool, error)
+	RequestPause(ctx context.Context, id string) (*models.Scan, error)
+	ResumeScan(ctx context.Context, id string) (*models.Scan, error)
+	SetIssueFalsePositive(ctx context.Context, scanID, issueID string, isFalsePositive bool) (*models.Issue, error)
+	GetStats(ctx context.Context) (*models.Stats, error)
+}
 
 // ScanRunner defines the interface for running async scans.
 // This avoids a circular dependency with the scanner package.
@@ -35,13 +48,13 @@ type IssueReportGenerator interface {
 
 // Handler holds dependencies for HTTP handlers.
 type Handler struct {
-	repo     *repository.Repository
+	repo     ScanRepository
 	scanner  ScanRunner
 	reporter IssueReportGenerator
 }
 
 // New creates a new Handler with the given repository, scanner, and reporter.
-func New(repo *repository.Repository, scanner ScanRunner, reporter IssueReportGenerator) *Handler {
+func New(repo ScanRepository, scanner ScanRunner, reporter IssueReportGenerator) *Handler {
 	return &Handler{repo: repo, scanner: scanner, reporter: reporter}
 }
 
@@ -286,6 +299,48 @@ func (h *Handler) RescanScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, newScan)
+}
+
+// RetryFailedPages handles POST /api/scans/{id}/retry-failed.
+// It requeues failed URLs on a completed partial scan without creating a new scan.
+func (h *Handler) RetryFailedPages(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "Scan ID is required",
+		})
+		return
+	}
+
+	updatedScan, retriedURLCount, err := h.repo.RetryFailedURLs(r.Context(), id)
+	if err != nil {
+		log.Printf("Failed to retry failed pages for scan %s: %v", id, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Failed to retry failed pages",
+		})
+		return
+	}
+	if updatedScan == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{
+			"error": "Scan not found",
+		})
+		return
+	}
+	if updatedScan.Status != "pending" || retriedURLCount == 0 {
+		writeJSON(w, http.StatusConflict, map[string]string{
+			"error": "Only completed partial scans with failed pages can retry failed pages",
+		})
+		return
+	}
+
+	if h.scanner != nil {
+		go h.scanner.RunScan(*updatedScan)
+	}
+
+	writeJSON(w, http.StatusOK, models.RetryFailedPagesResponse{
+		Scan:            *updatedScan,
+		RetriedURLCount: retriedURLCount,
+	})
 }
 
 // DeleteScan handles DELETE /api/scans/{id}.
