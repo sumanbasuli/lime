@@ -24,6 +24,7 @@ interface ScanActionsProps {
   scanId: string;
   status: Scan["status"];
   pauseRequested?: boolean;
+  isPartialScan?: boolean;
   redirectOnDelete?: string;
   size?: "sm" | "default";
   className?: string;
@@ -33,6 +34,7 @@ export function ScanActions({
   scanId,
   status,
   pauseRequested = false,
+  isPartialScan = false,
   redirectOnDelete,
   size = "sm",
   className,
@@ -188,7 +190,7 @@ export function ScanActions({
               ) : (
                 <RefreshCwIcon />
               )}
-              Rescan
+              {isPartialScan ? "Full rescan" : "Rescan"}
             </Button>
             <Button
               type="button"

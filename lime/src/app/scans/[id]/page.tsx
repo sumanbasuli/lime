@@ -5,6 +5,7 @@ import { scans, issues, issueOccurrences } from "@/db/schema";
 import { eq, count } from "drizzle-orm";
 import { AccessibilityScoreGauge } from "@/components/accessibility-score-gauge";
 import { AuditResultsDataTable } from "@/components/audit-results-data-table";
+import { PartialScanRetryBento } from "@/components/partial-scan-retry-bento";
 import { ScanActions } from "@/components/scan-actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -87,7 +88,7 @@ function getScoreSummaryCopy(summary: ScanScoreSummary, status: string): string 
   const terminalVerb = status === "paused" ? "stopped" : "finished";
 
   if (summary.isPartialScan && summary.hasScore && summary.score !== null) {
-    return `This scan ${terminalVerb} with ${summary.completedUrlCount} of ${summary.totalUrlCount} pages completed and ${summary.failedUrlCount} failed. The current accessibility score is based on completed pages only and may change after a full rerun.`;
+    return `This scan ${terminalVerb} with ${summary.completedUrlCount} of ${summary.totalUrlCount} pages completed and ${summary.failedUrlCount} failed. The current accessibility score is based on completed pages only and will update if you retry the failed pages or run a full rescan.`;
   }
 
   if (summary.hasScore && summary.score !== null) {
@@ -96,7 +97,7 @@ function getScoreSummaryCopy(summary: ScanScoreSummary, status: string): string 
   }
 
   if (summary.isPartialScan) {
-    return `This scan ${terminalVerb} with ${summary.completedUrlCount} of ${summary.totalUrlCount} pages completed and ${summary.failedUrlCount} failed. The accessibility score is withheld for partial scans.`;
+    return `This scan ${terminalVerb} with ${summary.completedUrlCount} of ${summary.totalUrlCount} pages completed and ${summary.failedUrlCount} failed. Retry the failed pages to continue this scan, or run a full rescan if you want a fresh pass across every page.`;
   }
 
   if (status === "paused") {
@@ -158,7 +159,7 @@ function getSeveritySummaryCopy(
 
 function getAuditResultsCopy(summary: ScanScoreSummary, status: string): string {
   if (summary.isPartialScan) {
-    return `Checks below are based on ${summary.completedUrlCount} of ${summary.totalUrlCount} completed pages. ${summary.failedUrlCount} page${summary.failedUrlCount === 1 ? "" : "s"} failed to scan, so the score reflects completed pages only.`;
+    return `Checks below are based on ${summary.completedUrlCount} of ${summary.totalUrlCount} completed pages. ${summary.failedUrlCount} page${summary.failedUrlCount === 1 ? "" : "s"} failed to scan, so the score reflects completed pages only until those failed pages are retried.`;
   }
 
   if (status === "paused") {
@@ -224,6 +225,10 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
     scan.status !== "completed" &&
     scan.status !== "paused" &&
     scan.status !== "failed";
+  const showRetryFailedPagesBento =
+    scan.status === "completed" &&
+    scoreSummary.isPartialScan &&
+    scoreSummary.failedUrlCount > 0;
   const excludedIssueCount = scanIssues.filter(
     (issue) => issue.isFalsePositive
   ).length;
@@ -284,10 +289,18 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
             scanId={scan.id}
             status={scan.status ?? "pending"}
             pauseRequested={scan.pauseRequested ?? false}
+            isPartialScan={scoreSummary.isPartialScan}
             redirectOnDelete="/scans"
           />
         </div>
       </div>
+
+      {showRetryFailedPagesBento && (
+        <PartialScanRetryBento
+          scanId={scan.id}
+          failedUrlCount={scoreSummary.failedUrlCount}
+        />
+      )}
 
       {isActive && (
         <section className="rounded-[28px] border border-black/10 bg-white p-4 shadow-[0_20px_45px_rgba(10,10,10,0.05)]">

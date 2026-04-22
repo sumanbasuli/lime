@@ -92,6 +92,11 @@ export interface CreateScanOptions {
   tag?: string;
 }
 
+export interface RetryFailedPagesResponse {
+  scan: Scan;
+  retried_url_count: number;
+}
+
 export function isTerminalScanStatus(status: Scan["status"]): boolean {
   return status === "completed" || status === "paused" || status === "failed";
 }
@@ -136,6 +141,19 @@ export async function rescanScan(id: string): Promise<Scan> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `Failed to rescan (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function retryFailedPages(
+  id: string
+): Promise<RetryFailedPagesResponse> {
+  const res = await fetch(`${API_BASE}/api/scans/${id}/retry-failed`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Failed to retry failed pages (${res.status})`);
   }
   return res.json();
 }

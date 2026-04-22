@@ -906,7 +906,7 @@ function getScoreCopy(data: IssueReportData): string {
   const { scoreSummary, scan, activeIssueCount } = data;
   if (scoreSummary.hasScore && scoreSummary.score !== null) {
     if (scoreSummary.isPartialScan) {
-      return `The current accessibility score is based on ${scoreSummary.completedUrlCount} completed pages out of ${scoreSummary.totalUrlCount}. ${scoreSummary.failedUrlCount} pages failed during scanning, so the score reflects completed pages only.`;
+      return `The current accessibility score is based on ${scoreSummary.completedUrlCount} completed pages out of ${scoreSummary.totalUrlCount}. ${scoreSummary.failedUrlCount} pages failed during scanning, so the score reflects completed pages only until those failed pages are retried.`;
     }
 
     return `This report includes ${activeIssueCount} weighted failed issue groups across ${scoreSummary.completedUrlCount} completed pages.`;

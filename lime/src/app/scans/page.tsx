@@ -224,6 +224,7 @@ export default async function ScansPage({
                         scanId={scan.id}
                         status={scan.status ?? "pending"}
                         pauseRequested={scan.pauseRequested ?? false}
+                        isPartialScan={scoreSummary.isPartialScan}
                         className="items-end"
                       />
                     </td>
