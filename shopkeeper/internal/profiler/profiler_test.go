@@ -33,7 +33,7 @@ func TestDiscoverRetriesTransientNestedSitemapFailures(t *testing.T) {
 			</sitemapindex>`, serverURL(t, r), serverURL(t, r), serverURL(t, r))
 		case "/a.xml":
 			w.Header().Set("Content-Type", "application/xml")
-			fmt.Fprint(w, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/a</loc></url></urlset>`)
+			fmt.Fprintf(w, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>%s/a</loc></url></urlset>`, serverURL(t, r))
 		case "/b.xml":
 			if count == 1 {
 				w.WriteHeader(599)
@@ -41,7 +41,7 @@ func TestDiscoverRetriesTransientNestedSitemapFailures(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/xml")
-			fmt.Fprint(w, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/b</loc></url></urlset>`)
+			fmt.Fprintf(w, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>%s/b</loc></url></urlset>`, serverURL(t, r))
 		case "/c.xml":
 			if count == 1 {
 				w.WriteHeader(599)
@@ -49,7 +49,7 @@ func TestDiscoverRetriesTransientNestedSitemapFailures(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/xml")
-			fmt.Fprint(w, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/c</loc></url></urlset>`)
+			fmt.Fprintf(w, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>%s/c</loc></url></urlset>`, serverURL(t, r))
 		default:
 			http.NotFound(w, r)
 		}
@@ -64,9 +64,9 @@ func TestDiscoverRetriesTransientNestedSitemapFailures(t *testing.T) {
 
 		slices.Sort(urls)
 		expected := []string{
-			"https://example.com/a",
-			"https://example.com/b",
-			"https://example.com/c",
+			server.URL + "/a",
+			server.URL + "/b",
+			server.URL + "/c",
 		}
 		if !slices.Equal(urls, expected) {
 			t.Fatalf("unexpected URLs: got %v want %v", urls, expected)
@@ -85,7 +85,7 @@ func TestDiscoverFailsWhenNestedSitemapRemainsUnavailable(t *testing.T) {
 			</sitemapindex>`, serverURL(t, r), serverURL(t, r))
 		case "/a.xml":
 			w.Header().Set("Content-Type", "application/xml")
-			fmt.Fprint(w, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/a</loc></url></urlset>`)
+			fmt.Fprintf(w, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>%s/a</loc></url></urlset>`, serverURL(t, r))
 		case "/b.xml":
 			w.WriteHeader(599)
 			fmt.Fprint(w, "still failing")
@@ -122,7 +122,7 @@ func TestDiscoverFallsBackWhenScannerProfileIsForbidden(t *testing.T) {
 			http.Error(w, "blocked by WAF", http.StatusForbidden)
 		case sitemapFetchProfiles[1].userAgent:
 			w.Header().Set("Content-Type", "application/xml")
-			fmt.Fprint(w, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/fallback</loc></url></urlset>`)
+			fmt.Fprintf(w, `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>%s/fallback</loc></url></urlset>`, serverURL(t, r))
 		default:
 			t.Fatalf("unexpected user agent: %q", userAgent)
 		}
@@ -135,7 +135,7 @@ func TestDiscoverFallsBackWhenScannerProfileIsForbidden(t *testing.T) {
 			t.Fatalf("Discover returned error: %v", err)
 		}
 
-		expected := []string{"https://example.com/fallback"}
+		expected := []string{server.URL + "/fallback"}
 		if !slices.Equal(urls, expected) {
 			t.Fatalf("unexpected URLs: got %v want %v", urls, expected)
 		}
@@ -147,8 +147,8 @@ func TestDiscoverFallsBackWhenScannerProfileIsForbidden(t *testing.T) {
 	if requests[sitemapFetchProfiles[0].userAgent] != 1 {
 		t.Fatalf("expected one request with scanner profile, got %d", requests[sitemapFetchProfiles[0].userAgent])
 	}
-	if requests[sitemapFetchProfiles[1].userAgent] != 1 {
-		t.Fatalf("expected one request with browser fallback profile, got %d", requests[sitemapFetchProfiles[1].userAgent])
+	if requests[sitemapFetchProfiles[1].userAgent] != 2 {
+		t.Fatalf("expected two requests with browser fallback profile (sitemap fetch + URL eligibility check), got %d", requests[sitemapFetchProfiles[1].userAgent])
 	}
 }
 
@@ -163,6 +163,100 @@ func TestDiscoverHonorsCanceledContext(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
+}
+
+func TestDiscoverFiltersCrossHostRedirectsAndCanonicalizesEligibleRedirects(t *testing.T) {
+	external := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/outside":
+			fmt.Fprint(w, "external")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer external.Close()
+
+	mainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sitemap.xml":
+			w.Header().Set("Content-Type", "application/xml")
+			fmt.Fprintf(
+				w,
+				`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+					<url><loc>%s/keep</loc></url>
+					<url><loc>%s/redirect-internal</loc></url>
+					<url><loc>%s/final</loc></url>
+					<url><loc>%s/redirect-external</loc></url>
+				</urlset>`,
+				serverURL(t, r),
+				serverURL(t, r),
+				serverURL(t, r),
+				serverURL(t, r),
+			)
+		case "/redirect-internal":
+			http.Redirect(w, r, serverURL(t, r)+"/final", http.StatusMovedPermanently)
+		case "/redirect-external":
+			http.Redirect(w, r, external.URL+"/outside", http.StatusFound)
+		case "/keep", "/final":
+			fmt.Fprint(w, "ok")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mainServer.Close()
+
+	withTestHTTPClient(t, mainServer.Client(), func() {
+		urls, err := Discover(context.Background(), mainServer.URL+"/sitemap.xml")
+		if err != nil {
+			t.Fatalf("Discover returned error: %v", err)
+		}
+
+		expected := []string{
+			mainServer.URL + "/keep",
+			mainServer.URL + "/final",
+		}
+		if !slices.Equal(urls, expected) {
+			t.Fatalf("unexpected URLs: got %v want %v", urls, expected)
+		}
+	})
+}
+
+func TestDiscoverUsesEnteredHostForEligibility(t *testing.T) {
+	redirectedHost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sitemap.xml":
+			w.Header().Set("Content-Type", "application/xml")
+			fmt.Fprintf(
+				w,
+				`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>%s/page</loc></url></urlset>`,
+				serverURL(t, r),
+			)
+		case "/page":
+			fmt.Fprint(w, "ok")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer redirectedHost.Close()
+
+	enteredHost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/sitemap.xml" {
+			http.Redirect(w, r, redirectedHost.URL+"/sitemap.xml", http.StatusMovedPermanently)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer enteredHost.Close()
+
+	withTestHTTPClient(t, enteredHost.Client(), func() {
+		urls, err := Discover(context.Background(), enteredHost.URL+"/sitemap.xml")
+		if err != nil {
+			t.Fatalf("Discover returned error: %v", err)
+		}
+		if len(urls) != 0 {
+			t.Fatalf("expected no eligible URLs, got %v", urls)
+		}
+	})
 }
 
 func withTestHTTPClient(t *testing.T, client *http.Client, fn func()) {
