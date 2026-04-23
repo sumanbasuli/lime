@@ -14,14 +14,6 @@ Scan sitemaps, capture screenshots, review issues in a dashboard.
 
 [Quick start](#quick-start) | [Deploy](#deploy) | [Docs](docs/index.md) | [Releases](https://github.com/sumanbasuli/lime/releases)
 
-<br />
-
-<a href="https://fly.io/launch?repo=https://github.com/sumanbasuli/lime">
-  <img src="https://fly.io/static/images/launch/launch.svg" alt="Launch LIME on Fly.io" height="42" />
-</a>
-
-<sub>Open the repo in Fly Launch, then use the included Fly helper to provision the two LIME apps.</sub>
-
 </div>
 
 ---
@@ -30,7 +22,7 @@ Scan sitemaps, capture screenshots, review issues in a dashboard.
 
 LIME is a batteries-included accessibility scanner you host yourself. Point it at a sitemap or a URL, it walks the pages with a headless Chromium, runs the full axe-core ruleset (WCAG A/AA, Lighthouse-aligned), captures focused screenshots of each violation, and groups the results into reviewable issues with ACT rule guidance.
 
-Built to be cheap to run on a small VPS, trivial to push to Fly.io, and safe to leave alone. Migrations apply on boot, interrupted scans recover on restart, and updates are one command.
+Built to be cheap to run on a small server, straightforward to push to Fly.io, and safe to leave alone. Migrations apply on boot, interrupted scans recover on restart, and updates are one command.
 
 ## Features
 
@@ -41,25 +33,23 @@ Built to be cheap to run on a small VPS, trivial to push to Fly.io, and safe to 
 - **False-positive triage** flag per issue.
 - **Scan recovery** - non-terminal scans resume after Shopkeeper restarts.
 - **Update notice** - opt-in sidebar banner when a new GitHub release is available.
-- **Three deploy targets** - Fly.io, VPS with Docker, VPS native systemd.
+- **Three deploy targets** - Fly.io, Docker, and Linux systemd.
 
 ## Architecture
 
-```
-+---------+      +--------------------+      +------------+
-| Browser | ---> | UI (NextJS, :3000) | ---> | PostgreSQL |
-+---------+      +---------+----------+      +-----^------+
-                           | /api proxy             |
-                           v                        |
-                 +---------------------+            |
-                 | Shopkeeper (Go,     | -----------+
-                 | :8080 + Chromium)   |
-                 +---------------------+
-```
+![LIME architecture](assets/img/arch.png)
 
-- **[Shopkeeper](shopkeeper/)** - Go backend. Chi router, pgx, golang-migrate. Owns scans, runs Chromium, serves screenshots and PDFs.
+- **[Shopkeeper](shopkeeper/)** - Go backend. Chi router, pgx, golang-migrate. Owns scan lifecycle, API routes, migrations, screenshots, PDFs, and the internal scan pipeline.
 - **[UI](lime/)** - NextJS App Router, shadcn/ui, Drizzle ORM. Reads Postgres directly for server-rendered pages, proxies `/api/...` to Shopkeeper at runtime so the image stays generic.
 - **Database** - PostgreSQL 17 shared by both services.
+
+Shopkeeper pipeline:
+
+| Stage | What it does |
+|-------|--------------|
+| **[Profiler](docs/architecture/profiler.md)** | Expands sitemap and sitemap-index inputs into a validated, deduplicated URL set for the scan. |
+| **[Juicer](docs/architecture/juicer.md)** | Takes those URLs, drives Chromium workers, runs axe-core, captures screenshots, and records per-page audit outcomes. |
+| **[Sweetner](docs/architecture/sweetner.md)** | Takes Juicer audit output and writes normalized issues, occurrences, audits, and review-required records. |
 
 Full architecture docs: [docs/architecture/](docs/architecture/).
 
@@ -86,14 +76,18 @@ LIME publishes versioned Docker images to GHCR on every GitHub Release. Use the 
 | Target | One-liner | Guide |
 |--------|-----------|-------|
 | **Fly.io** | `./scripts/fly-deploy.sh v0.1.0` | [docs/deployment/fly.md](docs/deployment/fly.md) |
-| **VPS + Docker** | `docker compose -f docker-compose.release.yml up -d` | [docs/deployment/vps-docker.md](docs/deployment/vps-docker.md) |
-| **VPS native** | `make build && sudo ./scripts/vps-install.sh` | [docs/deployment/vps-native.md](docs/deployment/vps-native.md) |
+| **Docker** | `docker compose -f docker-compose.release.yml up -d` | [docs/deployment/vps-docker.md](docs/deployment/vps-docker.md) |
+| **Linux systemd** | `make build && sudo ./scripts/vps-install.sh` | [docs/deployment/vps-native.md](docs/deployment/vps-native.md) |
 
 ### Deploy to Fly.io
 
-<a href="https://fly.io/launch?repo=https://github.com/sumanbasuli/lime"><img src="https://fly.io/static/images/launch/launch.svg" alt="Deploy to Fly.io" height="40" /></a>
+Fly Launch is Fly.io's app workflow around `fly launch`, `fly.toml`, and `fly deploy`; see [Fly Launch](https://fly.io/launch) for the platform overview. LIME uses that model, but it is a two-app deployment (Shopkeeper + UI), so do not run a single root-level `fly launch` and expect the whole stack to be configured. Use the included helper instead: `scripts/fly-deploy.sh` creates both apps, provisions screenshot storage, wires private networking, and deploys the published GHCR images.
 
-The button opens this repository in Fly Launch. LIME is a two-app deployment (Shopkeeper + UI), so the one-click flow is paired with the included helper: `scripts/fly-deploy.sh` creates both apps, provisions screenshot storage, wires private networking, and deploys the published GHCR images.
+Before deploying, install [`flyctl`](https://fly.io/docs/flyctl/install/) and authenticate:
+
+```bash
+flyctl auth login
+```
 
 Use either an external PostgreSQL URL:
 
@@ -111,7 +105,7 @@ Every deploy target ships an update command that backs up the database, pulls th
 ```bash
 ./scripts/fly-update.sh v0.2.0            # Fly.io
 make update-release TAG=v0.2.0            # Docker (release bundle)
-sudo ./scripts/vps-update.sh v0.2.0       # VPS native
+sudo ./scripts/vps-update.sh v0.2.0       # Linux systemd
 ```
 
 Details and rollback: [docs/deployment/updates.md](docs/deployment/updates.md).
@@ -164,8 +158,8 @@ make dev-ui              # NextJS with hot reload
 - [Database schema](docs/database.md)
 - [Docker & release pipeline](docs/deployment/docker.md)
 - [Deploy to Fly.io](docs/deployment/fly.md)
-- [Deploy to a VPS (Docker)](docs/deployment/vps-docker.md)
-- [Deploy to a VPS (native)](docs/deployment/vps-native.md)
+- [Deploy with Docker](docs/deployment/vps-docker.md)
+- [Deploy on Linux (systemd)](docs/deployment/vps-native.md)
 - [Updating LIME](docs/deployment/updates.md)
 - [Roadmap](docs/roadmap.md)
 

@@ -40,6 +40,10 @@ export interface ReportOccurrence {
 type ScanIssueRow = typeof issues.$inferSelect;
 
 export type ReportIssueKind = "failed" | "needs_review";
+export type ReportOccurrenceSource =
+  | "issue_occurrences"
+  | "url_audit_occurrences"
+  | "url_audits";
 
 export type ReportIssue = Omit<ScanIssueRow, "severity" | "createdAt"> & {
   severity: ScanIssueRow["severity"] | null;
@@ -54,6 +58,7 @@ export interface ReportIssueGroup {
   issue: ReportIssue;
   occurrences: ReportOccurrence[];
   occurrenceCount: number;
+  occurrenceSource: ReportOccurrenceSource;
   complianceReferences: AccessibilityReference[];
   axeSuggestedChange: string | null;
   axeRuleDescription: string | null;
@@ -68,6 +73,10 @@ export interface IssueReportData {
   needsReviewIssueCount: number;
   totalIssueCardCount: number;
   severityBreakdown: Record<"critical" | "serious" | "moderate" | "minor", number>;
+}
+
+export interface IssueReportDataOptions {
+  occurrenceLimit?: number | null;
 }
 
 function isSeverityKey(
@@ -95,9 +104,112 @@ function severitySortOrder(severity: ScanIssueRow["severity"] | null): number {
   }
 }
 
-async function loadFailedReportGroups(
+function resolveOccurrenceLimit(
+  options?: IssueReportDataOptions
+): number | null {
+  return options?.occurrenceLimit === null
+    ? null
+    : options?.occurrenceLimit ?? REPORT_OCCURRENCE_SAMPLE_LIMIT;
+}
+
+async function loadFailedOccurrences(
+  issueId: string,
+  occurrenceLimit: number | null
+): Promise<ReportOccurrence[]> {
+  const query = db
+    .select({
+      id: issueOccurrences.id,
+      issueId: issueOccurrences.issueId,
+      urlId: issueOccurrences.urlId,
+      htmlSnippet: issueOccurrences.htmlSnippet,
+      screenshotPath: issueOccurrences.screenshotPath,
+      elementScreenshotPath: issueOccurrences.elementScreenshotPath,
+      cssSelector: issueOccurrences.cssSelector,
+      pageUrl: urls.url,
+    })
+    .from(issueOccurrences)
+    .innerJoin(urls, eq(urls.id, issueOccurrences.urlId))
+    .where(eq(issueOccurrences.issueId, issueId))
+    .orderBy(asc(urls.url), asc(issueOccurrences.createdAt));
+
+  return occurrenceLimit === null
+    ? await query
+    : await query.limit(occurrenceLimit);
+}
+
+async function loadNeedsReviewOccurrences(
   scanId: string,
-  scanIssues: ScanIssueRow[]
+  ruleId: string,
+  occurrenceLimit: number | null
+): Promise<ReportOccurrence[]> {
+  const query = db
+    .select({
+      id: urlAuditOccurrences.id,
+      ruleId: urlAuditOccurrences.ruleId,
+      urlId: urlAuditOccurrences.urlId,
+      htmlSnippet: urlAuditOccurrences.htmlSnippet,
+      screenshotPath: urlAuditOccurrences.screenshotPath,
+      elementScreenshotPath: urlAuditOccurrences.elementScreenshotPath,
+      cssSelector: urlAuditOccurrences.cssSelector,
+      pageUrl: urls.url,
+    })
+    .from(urlAuditOccurrences)
+    .innerJoin(urls, eq(urls.id, urlAuditOccurrences.urlId))
+    .where(
+      and(
+        eq(urls.scanId, scanId),
+        eq(urls.status, "completed"),
+        eq(urlAuditOccurrences.ruleId, ruleId),
+        eq(urlAuditOccurrences.outcome, "incomplete")
+      )
+    )
+    .orderBy(asc(urls.url), asc(urlAuditOccurrences.createdAt));
+
+  return occurrenceLimit === null
+    ? await query
+    : await query.limit(occurrenceLimit);
+}
+
+async function loadNeedsReviewAuditFallbackOccurrences(
+  scanId: string,
+  ruleId: string,
+  occurrenceLimit: number | null
+): Promise<ReportOccurrence[]> {
+  const query = db
+    .select({
+      urlId: urls.id,
+      pageUrl: urls.url,
+    })
+    .from(urlAudits)
+    .innerJoin(urls, eq(urls.id, urlAudits.urlId))
+    .where(
+      and(
+        eq(urls.scanId, scanId),
+        eq(urls.status, "completed"),
+        eq(urlAudits.ruleId, ruleId),
+        eq(urlAudits.outcome, "incomplete")
+      )
+    )
+    .orderBy(asc(urls.url));
+
+  const auditRows =
+    occurrenceLimit === null ? await query : await query.limit(occurrenceLimit);
+
+  return auditRows.map((row) => ({
+    id: `${ruleId}-${row.urlId}`,
+    ruleId,
+    urlId: row.urlId,
+    htmlSnippet: null,
+    screenshotPath: null,
+    elementScreenshotPath: null,
+    cssSelector: null,
+    pageUrl: row.pageUrl,
+  }));
+}
+
+async function loadFailedReportGroups(
+  scanIssues: ScanIssueRow[],
+  occurrenceLimit: number | null
 ): Promise<ReportIssueGroup[]> {
   const reportableScanIssues = scanIssues.filter(
     (issue) => !issue.isFalsePositive
@@ -111,22 +223,7 @@ async function loadFailedReportGroups(
             .select({ value: count() })
             .from(issueOccurrences)
             .where(eq(issueOccurrences.issueId, issue.id)),
-          db
-            .select({
-              id: issueOccurrences.id,
-              issueId: issueOccurrences.issueId,
-              urlId: issueOccurrences.urlId,
-              htmlSnippet: issueOccurrences.htmlSnippet,
-              screenshotPath: issueOccurrences.screenshotPath,
-              elementScreenshotPath: issueOccurrences.elementScreenshotPath,
-              cssSelector: issueOccurrences.cssSelector,
-              pageUrl: urls.url,
-            })
-            .from(issueOccurrences)
-            .innerJoin(urls, eq(urls.id, issueOccurrences.urlId))
-            .where(eq(issueOccurrences.issueId, issue.id))
-            .orderBy(asc(urls.url), asc(issueOccurrences.createdAt))
-            .limit(REPORT_OCCURRENCE_SAMPLE_LIMIT),
+          loadFailedOccurrences(issue.id, occurrenceLimit),
           enrichIssueWithACT(issue),
           resolveAxeRuleContext(issue.violationType),
         ]);
@@ -136,6 +233,7 @@ async function loadFailedReportGroups(
         issue: enrichedIssue,
         occurrences,
         occurrenceCount: occurrenceCountRows[0]?.value ?? occurrences.length,
+        occurrenceSource: "issue_occurrences",
         complianceReferences: axeContext.accessibilityRequirements,
         axeSuggestedChange: axeContext.successCriterion,
         axeRuleDescription: axeContext.ruleDescription,
@@ -146,7 +244,8 @@ async function loadFailedReportGroups(
 
 async function loadNeedsReviewReportGroups(
   scanId: string,
-  failedRuleIds: Set<string>
+  failedRuleIds: Set<string>,
+  occurrenceLimit: number | null
 ): Promise<ReportIssueGroup[]> {
   const [incompleteAuditCounts, incompleteOccurrenceCounts, axeRuleCatalog] =
     await Promise.all([
@@ -208,59 +307,20 @@ async function loadNeedsReviewReportGroups(
 
       let occurrences: ReportOccurrence[];
       if (occurrenceCount > 0) {
-        occurrences = await db
-          .select({
-            id: urlAuditOccurrences.id,
-            ruleId: urlAuditOccurrences.ruleId,
-            urlId: urlAuditOccurrences.urlId,
-            htmlSnippet: urlAuditOccurrences.htmlSnippet,
-            screenshotPath: urlAuditOccurrences.screenshotPath,
-            elementScreenshotPath: urlAuditOccurrences.elementScreenshotPath,
-            cssSelector: urlAuditOccurrences.cssSelector,
-            pageUrl: urls.url,
-          })
-          .from(urlAuditOccurrences)
-          .innerJoin(urls, eq(urls.id, urlAuditOccurrences.urlId))
-          .where(
-            and(
-              eq(urls.scanId, scanId),
-              eq(urls.status, "completed"),
-              eq(urlAuditOccurrences.ruleId, ruleId),
-              eq(urlAuditOccurrences.outcome, "incomplete")
-            )
-          )
-          .orderBy(asc(urls.url), asc(urlAuditOccurrences.createdAt))
-          .limit(REPORT_OCCURRENCE_SAMPLE_LIMIT);
-      } else {
-        const auditRows = await db
-          .select({
-            urlId: urls.id,
-            pageUrl: urls.url,
-          })
-          .from(urlAudits)
-          .innerJoin(urls, eq(urls.id, urlAudits.urlId))
-          .where(
-            and(
-              eq(urls.scanId, scanId),
-              eq(urls.status, "completed"),
-              eq(urlAudits.ruleId, ruleId),
-              eq(urlAudits.outcome, "incomplete")
-            )
-          )
-          .orderBy(asc(urls.url))
-          .limit(REPORT_OCCURRENCE_SAMPLE_LIMIT);
-
-        occurrences = auditRows.map((row) => ({
-          id: `${ruleId}-${row.urlId}`,
+        occurrences = await loadNeedsReviewOccurrences(
+          scanId,
           ruleId,
-          urlId: row.urlId,
-          htmlSnippet: null,
-          screenshotPath: null,
-          elementScreenshotPath: null,
-          cssSelector: null,
-          pageUrl: row.pageUrl,
-        }));
+          occurrenceLimit
+        );
+      } else {
+        occurrences = await loadNeedsReviewAuditFallbackOccurrences(
+          scanId,
+          ruleId,
+          occurrenceLimit
+        );
       }
+      const occurrenceSource =
+        occurrenceCount > 0 ? "url_audit_occurrences" : "url_audits";
 
       return {
         kind: "needs_review",
@@ -279,6 +339,7 @@ async function loadNeedsReviewReportGroups(
         },
         occurrences,
         occurrenceCount: occurrenceCount || auditCount || occurrences.length,
+        occurrenceSource,
         complianceReferences: axeContext.accessibilityRequirements,
         axeSuggestedChange: axeContext.successCriterion,
         axeRuleDescription: axeContext.ruleDescription,
@@ -288,7 +349,8 @@ async function loadNeedsReviewReportGroups(
 }
 
 export async function loadIssueReportData(
-  scanId: string
+  scanId: string,
+  options?: IssueReportDataOptions
 ): Promise<IssueReportData | null> {
   const [scan] = await db.select().from(scans).where(eq(scans.id, scanId));
   if (!scan) {
@@ -302,9 +364,10 @@ export async function loadIssueReportData(
 
   const scanIssues = await db.select().from(issues).where(eq(issues.scanId, scanId));
   const failedRuleIds = new Set(scanIssues.map((issue) => issue.violationType));
+  const occurrenceLimit = resolveOccurrenceLimit(options);
   const [failedGroups, needsReviewGroups] = await Promise.all([
-    loadFailedReportGroups(scanId, scanIssues),
-    loadNeedsReviewReportGroups(scanId, failedRuleIds),
+    loadFailedReportGroups(scanIssues, occurrenceLimit),
+    loadNeedsReviewReportGroups(scanId, failedRuleIds, occurrenceLimit),
   ]);
 
   const issuesWithOccurrences = [...failedGroups, ...needsReviewGroups];
