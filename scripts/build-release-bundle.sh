@@ -10,6 +10,7 @@ fi
 
 VERSION="$1"
 RELEASE_TAG="v${VERSION}"
+IMAGE_REGISTRY="${LIME_IMAGE_REGISTRY:-ghcr.io/sumanbasuli}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
 BUNDLE_DIR="${DIST_DIR}/release/lime-${RELEASE_TAG}"
@@ -24,7 +25,9 @@ cp "${ROOT_DIR}/deploy/release/README.md" "${BUNDLE_DIR}/README.md"
 mkdir -p "${BUNDLE_DIR}/data"
 cp "${ROOT_DIR}/data/"*.json "${BUNDLE_DIR}/data/"
 
-sed "s/^LIME_IMAGE_TAG=.*/LIME_IMAGE_TAG=${RELEASE_TAG}/" \
+sed \
+  -e "s|^LIME_IMAGE_REGISTRY=.*|LIME_IMAGE_REGISTRY=${IMAGE_REGISTRY}|" \
+  -e "s|^LIME_IMAGE_TAG=.*|LIME_IMAGE_TAG=${RELEASE_TAG}|" \
   "${ROOT_DIR}/deploy/release/.env.example" > "${BUNDLE_DIR}/.env.example"
 
 tar -C "${DIST_DIR}/release" -czf "${ARCHIVE_PATH}" "lime-${RELEASE_TAG}"

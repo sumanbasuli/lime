@@ -12,7 +12,7 @@ This bundle runs the published LIME containers without building from source.
 
 1. Copy `.env.example` to `.env`
 2. Set `DATABASE_URL` to your external PostgreSQL connection string
-3. Review the public ports and the internal Shopkeeper target in `SHOPKEEPER_URL`
+3. Review `LIME_IMAGE_REGISTRY`, `LIME_IMAGE_TAG`, the public ports, and the internal Shopkeeper target in `SHOPKEEPER_URL`
 4. Start the stack:
 
 ```bash

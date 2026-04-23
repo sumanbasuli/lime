@@ -71,7 +71,7 @@ Stop: `make stop-all`. Reset volumes: `make clean`.
 
 ## Deploy
 
-LIME publishes versioned Docker images to GHCR on every GitHub Release. Use the release tag you want to deploy, for example `v0.1.0`.
+LIME publishes versioned Docker images to GHCR from the main-branch release workflow. Use the release tag you want to deploy, for example `v0.1.0`.
 
 | Target | One-liner | Guide |
 |--------|-----------|-------|
@@ -118,6 +118,7 @@ Runtime configuration lives in `.env` (root) or deploy-specific env files.
 |----------|----------|-------------|
 | `DATABASE_URL` | yes | PostgreSQL connection string, shared by UI and Shopkeeper. |
 | `SHOPKEEPER_URL` | yes | URL the UI proxies `/api/...` to. |
+| `LIME_IMAGE_REGISTRY` | release only | GHCR namespace for published images, e.g. `ghcr.io/sumanbasuli`. |
 | `LIME_IMAGE_TAG` | release only | GHCR image tag, e.g. `v0.1.0`. |
 | `LIME_API_PORT` / `LIME_UI_PORT` | optional | Published ports (defaults 8080 / 3000). |
 | `LIME_UPDATE_CHECK` | optional | `true` shows a sidebar card when a newer release is on GitHub. Off by default. |
@@ -173,7 +174,7 @@ Issues and pull requests welcome. Before opening a PR:
 
 ## Release Checklist
 
-Maintainers publish a release by updating [VERSION](VERSION), creating a GitHub Release named `v<version>`, and letting [release-docker.yml](.github/workflows/release-docker.yml) publish both GHCR images plus the release bundle. The release tag must match `VERSION`.
+Maintainers publish a release by updating [VERSION](VERSION), adding matching notes in [CHANGELOG.md](CHANGELOG.md), and merging to `main`. [release-docker.yml](.github/workflows/release-docker.yml) creates the `v<version>` release, pushes both GHCR images, and uploads the Docker release bundle. The release tag must be new; bump `VERSION` for every release.
 
 ## Support
 

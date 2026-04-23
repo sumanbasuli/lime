@@ -89,14 +89,15 @@ make logs-ui
 
 ## Release Workflow
 
-- GitHub Release publishing is the trigger for Docker package publishing.
-- The release tag must match `VERSION` after `v` normalization, for example:
+- Pushes to `main` trigger Docker package publishing and GitHub Release creation.
+- The workflow reads `VERSION` and creates the `v<VERSION>` release tag, for example:
   - `VERSION`: `0.1.0`
   - Git tag / GitHub Release: `v0.1.0`
-- A published release pushes:
+- `CHANGELOG.md` must include a matching `## [0.1.0]` or `## v0.1.0` section; that section becomes the release notes.
+- A release pushes:
   - `ghcr.io/sumanbasuli/lime-shopkeeper:v0.1.0`
   - `ghcr.io/sumanbasuli/lime-ui:v0.1.0`
-- Stable releases also update `latest`.
+- The workflow also publishes `latest` and `sha-<commit>` image tags.
 - The same workflow uploads a bundle asset like `lime-v0.1.0-release.tar.gz`.
 
 ## Release Bundle
@@ -114,6 +115,7 @@ docker compose --env-file .env -f docker-compose.release.yml up -d
 ```
 
 The release `.env` file is the source of truth for:
+- image registry
 - published image tag
 - `DATABASE_URL`
 - `SHOPKEEPER_URL`
