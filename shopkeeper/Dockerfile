@@ -2,7 +2,7 @@
 # Expects the docker build context at the repository root so the
 # shared ./data catalog can be baked into the image alongside the
 # Go source tree under ./shopkeeper.
-FROM golang:1.25.1-alpine AS builder
+FROM golang:1.25-alpine AS builder
 ARG LIME_VERSION=dev
 ARG LIME_COMMIT=""
 WORKDIR /app

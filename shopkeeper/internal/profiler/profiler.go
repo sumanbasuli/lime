@@ -38,13 +38,10 @@ type urlEntry struct {
 }
 
 const (
-	fetchTimeout          = 30 * time.Second
-	fetchRetryDelay       = 400 * time.Millisecond
-	maxFetchRetries       = 3
-	xmlAcceptHeader       = "application/xml,text/xml;q=0.9,*/*;q=0.8"
-	pageAcceptHeader      = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-	resolveURLTimeout     = 10 * time.Second
-	resolveURLWorkerCount = 12
+	fetchTimeout    = 30 * time.Second
+	fetchRetryDelay = 400 * time.Millisecond
+	maxFetchRetries = 3
+	xmlAcceptHeader = "application/xml,text/xml;q=0.9,*/*;q=0.8"
 )
 
 var httpClient = newHTTPClient()
@@ -52,26 +49,6 @@ var httpClient = newHTTPClient()
 type requestProfile struct {
 	name      string
 	userAgent string
-}
-
-type discoveredURL struct {
-	index  int
-	rawURL string
-}
-
-type urlEligibilityOutcome struct {
-	index      int
-	finalURL   string
-	eligible   bool
-	redirected bool
-	external   bool
-	unresolved bool
-}
-
-type urlEligibilitySummary struct {
-	redirected int
-	external   int
-	unresolved int
 }
 
 var sitemapFetchProfiles = []requestProfile{
@@ -99,11 +76,6 @@ func Discover(ctx context.Context, sitemapURL string) ([]string, error) {
 	var result []string
 
 	if err := discoverRecursive(ctx, sitemapURL, seen, &result, 0); err != nil {
-		return nil, err
-	}
-
-	eligibleURLs, summary, err := filterEligibleURLs(ctx, sitemapURL, result)
-	if err != nil {
 		return nil, err
 	}
 

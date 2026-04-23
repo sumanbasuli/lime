@@ -94,7 +94,6 @@ make logs-ui
   - `VERSION`: `0.1.0`
   - Git tag / GitHub Release: `v0.1.0`
 - `CHANGELOG.md` must include a matching `## [0.1.0]` or `## v0.1.0` section; that section becomes the release notes.
-- The workflow installs dependencies, runs `make build`, publishes images via `scripts/publish-release-images.sh`, and publishes the GitHub Release via `scripts/publish-github-release.sh`.
 - A release pushes:
   - `ghcr.io/sumanbasuli/lime-shopkeeper:v0.1.0`
   - `ghcr.io/sumanbasuli/lime-ui:v0.1.0`

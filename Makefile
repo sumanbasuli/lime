@@ -7,12 +7,11 @@ VERSION := $(shell cat VERSION)
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DIST_DIR := dist
 BACKUP_DIR := $(DIST_DIR)/backups
-UI_IMAGE ?= lime-ui
-SHOPKEEPER_IMAGE ?= lime-shopkeeper
+UI_IMAGE := lime-ui
+SHOPKEEPER_IMAGE := lime-shopkeeper
 LIME_API_PORT ?= 8080
 LIME_UI_PORT ?= 3000
 LIME_IMAGE_TAG ?= v$(VERSION)
-DOCKER_BUILD_FLAGS ?= --pull
 SHOPKEEPER_LDFLAGS := -s -w \
   -X github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo.Version=$(VERSION) \
   -X github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo.Commit=$(GIT_COMMIT)
@@ -23,7 +22,6 @@ SHOPKEEPER_LDFLAGS := -s -w \
        migrate-all \
        build build-ui build-shopkeeper build-release-bundle \
        build-docker build-docker-ui build-docker-shopkeeper \
-       publish-release-images \
        backup-db update update-release \
        clean
 
@@ -102,31 +100,24 @@ build-release-bundle:
 
 build-docker: build-docker-shopkeeper build-docker-ui
 	@echo "Production images built:"
-	@echo "  $(SHOPKEEPER_IMAGE):$(LIME_IMAGE_TAG)"
-	@echo "  $(UI_IMAGE):$(LIME_IMAGE_TAG)"
+	@echo "  $(SHOPKEEPER_IMAGE):v$(VERSION)"
+	@echo "  $(UI_IMAGE):v$(VERSION)"
 
 build-docker-shopkeeper:
-	docker build $(DOCKER_BUILD_FLAGS) \
+	docker build \
 		--build-arg LIME_VERSION=$(VERSION) \
 		--build-arg LIME_COMMIT=$(GIT_COMMIT) \
-		--tag $(SHOPKEEPER_IMAGE):$(LIME_IMAGE_TAG) \
+		--tag $(SHOPKEEPER_IMAGE):v$(VERSION) \
 		--file shopkeeper/Dockerfile \
 		.
 
 build-docker-ui:
-	docker build $(DOCKER_BUILD_FLAGS) \
+	docker build \
 		--build-arg LIME_VERSION=$(VERSION) \
 		--build-arg LIME_COMMIT=$(GIT_COMMIT) \
-		--tag $(UI_IMAGE):$(LIME_IMAGE_TAG) \
+		--tag $(UI_IMAGE):v$(VERSION) \
 		--file lime/Dockerfile \
 		.
-
-publish-release-images:
-	LIME_IMAGE_REGISTRY="$(LIME_IMAGE_REGISTRY)" \
-	LIME_SHA_TAG="$(LIME_SHA_TAG)" \
-	PUBLISH_LATEST="$(PUBLISH_LATEST)" \
-	PUSH_IMAGES="$(PUSH_IMAGES)" \
-	./scripts/publish-release-images.sh $(LIME_IMAGE_TAG)
 
 # ---- Backup + update ----
 

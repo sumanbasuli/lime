@@ -66,14 +66,12 @@ The workflow:
 - reads `VERSION` and uses `v<VERSION>` as the release tag
 - requires a matching `CHANGELOG.md` section and uses it as the GitHub Release notes
 - refuses to overwrite an existing release tag that points at another commit
-- installs the repo toolchains and runs `make build` as the release preflight
 - builds and pushes:
   - `ghcr.io/<repo-owner>/lime-shopkeeper:<release-tag>`
   - `ghcr.io/<repo-owner>/lime-ui:<release-tag>`
 - also tags both images as `latest` and `sha-<commit>`
-- uses `scripts/publish-release-images.sh` for Docker publish logic
 - adds OCI labels for source, version, and revision
-- uses `scripts/publish-github-release.sh` to create or update the GitHub Release
+- creates or updates the GitHub Release
 - uploads a release bundle asset like `lime-v0.1.0-release.tar.gz`
 
 No build-time `NEXT_PUBLIC_API_URL` is used in this workflow anymore.
