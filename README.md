@@ -174,7 +174,7 @@ Issues and pull requests welcome. Before opening a PR:
 
 ## Release Checklist
 
-Maintainers publish a release by updating [VERSION](VERSION), adding matching notes in [CHANGELOG.md](CHANGELOG.md), and merging to `main`. [release-docker.yml](.github/workflows/release-docker.yml) creates the `v<version>` release, pushes both GHCR images, and uploads the Docker release bundle. The release tag must be new; bump `VERSION` for every release.
+Maintainers publish a release by updating [VERSION](VERSION), adding matching notes in [CHANGELOG.md](CHANGELOG.md), and merging to `main`. [release-docker.yml](.github/workflows/release-docker.yml) now runs `make build`, publishes the GHCR images through [`scripts/publish-release-images.sh`](scripts/publish-release-images.sh), and creates or updates the GitHub Release through [`scripts/publish-github-release.sh`](scripts/publish-github-release.sh). The release tag must be new; bump `VERSION` for every release.
 
 ## Support
 

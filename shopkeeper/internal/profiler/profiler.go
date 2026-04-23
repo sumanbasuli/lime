@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,10 +38,13 @@ type urlEntry struct {
 }
 
 const (
-	fetchTimeout    = 30 * time.Second
-	fetchRetryDelay = 400 * time.Millisecond
-	maxFetchRetries = 3
-	xmlAcceptHeader = "application/xml,text/xml;q=0.9,*/*;q=0.8"
+	fetchTimeout          = 30 * time.Second
+	fetchRetryDelay       = 400 * time.Millisecond
+	maxFetchRetries       = 3
+	xmlAcceptHeader       = "application/xml,text/xml;q=0.9,*/*;q=0.8"
+	pageAcceptHeader      = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+	resolveURLTimeout     = 10 * time.Second
+	resolveURLWorkerCount = 12
 )
 
 var httpClient = newHTTPClient()
@@ -47,6 +52,26 @@ var httpClient = newHTTPClient()
 type requestProfile struct {
 	name      string
 	userAgent string
+}
+
+type discoveredURL struct {
+	index  int
+	rawURL string
+}
+
+type urlEligibilityOutcome struct {
+	index      int
+	finalURL   string
+	eligible   bool
+	redirected bool
+	external   bool
+	unresolved bool
+}
+
+type urlEligibilitySummary struct {
+	redirected int
+	external   int
+	unresolved int
 }
 
 var sitemapFetchProfiles = []requestProfile{
@@ -77,8 +102,21 @@ func Discover(ctx context.Context, sitemapURL string) ([]string, error) {
 		return nil, err
 	}
 
-	log.Printf("Profiler: discovered %d unique URLs from %s", len(result), sitemapURL)
-	return result, nil
+	eligibleURLs, summary, err := filterEligibleURLs(ctx, sitemapURL, result)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf(
+		"Profiler: discovered %d unique URLs from %s; kept %d same-host URLs (%d redirected, %d cross-host skipped, %d unresolved skipped)",
+		len(result),
+		sitemapURL,
+		len(eligibleURLs),
+		summary.redirected,
+		summary.external,
+		summary.unresolved,
+	)
+	return eligibleURLs, nil
 }
 
 const maxDepth = 10
@@ -227,4 +265,203 @@ func isValidURL(rawURL string) bool {
 		return false
 	}
 	return u.Scheme == "http" || u.Scheme == "https"
+}
+
+func filterEligibleURLs(
+	ctx context.Context,
+	sitemapURL string,
+	discovered []string,
+) ([]string, urlEligibilitySummary, error) {
+	var summary urlEligibilitySummary
+
+	if len(discovered) == 0 {
+		return []string{}, summary, nil
+	}
+
+	parsedSitemapURL, err := url.Parse(sitemapURL)
+	if err != nil {
+		return nil, summary, fmt.Errorf("failed to parse sitemap URL %s: %w", sitemapURL, err)
+	}
+
+	allowedAuthority := normalizedAuthority(parsedSitemapURL)
+	if allowedAuthority == "" {
+		return nil, summary, fmt.Errorf("sitemap URL %s has no host", sitemapURL)
+	}
+
+	workerCount := resolveURLWorkerCount
+	if len(discovered) < workerCount {
+		workerCount = len(discovered)
+	}
+
+	jobs := make(chan discoveredURL)
+	results := make(chan urlEligibilityOutcome, len(discovered))
+
+	var wg sync.WaitGroup
+	for workerIndex := 0; workerIndex < workerCount; workerIndex++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for candidate := range jobs {
+				outcome, err := evaluateURLEligibility(ctx, candidate, allowedAuthority)
+				if err != nil {
+					return
+				}
+				results <- outcome
+			}
+		}()
+	}
+
+	for index, rawURL := range discovered {
+		if err := ctx.Err(); err != nil {
+			close(jobs)
+			wg.Wait()
+			close(results)
+			return nil, summary, err
+		}
+
+		jobs <- discoveredURL{index: index, rawURL: rawURL}
+	}
+
+	close(jobs)
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	outcomes := make([]urlEligibilityOutcome, len(discovered))
+	for outcome := range results {
+		outcomes[outcome.index] = outcome
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, summary, err
+	}
+
+	seenFinalURLs := make(map[string]bool, len(outcomes))
+	filtered := make([]string, 0, len(outcomes))
+	for _, outcome := range outcomes {
+		switch {
+		case outcome.eligible:
+			if outcome.redirected {
+				summary.redirected++
+			}
+			if !seenFinalURLs[outcome.finalURL] {
+				seenFinalURLs[outcome.finalURL] = true
+				filtered = append(filtered, outcome.finalURL)
+			}
+		case outcome.external:
+			summary.external++
+		default:
+			summary.unresolved++
+		}
+	}
+
+	return filtered, summary, nil
+}
+
+func evaluateURLEligibility(
+	ctx context.Context,
+	candidate discoveredURL,
+	allowedAuthority string,
+) (urlEligibilityOutcome, error) {
+	outcome := urlEligibilityOutcome{index: candidate.index}
+
+	resolveCtx, cancel := context.WithTimeout(ctx, resolveURLTimeout)
+	defer cancel()
+
+	finalURL, err := resolveFinalURL(resolveCtx, candidate.rawURL)
+	if err != nil {
+		if ctx.Err() != nil {
+			return outcome, ctx.Err()
+		}
+		outcome.unresolved = true
+		return outcome, nil
+	}
+
+	outcome.finalURL = canonicalizeURL(finalURL)
+	outcome.redirected = outcome.finalURL != canonicalizeURLString(candidate.rawURL)
+	if normalizedAuthority(finalURL) != allowedAuthority {
+		outcome.external = true
+		return outcome, nil
+	}
+
+	outcome.eligible = true
+	return outcome, nil
+}
+
+func resolveFinalURL(ctx context.Context, rawURL string) (*url.URL, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Accept", pageAcceptHeader)
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("User-Agent", sitemapFetchProfiles[1].userAgent)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.Request == nil || resp.Request.URL == nil {
+		return nil, fmt.Errorf("missing final request URL for %s", rawURL)
+	}
+
+	return resp.Request.URL, nil
+}
+
+func normalizedAuthority(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return ""
+	}
+
+	port := u.Port()
+	if port == "" || port == defaultPortForScheme(u.Scheme) {
+		return host
+	}
+
+	return net.JoinHostPort(host, port)
+}
+
+func defaultPortForScheme(scheme string) string {
+	switch strings.ToLower(scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	default:
+		return ""
+	}
+}
+
+func canonicalizeURLString(rawURL string) string {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+
+	return canonicalizeURL(parsedURL)
+}
+
+func canonicalizeURL(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+
+	normalized := *u
+	normalized.Scheme = strings.ToLower(normalized.Scheme)
+	normalized.Host = normalizedAuthority(u)
+	normalized.Fragment = ""
+	if normalized.Path == "" {
+		normalized.Path = "/"
+	}
+
+	return normalized.String()
 }
