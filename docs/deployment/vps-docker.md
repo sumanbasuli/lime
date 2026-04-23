@@ -25,7 +25,7 @@ This is the recommended VPS option. You run the published GHCR images via Docker
    $EDITOR .env
    ```
 
-   Set at least `LIME_IMAGE_TAG`, `DATABASE_URL`, and `SHOPKEEPER_URL`.
+   Set at least `LIME_IMAGE_REGISTRY`, `LIME_IMAGE_TAG`, `DATABASE_URL`, and `SHOPKEEPER_URL`.
 
 4. Start the stack:
 
@@ -51,6 +51,7 @@ The dev `docker-compose.yml` bundles its own PostgreSQL. Only use it if you do n
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
+| `LIME_IMAGE_REGISTRY` | yes (release) | GHCR namespace containing the published images, e.g. `ghcr.io/sumanbasuli` |
 | `LIME_IMAGE_TAG` | yes (release) | GHCR image tag to pin, e.g. `v0.1.0` |
 | `DATABASE_URL` | yes | PostgreSQL connection string used by both services |
 | `SHOPKEEPER_URL` | yes | URL the UI proxies `/api/...` to (internal Docker URL or external) |

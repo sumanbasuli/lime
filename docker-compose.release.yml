@@ -1,6 +1,6 @@
 services:
   shopkeeper:
-    image: ghcr.io/sumanbasuli/lime-shopkeeper:${LIME_IMAGE_TAG:?set LIME_IMAGE_TAG}
+    image: ${LIME_IMAGE_REGISTRY:-ghcr.io/sumanbasuli}/lime-shopkeeper:${LIME_IMAGE_TAG:?set LIME_IMAGE_TAG}
     restart: unless-stopped
     environment:
       ACT_RULES_PATH: /shared-data/act-rules.json
@@ -20,7 +20,7 @@ services:
       start_period: 30s
 
   ui:
-    image: ghcr.io/sumanbasuli/lime-ui:${LIME_IMAGE_TAG:?set LIME_IMAGE_TAG}
+    image: ${LIME_IMAGE_REGISTRY:-ghcr.io/sumanbasuli}/lime-ui:${LIME_IMAGE_TAG:?set LIME_IMAGE_TAG}
     restart: unless-stopped
     depends_on:
       - shopkeeper

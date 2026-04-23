@@ -60,15 +60,18 @@ These builds are generic. Runtime deployments must supply:
 
 ## GitHub Release Publishing
 
-Publishing a GitHub Release triggers [release-docker.yml](../../.github/workflows/release-docker.yml).
+Pushing to `main` triggers [release-docker.yml](../../.github/workflows/release-docker.yml).
 
 The workflow:
-- validates that `VERSION` matches the GitHub Release tag after `v` normalization
+- reads `VERSION` and uses `v<VERSION>` as the release tag
+- requires a matching `CHANGELOG.md` section and uses it as the GitHub Release notes
+- refuses to overwrite an existing release tag that points at another commit
 - builds and pushes:
-  - `ghcr.io/sumanbasuli/lime-shopkeeper:<release-tag>`
-  - `ghcr.io/sumanbasuli/lime-ui:<release-tag>`
-- publishes `latest` only for non-prerelease releases
+  - `ghcr.io/<repo-owner>/lime-shopkeeper:<release-tag>`
+  - `ghcr.io/<repo-owner>/lime-ui:<release-tag>`
+- also tags both images as `latest` and `sha-<commit>`
 - adds OCI labels for source, version, and revision
+- creates or updates the GitHub Release
 - uploads a release bundle asset like `lime-v0.1.0-release.tar.gz`
 
 No build-time `NEXT_PUBLIC_API_URL` is used in this workflow anymore.
@@ -93,6 +96,7 @@ The release stack is external-Postgres only. It ships only:
 - `ui`
 
 Required runtime env values:
+- `LIME_IMAGE_REGISTRY`
 - `LIME_IMAGE_TAG`
 - `DATABASE_URL`
 - `SHOPKEEPER_URL`
