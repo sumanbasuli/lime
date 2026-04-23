@@ -1,4 +1,4 @@
-import { buildIssueReportCsv } from "@/lib/issues-report-csv";
+import { buildIssueReportCsvStream } from "@/lib/issues-report-csv";
 import { loadIssueReportData } from "@/lib/issues-report-data";
 
 export const dynamic = "force-dynamic";
@@ -32,13 +32,13 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   const { id } = await context.params;
-  const data = await loadIssueReportData(id);
+  const data = await loadIssueReportData(id, { occurrenceLimit: 0 });
 
   if (!data) {
     return Response.json({ error: "Scan not found" }, { status: 404 });
   }
 
-  const csv = buildIssueReportCsv(data);
+  const csv = buildIssueReportCsvStream(data);
 
   return new Response(csv, {
     status: 200,
