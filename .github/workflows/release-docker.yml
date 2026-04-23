@@ -17,11 +17,11 @@ jobs:
         include:
           - name: ui
             image: ghcr.io/sumanbasuli/lime-ui
-            context: ./lime
+            context: .
             dockerfile: ./lime/Dockerfile
           - name: shopkeeper
             image: ghcr.io/sumanbasuli/lime-shopkeeper
-            context: ./shopkeeper
+            context: .
             dockerfile: ./shopkeeper/Dockerfile
 
     steps:
@@ -77,6 +77,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            LIME_VERSION=${{ steps.version.outputs.file_version }}
+            LIME_COMMIT=${{ github.sha }}
 
   bundle:
     runs-on: ubuntu-latest

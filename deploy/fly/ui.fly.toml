@@ -1,0 +1,52 @@
+# Fly.io config for the LIME UI (NextJS).
+#
+# Deploy target:
+#   fly deploy --config deploy/fly/ui.fly.toml \
+#     --image ghcr.io/sumanbasuli/lime-ui:v0.1.0 \
+#     --app lime-ui
+#
+# The UI proxies /api/... requests to the Shopkeeper app over
+# Fly's private network. SHOPKEEPER_URL must be set to the internal
+# DNS name of the Shopkeeper app, e.g. http://lime-shopkeeper.internal:8080.
+
+app = "lime-ui"
+primary_region = "iad"
+
+[build]
+  image = "ghcr.io/sumanbasuli/lime-ui:latest"
+
+[env]
+  ACT_RULES_PATH = "/shared-data/act-rules.json"
+  AXE_RULES_PATH = "/shared-data/axe-rules.json"
+  AXE_ACT_MAPPING_PATH = "/shared-data/axe-act-mapping.json"
+  AXE_GUIDANCE_PATH = "/shared-data/axe-guidance.json"
+  SHOPKEEPER_URL = "http://lime-shopkeeper.internal:8080"
+  LIME_GITHUB_REPO = "sumanbasuli/lime"
+  # Set LIME_UPDATE_CHECK=true via `fly secrets set` (or in this file) to
+  # show update notices in the sidebar. Default off.
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 80
+    hard_limit = 160
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "30s"
+  method = "get"
+  path = "/"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[deploy]
+  strategy = "rolling"

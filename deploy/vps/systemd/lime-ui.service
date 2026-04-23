@@ -1,0 +1,26 @@
+[Unit]
+Description=LIME UI (NextJS dashboard)
+After=network-online.target lime-shopkeeper.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lime
+Group=lime
+WorkingDirectory=/opt/lime/ui
+# EnvironmentFile must define DATABASE_URL, SHOPKEEPER_URL, PORT=3000,
+# and optionally LIME_VERSION, LIME_UPDATE_CHECK, LIME_GITHUB_REPO.
+EnvironmentFile=/etc/lime/ui.env
+ExecStart=/usr/bin/node /opt/lime/ui/server.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+NoNewPrivileges=yes
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

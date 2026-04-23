@@ -21,6 +21,7 @@ interface IssueFalsePositiveButtonProps {
   issueId: string;
   isFalsePositive: boolean;
   className?: string;
+  onFalsePositiveChange?: (issueId: string, isFalsePositive: boolean) => void;
 }
 
 export function IssueFalsePositiveButton({
@@ -28,6 +29,7 @@ export function IssueFalsePositiveButton({
   issueId,
   isFalsePositive,
   className,
+  onFalsePositiveChange,
 }: IssueFalsePositiveButtonProps) {
   const router = useRouter();
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -78,7 +80,9 @@ export function IssueFalsePositiveButton({
         await markIssueFalsePositive(scanId, issueId);
       }
 
-      setLocalIsFalsePositive((current) => !current);
+      const nextIsFalsePositive = !localIsFalsePositive;
+      setLocalIsFalsePositive(nextIsFalsePositive);
+      onFalsePositiveChange?.(issueId, nextIsFalsePositive);
       setIsPending(false);
       setShowSuccess(true);
 

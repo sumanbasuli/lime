@@ -18,7 +18,7 @@ import {
 import { getLighthouseAccessibilityWeight } from "@/lib/scan-scoring";
 
 export const ISSUE_SUMMARIES_PAGE_SIZE = 12;
-export const ISSUE_OCCURRENCES_PAGE_SIZE = 50;
+export const ISSUE_OCCURRENCES_PAGE_SIZE = 25;
 
 export interface IssueListCounts {
   activeIssueCount: number;
@@ -115,6 +115,17 @@ function severitySortOrder(
   }
 }
 
+function compareFailedIssueSummaries(
+  left: FailedIssueSummaryItem,
+  right: FailedIssueSummaryItem
+): number {
+  return (
+    right.weight - left.weight ||
+    severitySortOrder(left.severity) - severitySortOrder(right.severity) ||
+    left.title.localeCompare(right.title)
+  );
+}
+
 async function loadIssueSummaries(scanId: string): Promise<{
   items: IssueSummaryItem[];
   counts: IssueListCounts;
@@ -152,11 +163,7 @@ async function loadIssueSummaries(scanId: string): Promise<{
         scored: weight > 0,
       };
     })
-    .sort(
-      (left, right) =>
-        right.weight - left.weight ||
-        severitySortOrder(left.severity) - severitySortOrder(right.severity)
-    );
+    .sort(compareFailedIssueSummaries);
 
   const failedRuleIds = new Set(failedIssues.map((issue) => issue.violationType));
 
@@ -230,12 +237,18 @@ async function loadIssueSummaries(scanId: string): Promise<{
       (left, right) =>
         right.weight - left.weight || left.title.localeCompare(right.title)
     );
+  const activeFailedIssues = failedIssues.filter(
+    (issue) => !issue.isFalsePositive
+  );
+  const falsePositiveIssues = failedIssues.filter(
+    (issue) => issue.isFalsePositive
+  );
 
   return {
-    items: [...failedIssues, ...needsReviewIssues],
+    items: [...activeFailedIssues, ...needsReviewIssues, ...falsePositiveIssues],
     counts: {
-      activeIssueCount: failedIssues.filter((issue) => !issue.isFalsePositive).length,
-      excludedIssueCount: failedIssues.filter((issue) => issue.isFalsePositive).length,
+      activeIssueCount: activeFailedIssues.length,
+      excludedIssueCount: falsePositiveIssues.length,
       needsReviewCount: needsReviewIssues.length,
       totalIssueCardCount: failedIssues.length + needsReviewIssues.length,
     },
@@ -487,12 +500,99 @@ export async function loadIssueSummaryByKey(
   kind: IssueSummaryItem["kind"],
   key: string
 ): Promise<IssueSummaryItem | null> {
-  const { items } = await loadIssueSummaries(scanId);
-  return items.find(
-    (item) =>
-      item.kind === kind &&
-      (item.kind === "failed" ? item.issueId === key : item.ruleId === key)
-  ) ?? null;
+  if (kind === "failed") {
+    const [issue] = await db
+      .select({
+        issueId: issues.id,
+        violationType: issues.violationType,
+        title: issues.description,
+        helpUrl: issues.helpUrl,
+        severity: issues.severity,
+        isFalsePositive: issues.isFalsePositive,
+        occurrenceCount: count(issueOccurrences.id),
+      })
+      .from(issues)
+      .leftJoin(issueOccurrences, eq(issueOccurrences.issueId, issues.id))
+      .where(and(eq(issues.scanId, scanId), eq(issues.id, key)))
+      .groupBy(issues.id)
+      .limit(1);
+
+    if (!issue) {
+      return null;
+    }
+
+    const weight = getLighthouseAccessibilityWeight(issue.violationType);
+    return {
+      kind: "failed",
+      key: issue.issueId,
+      issueId: issue.issueId,
+      violationType: issue.violationType,
+      title: issue.title,
+      helpUrl: issue.helpUrl,
+      severity: issue.severity,
+      isFalsePositive: issue.isFalsePositive,
+      occurrenceCount: issue.occurrenceCount,
+      weight,
+      scored: weight > 0,
+    };
+  }
+
+  const [failedRuleRows, incompleteOccurrenceRows, incompleteAuditRows, axeRuleCatalog] =
+    await Promise.all([
+      db
+        .select({ value: count() })
+        .from(issues)
+        .where(and(eq(issues.scanId, scanId), eq(issues.violationType, key))),
+      db
+        .select({ value: count() })
+        .from(urlAuditOccurrences)
+        .innerJoin(urls, eq(urls.id, urlAuditOccurrences.urlId))
+        .where(
+          and(
+            eq(urls.scanId, scanId),
+            eq(urls.status, "completed"),
+            eq(urlAuditOccurrences.ruleId, key),
+            eq(urlAuditOccurrences.outcome, "incomplete")
+          )
+        ),
+      db
+        .select({ value: count() })
+        .from(urlAudits)
+        .innerJoin(urls, eq(urls.id, urlAudits.urlId))
+        .where(
+          and(
+            eq(urls.scanId, scanId),
+            eq(urls.status, "completed"),
+            eq(urlAudits.ruleId, key),
+            eq(urlAudits.outcome, "incomplete")
+          )
+        ),
+      getAxeRuleCatalog(),
+    ]);
+
+  if ((failedRuleRows[0]?.value ?? 0) > 0) {
+    return null;
+  }
+
+  const occurrenceCount =
+    (incompleteOccurrenceRows[0]?.value ?? 0) ||
+    (incompleteAuditRows[0]?.value ?? 0);
+  if (occurrenceCount === 0) {
+    return null;
+  }
+
+  const weight = getLighthouseAccessibilityWeight(key);
+  const metadata = axeRuleCatalog[key];
+  return {
+    kind: "needs_review",
+    key,
+    ruleId: key,
+    title: metadata?.help || key,
+    helpUrl: metadata?.helpUrl || null,
+    occurrenceCount,
+    weight,
+    scored: weight > 0,
+  };
 }
 
 export async function loadIssueDetailWithSummary(

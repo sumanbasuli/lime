@@ -1,0 +1,32 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+dist
+out
+coverage
+*.log
+
+# Go
+shopkeeper/.cache
+shopkeeper/bin
+shopkeeper/tmp
+shopkeeper/screenshots
+shopkeeper/*.test
+
+# Node/Next
+lime/node_modules
+lime/.next
+lime/out
+lime/coverage
+lime/*.tsbuildinfo
+lime/next-env.d.ts
+
+# Editor/OS
+.vscode
+.idea
+.DS_Store
+*.swp

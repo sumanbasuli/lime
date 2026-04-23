@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/actrules"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
@@ -63,6 +64,14 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "ok",
 		"service": "shopkeeper",
+	})
+}
+
+// Version reports the embedded build version and commit SHA.
+func (h *Handler) Version(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"version": buildinfo.Version,
+		"commit":  buildinfo.Commit,
 	})
 }
 

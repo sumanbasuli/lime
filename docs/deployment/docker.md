@@ -43,10 +43,10 @@ Important local detail:
 
 ## Production Build Targets
 
-The root [Makefile](/Users/txsadhu/Documents/Campuspress/lime/Makefile) exposes:
+The root [Makefile](../../Makefile) exposes:
 
 - `make build` for production artifacts in `dist/`
-- `make build-docker` for local production image builds tagged from [VERSION](/Users/txsadhu/Documents/Campuspress/lime/VERSION)
+- `make build-docker` for local production image builds tagged from [VERSION](../../VERSION)
 - `make migrate-all` to run `./shopkeeper --migrate` in a one-off Shopkeeper container against the local Docker database
 
 Local image names:
@@ -60,7 +60,7 @@ These builds are generic. Runtime deployments must supply:
 
 ## GitHub Release Publishing
 
-Publishing a GitHub Release triggers [release-docker.yml](/Users/txsadhu/Documents/Campuspress/lime/.github/workflows/release-docker.yml).
+Publishing a GitHub Release triggers [release-docker.yml](../../.github/workflows/release-docker.yml).
 
 The workflow:
 - validates that `VERSION` matches the GitHub Release tag after `v` normalization

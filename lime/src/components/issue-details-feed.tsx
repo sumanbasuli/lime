@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ChevronRightIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -29,7 +29,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const ISSUE_SUMMARIES_PAGE_SIZE = 12;
-const ISSUE_OCCURRENCES_PAGE_SIZE = 50;
+const ISSUE_OCCURRENCES_PAGE_SIZE = 25;
 
 const CodeSnippet = dynamic(
   () => import("@/components/code-snippet").then((module) => module.CodeSnippet),
@@ -212,6 +212,57 @@ function occurrencePageCapture(occ: { screenshotPath: string | null }) {
 
 function formatOccurrenceLabel(count: number): string {
   return `${count} occurrence${count === 1 ? "" : "s"}`;
+}
+
+function severitySortOrder(
+  severity: "critical" | "serious" | "moderate" | "minor"
+): number {
+  switch (severity) {
+    case "critical":
+      return 0;
+    case "serious":
+      return 1;
+    case "moderate":
+      return 2;
+    case "minor":
+    default:
+      return 3;
+  }
+}
+
+function issueSummaryRank(item: IssueSummaryItem): number {
+  if (item.kind === "failed" && !item.isFalsePositive) {
+    return 0;
+  }
+  if (item.kind === "needs_review") {
+    return 1;
+  }
+  return 2;
+}
+
+function compareIssueSummaryItems(
+  left: IssueSummaryItem,
+  right: IssueSummaryItem
+): number {
+  const rankDifference = issueSummaryRank(left) - issueSummaryRank(right);
+  if (rankDifference !== 0) {
+    return rankDifference;
+  }
+
+  const weightDifference = right.weight - left.weight;
+  if (weightDifference !== 0) {
+    return weightDifference;
+  }
+
+  if (left.kind === "failed" && right.kind === "failed") {
+    const severityDifference =
+      severitySortOrder(left.severity) - severitySortOrder(right.severity);
+    if (severityDifference !== 0) {
+      return severityDifference;
+    }
+  }
+
+  return left.title.localeCompare(right.title);
 }
 
 function ACTRuleCard({
@@ -495,9 +546,11 @@ function IssueDetailLoading() {
 function IssueCard({
   scanId,
   item,
+  onFalsePositiveChange,
 }: {
   scanId: string;
   item: IssueSummaryItem;
+  onFalsePositiveChange: (issueId: string, isFalsePositive: boolean) => void;
 }) {
   const [summary, setSummary] = useState(item);
   const [open, setOpen] = useState(false);
@@ -623,7 +676,7 @@ function IssueCard({
               summary.kind === "failed" ? "pr-36 sm:pr-40" : "pr-4"
             )}
           >
-            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-all duration-200">
+            <div className="issue-expander mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-all duration-200">
               <ChevronRightIcon
                 className={cn(
                   "h-4 w-4 transition-transform duration-200",
@@ -669,13 +722,13 @@ function IssueCard({
                   rel="noopener noreferrer"
                   className="pointer-events-auto mt-2 inline-flex max-w-full items-start gap-1 font-heading text-[15px] font-bold leading-tight text-foreground hover:underline"
                 >
-                  <span className="truncate sm:whitespace-normal">
+                  <span className="issue-card-heading truncate sm:whitespace-normal">
                     {summary.title}
                   </span>
                   <ExternalLinkIcon className="mt-0.5 h-3 w-3 shrink-0" />
                 </a>
               ) : (
-                <h2 className="mt-2 font-heading text-[15px] font-bold leading-tight text-foreground">
+                <h2 className="issue-card-heading mt-2 font-heading text-[15px] font-bold leading-tight text-foreground">
                   {summary.title}
                 </h2>
               )}
@@ -705,6 +758,7 @@ function IssueCard({
               scanId={scanId}
               issueId={summary.issueId}
               isFalsePositive={summary.isFalsePositive}
+              onFalsePositiveChange={onFalsePositiveChange}
               className="absolute right-4 top-4 z-20"
             />
           )}
@@ -829,9 +883,23 @@ export function IssueDetailsFeed({
   const [items, setItems] = useState(initialItems);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const hasMore = items.length < totalItemCount;
+
+  const handleFalsePositiveChange = useCallback(
+    (issueId: string, isFalsePositive: boolean) => {
+      setItems((currentItems) =>
+        currentItems
+          .map((item) =>
+            item.kind === "failed" && item.issueId === issueId
+              ? { ...item, isFalsePositive }
+              : item
+          )
+          .sort(compareIssueSummaryItems)
+      );
+    },
+    []
+  );
 
   const loadMore = useCallback(async () => {
     if (isLoadingMore || !hasMore) {
@@ -867,7 +935,7 @@ export function IssueDetailsFeed({
                 currentItem.key === nextItem.key
             )
         ),
-      ]);
+      ].sort(compareIssueSummaryItems));
     } catch (error) {
       setLoadMoreError(
         error instanceof Error ? error.message : "Failed to load more issues"
@@ -877,25 +945,6 @@ export function IssueDetailsFeed({
     }
   }, [hasMore, isLoadingMore, items.length, scanId]);
 
-  useEffect(() => {
-    if (!hasMore || !sentinelRef.current) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const [entry] = entries;
-        if (entry?.isIntersecting) {
-          void loadMore();
-        }
-      },
-      { rootMargin: "500px 0px" }
-    );
-
-    observer.observe(sentinelRef.current);
-    return () => observer.disconnect();
-  }, [hasMore, loadMore, items.length]);
-
   return (
     <div className="space-y-3">
       {items.map((item) => (
@@ -903,16 +952,17 @@ export function IssueDetailsFeed({
           key={`${item.kind}-${item.key}`}
           scanId={scanId}
           item={item}
+          onFalsePositiveChange={handleFalsePositiveChange}
         />
       ))}
 
       {hasMore && (
-        <div ref={sentinelRef} className="space-y-3">
+        <div className="space-y-3">
           {isLoadingMore && <LoadingIssueCards />}
           {!isLoadingMore && (
             <div className="rounded-xl border border-dashed bg-card p-4 text-sm text-muted-foreground">
-              Loaded {items.length} of {totalItemCount} issue groups. Scroll to
-              load more, or use the button below.
+              Loaded {items.length} of {totalItemCount} issue groups. Load the
+              next batch when you need it.
             </div>
           )}
           <Button

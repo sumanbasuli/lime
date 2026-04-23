@@ -36,6 +36,10 @@ export interface ScanAuditRecordInput {
   outcome: StoredAuditOutcome;
 }
 
+export interface ScanAuditPageCountInput extends ScanAuditRecordInput {
+  pageCount: number;
+}
+
 export interface ScanScoreSummary {
   score: number | null;
   hasScore: boolean;
@@ -261,11 +265,34 @@ export function buildScanAuditReport(options: {
     totalUrlCount: number;
   };
 }): ScanAuditReport {
+  return buildScanAuditReportFromPageCounts({
+    auditPageCounts: options.auditRecords.map((record) => ({
+      ...record,
+      pageCount: 1,
+    })),
+    falsePositiveRuleIds: options.falsePositiveRuleIds,
+    definitions: options.definitions,
+    scanStatus: options.scanStatus,
+    coverage: options.coverage,
+  });
+}
+
+export function buildScanAuditReportFromPageCounts(options: {
+  auditPageCounts: ScanAuditPageCountInput[];
+  falsePositiveRuleIds?: Iterable<string>;
+  definitions?: Record<string, ScanAuditMetadata>;
+  scanStatus: string;
+  coverage: {
+    completedUrlCount: number;
+    failedUrlCount: number;
+    totalUrlCount: number;
+  };
+}): ScanAuditReport {
   const grouped = new Map<string, Record<StoredAuditOutcome, number>>();
 
-  for (const record of options.auditRecords) {
+  for (const record of options.auditPageCounts) {
     const pageCounts = grouped.get(record.ruleId) ?? createEmptyPageCounts();
-    pageCounts[record.outcome] += 1;
+    pageCounts[record.outcome] += record.pageCount;
     grouped.set(record.ruleId, pageCounts);
   }
 
