@@ -12,6 +12,12 @@ services:
     volumes:
       - ./data:/shared-data:ro
       - screenshots:/app/screenshots
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   ui:
     image: ghcr.io/sumanbasuli/lime-ui:${LIME_IMAGE_TAG:?set LIME_IMAGE_TAG}
@@ -25,6 +31,8 @@ services:
       AXE_GUIDANCE_PATH: /shared-data/axe-guidance.json
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
       SHOPKEEPER_URL: ${SHOPKEEPER_URL:?set SHOPKEEPER_URL}
+      LIME_UPDATE_CHECK: ${LIME_UPDATE_CHECK:-false}
+      LIME_GITHUB_REPO: ${LIME_GITHUB_REPO:-sumanbasuli/lime}
     ports:
       - "${LIME_UI_PORT:-3000}:3000"
     volumes:

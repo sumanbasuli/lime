@@ -40,6 +40,7 @@ func Setup(
 	// Routes
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", h.HealthCheck)
+		r.Get("/version", h.Version)
 		r.Get("/stats", h.GetStats)
 
 		r.Route("/scans", func(r chi.Router) {

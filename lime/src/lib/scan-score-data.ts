@@ -3,8 +3,9 @@ import { db } from "@/db";
 import { issues, urlAudits, urls } from "@/db/schema";
 import { getAxeRuleCatalog } from "@/lib/act-rules";
 import {
-  buildScanAuditReport,
+  buildScanAuditReportFromPageCounts,
   type ScanAuditReport,
+  type ScanAuditPageCountInput,
   type ScanScoreSummary,
   type StoredAuditOutcome,
 } from "@/lib/scan-scoring";
@@ -85,6 +86,7 @@ export async function getScanAuditReports(
     scanId: string;
     ruleId: string;
     outcome: string;
+    pageCount: number;
   }> = [];
 
   try {
@@ -93,10 +95,12 @@ export async function getScanAuditReports(
         scanId: urls.scanId,
         ruleId: urlAudits.ruleId,
         outcome: urlAudits.outcome,
+        pageCount: count(),
       })
       .from(urlAudits)
       .innerJoin(urls, eq(urls.id, urlAudits.urlId))
-      .where(and(inArray(urls.scanId, scanIds), eq(urls.status, "completed")));
+      .where(and(inArray(urls.scanId, scanIds), eq(urls.status, "completed")))
+      .groupBy(urls.scanId, urlAudits.ruleId, urlAudits.outcome);
   } catch (error) {
     if (!isMissingAuditStorageError(error)) {
       throw error;
@@ -114,15 +118,13 @@ export async function getScanAuditReports(
     ])
   );
 
-  const auditRowsByScan = new Map<
-    string,
-    Array<{ ruleId: string; outcome: StoredAuditOutcome }>
-  >();
+  const auditRowsByScan = new Map<string, ScanAuditPageCountInput[]>();
   for (const row of auditRows) {
     const scanAuditRows = auditRowsByScan.get(row.scanId) ?? [];
     scanAuditRows.push({
       ruleId: row.ruleId,
       outcome: row.outcome as StoredAuditOutcome,
+      pageCount: row.pageCount,
     });
     auditRowsByScan.set(row.scanId, scanAuditRows);
   }
@@ -159,8 +161,8 @@ export async function getScanAuditReports(
 
   const reports: Record<string, ScanAuditReport> = {};
   for (const scan of scansToLoad) {
-    reports[scan.id] = buildScanAuditReport({
-      auditRecords: auditRowsByScan.get(scan.id) ?? [],
+    reports[scan.id] = buildScanAuditReportFromPageCounts({
+      auditPageCounts: auditRowsByScan.get(scan.id) ?? [],
       falsePositiveRuleIds: falsePositiveRuleIdsByScan.get(scan.id),
       definitions: metadataByRuleId,
       scanStatus: scan.status,

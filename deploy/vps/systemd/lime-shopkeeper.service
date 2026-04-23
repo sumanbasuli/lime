@@ -1,0 +1,25 @@
+[Unit]
+Description=LIME Shopkeeper (Go backend + Chromium accessibility scanner)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lime
+Group=lime
+WorkingDirectory=/opt/lime/shopkeeper
+# EnvironmentFile must define DATABASE_URL and optionally SHOPKEEPER_PORT,
+# ACT_RULES_PATH, AXE_BUNDLE_PATH, CHROMIUM_PATH.
+EnvironmentFile=/etc/lime/shopkeeper.env
+ExecStart=/opt/lime/shopkeeper/shopkeeper
+Restart=on-failure
+RestartSec=5
+# Chromium needs room for /dev/shm. If /dev/shm is tiny, Chromium uses disk fallback.
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+NoNewPrivileges=yes
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -5,6 +5,10 @@ import {
   getAccessibilityScoreBand,
   getLighthouseAccessibilityWeight,
 } from "@/lib/scan-scoring";
+import {
+  REPORT_MEDIA_SAMPLE_LIMIT,
+  REPORT_OCCURRENCE_SAMPLE_LIMIT,
+} from "@/lib/issues-report-data";
 import type {
   IssueReportData,
   ReportIssueGroup,
@@ -848,6 +852,15 @@ function elementScreenshotUrl(path: string): string {
   return "";
 }
 
+function focusedPreviewPath(path: string): string {
+  const extensionIndex = path.lastIndexOf(".");
+  if (extensionIndex === -1) {
+    return `${path}_preview`;
+  }
+
+  return `${path.slice(0, extensionIndex)}_preview${path.slice(extensionIndex)}`;
+}
+
 function occurrenceScreenshot(occ: {
   elementScreenshotPath: string | null;
 }) {
@@ -903,13 +916,23 @@ function getScoreChip(summary: IssueReportData["scoreSummary"]): {
 }
 
 function getScoreCopy(data: IssueReportData): string {
-  const { scoreSummary, scan, activeIssueCount } = data;
+  const { scoreSummary, scan, failedIssueCount, needsReviewIssueCount } = data;
+  const issueSummary = `${failedIssueCount} failed issue group${
+    failedIssueCount === 1 ? "" : "s"
+  }${
+    needsReviewIssueCount > 0
+      ? ` and ${needsReviewIssueCount} review-required check${
+          needsReviewIssueCount === 1 ? "" : "s"
+        }`
+      : ""
+  }`;
+
   if (scoreSummary.hasScore && scoreSummary.score !== null) {
     if (scoreSummary.isPartialScan) {
       return `The current accessibility score is based on ${scoreSummary.completedUrlCount} completed pages out of ${scoreSummary.totalUrlCount}. ${scoreSummary.failedUrlCount} pages failed during scanning, so the score reflects completed pages only until those failed pages are retried.`;
     }
 
-    return `This report includes ${activeIssueCount} weighted failed issue groups across ${scoreSummary.completedUrlCount} completed pages.`;
+    return `This report includes ${issueSummary} across ${scoreSummary.completedUrlCount} completed pages.`;
   }
 
   if (scan.status === "paused") {
@@ -920,7 +943,7 @@ function getScoreCopy(data: IssueReportData): string {
     return "This scan failed before a final score could be calculated. The report includes any findings that were successfully persisted.";
   }
 
-  return "No weighted accessibility score is available for this scan. The report still includes the weighted failed issue detail breakdown.";
+  return "No weighted accessibility score is available for this scan. The report still includes the failed and review-required issue detail breakdown.";
 }
 
 function DetailList({
@@ -1129,14 +1152,24 @@ function GuidanceSection({
 
 function OccurrenceSection({
   occurrences,
+  mediaLimit,
 }: {
   occurrences: ReportOccurrence[];
+  mediaLimit: number;
 }) {
   return (
     <section className="occurrence-list">
-      {occurrences.map((occurrence) => {
-        const screenshot = occurrenceScreenshot(occurrence);
-        const pageCapture = occurrencePageCapture(occurrence);
+      {occurrences.map((occurrence, index) => {
+        const shouldRenderMedia = index < mediaLimit;
+        const hasStoredMedia =
+          Boolean(occurrence.elementScreenshotPath) ||
+          Boolean(occurrence.screenshotPath);
+        const screenshot = shouldRenderMedia
+          ? occurrenceScreenshot(occurrence)
+          : null;
+        const pageCapture = shouldRenderMedia
+          ? occurrencePageCapture(occurrence)
+          : null;
 
         return (
           <article key={occurrence.id} className="occurrence-card">
@@ -1169,7 +1202,7 @@ function OccurrenceSection({
                   <div className="media-card">
                     <div className="occurrence-label">{screenshot.label}</div>
                     <img
-                      src={elementScreenshotUrl(screenshot.path)}
+                      src={elementScreenshotUrl(focusedPreviewPath(screenshot.path))}
                       alt={screenshot.label}
                     />
                   </div>
@@ -1188,7 +1221,9 @@ function OccurrenceSection({
 
             {!occurrence.htmlSnippet && !screenshot && !pageCapture && (
               <p className="small-copy" style={{ marginTop: "10px" }}>
-                No stored element context was available for this occurrence.
+                {hasStoredMedia
+                  ? "Screenshot available in the interactive issue page."
+                  : "No stored element context was available for this occurrence."}
               </p>
             )}
           </article>
@@ -1198,16 +1233,27 @@ function OccurrenceSection({
   );
 }
 
-function FailedIssueCard({ issueGroup }: { issueGroup: ReportIssueGroup }) {
-  const { issue, occurrences, complianceReferences, axeRuleDescription } = issueGroup;
+function ReportIssueCard({ issueGroup }: { issueGroup: ReportIssueGroup }) {
+  const {
+    kind,
+    issue,
+    occurrences,
+    occurrenceCount,
+    complianceReferences,
+    axeRuleDescription,
+  } = issueGroup;
   const suggestedChangesSummary = buildSuggestedChangesSummary(issue.suggestedFixes);
   const weight = getLighthouseAccessibilityWeight(issue.violationType);
+  const omittedOccurrenceCount = Math.max(occurrenceCount - occurrences.length, 0);
+  const isNeedsReview = kind === "needs_review";
 
   return (
     <article className="issue-card">
       <header className="issue-card-header">
         <div className="section-kicker">Expanded findings</div>
-        <div className="issue-kicker">Failed check</div>
+        <div className="issue-kicker">
+          {isNeedsReview ? "Needs review" : "Failed check"}
+        </div>
         <h3 className="issue-title">
           {issue.helpUrl ? <a href={issue.helpUrl}>{issue.description}</a> : issue.description}
         </h3>
@@ -1215,15 +1261,24 @@ function FailedIssueCard({ issueGroup }: { issueGroup: ReportIssueGroup }) {
           <p className="issue-description">{axeRuleDescription}</p>
         )}
         <div className="issue-badges">
-          <span className="pill pill-neutral">{issue.severity}</span>
+          {issue.severity ? (
+            <span className="pill pill-neutral">{issue.severity}</span>
+          ) : (
+            <span className="pill pill-yellow">Needs review</span>
+          )}
           {weight > 0 ? (
             <span className="pill pill-neutral">Weight {weight}</span>
           ) : (
             <span className="pill pill-neutral">Not scored</span>
           )}
           <span className="pill pill-neutral">
-            {formatOccurrenceLabel(occurrences.length)}
+            {formatOccurrenceLabel(occurrenceCount)}
           </span>
+          {omittedOccurrenceCount > 0 && (
+            <span className="pill pill-neutral">
+              Showing first {occurrences.length}
+            </span>
+          )}
         </div>
       </header>
 
@@ -1248,7 +1303,19 @@ function FailedIssueCard({ issueGroup }: { issueGroup: ReportIssueGroup }) {
 
         <section>
           <div className="section-kicker">Affected elements</div>
-          <OccurrenceSection occurrences={occurrences} />
+          {omittedOccurrenceCount > 0 && (
+            <p className="small-copy" style={{ marginBottom: "10px" }}>
+              This PDF includes the first {occurrences.length} examples from{" "}
+              {formatOccurrenceLabel(occurrenceCount)} with screenshot previews to
+              keep report generation fast. Open the interactive issue page to load the remaining{" "}
+              {omittedOccurrenceCount} occurrence
+              {omittedOccurrenceCount === 1 ? "" : "s"} on demand.
+            </p>
+          )}
+          <OccurrenceSection
+            occurrences={occurrences}
+            mediaLimit={REPORT_MEDIA_SAMPLE_LIMIT}
+          />
         </section>
       </div>
     </article>
@@ -1280,8 +1347,9 @@ function CoverPage({ data }: { data: IssueReportData }) {
           {extractHost(scan.sitemapUrl)} accessibility findings
         </h1>
         <p className="cover-subtitle">
-          A printable, expanded record of every weighted failed issue captured by
-          Lime for this scan.
+          A printable, fast-loading record of failed and review-required
+          accessibility findings captured by Lime for this scan, with
+          representative affected-element examples.
         </p>
       </div>
 
@@ -1294,6 +1362,10 @@ function CoverPage({ data }: { data: IssueReportData }) {
 }
 
 function TableOfContentsPage({ data }: { data: IssueReportData }) {
+  const issueCopy =
+    data.needsReviewIssueCount > 0
+      ? `${data.failedIssueCount} failed issue groups and ${data.needsReviewIssueCount} review-required checks included, with up to ${REPORT_OCCURRENCE_SAMPLE_LIMIT} affected-element examples per group.`
+      : `${data.failedIssueCount} failed issue groups included, with up to ${REPORT_OCCURRENCE_SAMPLE_LIMIT} affected-element examples per group.`;
   const tocItems = [
     {
       title: "Accessibility score and severity breakdown",
@@ -1301,9 +1373,9 @@ function TableOfContentsPage({ data }: { data: IssueReportData }) {
       href: "#accessibility-summary",
     },
     {
-      title: "Failed checks",
-      copy: `${data.activeIssueCount} weighted failed issue groups included in this report.`,
-      href: "#failed-checks",
+      title: "Failed and review-required checks",
+      copy: issueCopy,
+      href: "#issue-checks",
     },
   ];
 
@@ -1386,6 +1458,12 @@ export function IssuesReportDocument({ data }: { data: IssueReportData }) {
               copy="Lower-severity quality issues."
               className="severity-minor"
             />
+            <SeverityCard
+              label="Needs review"
+              value={data.needsReviewIssueCount}
+              copy="Automated checks that require manual confirmation."
+              className="severity-review"
+            />
           </div>
 
           <div className="footer-note">
@@ -1396,22 +1474,24 @@ export function IssuesReportDocument({ data }: { data: IssueReportData }) {
         </section>
 
         {data.issuesWithOccurrences.length > 0 ? (
-          <div id="failed-checks" className="issue-list">
+          <div id="issue-checks" className="issue-list">
             {data.issuesWithOccurrences.map((issueGroup) => (
-              <FailedIssueCard
-                key={issueGroup.issue.id}
+              <ReportIssueCard
+                key={`${issueGroup.kind}-${issueGroup.issue.id}`}
                 issueGroup={issueGroup}
               />
             ))}
           </div>
         ) : (
-          <section id="failed-checks" className="page page-break-before">
+          <section id="issue-checks" className="page page-break-before">
             <div className="section-header">
               <div>
                 <div className="section-kicker">Expanded findings</div>
-                <h2 className="section-title">Failed checks</h2>
+                <h2 className="section-title">
+                  Failed and review-required checks
+                </h2>
                 <p className="section-copy">
-                  No weighted failed checks were stored for this scan.
+                  No failed or review-required checks were stored for this scan.
                 </p>
               </div>
             </div>

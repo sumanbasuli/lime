@@ -14,7 +14,7 @@ import (
 
 const (
 	reportRenderTimeout = 4 * time.Minute
-	assetWaitTimeout    = 20 * time.Second
+	assetWaitTimeout    = 6 * time.Second
 )
 
 // Reporter renders scan reports to PDF using the shared Chromium allocator.

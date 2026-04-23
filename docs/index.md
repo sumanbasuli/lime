@@ -1,10 +1,17 @@
-# Accessibility Scanner System Documentation
+# LIME Documentation
 
-Welcome to the internal documentation for the Shopkeeper accessibility scanner system. This project aims to build a scalable, multi-threaded accessibility scanning tool using axe-core, orchestrated by a Go backend, and presented through a NextJS user interface.
+LIME is a self-hosted accessibility scanner powered by axe-core, Chromium, PostgreSQL, and a NextJS dashboard. These docs cover local development, architecture, production deployment, updates, and release operations.
 
-## System Architecture
+## Start Here
 
-The project is divided into several core components:
+* **[Local Development Setup](setup.md)**: Run LIME locally with Docker or native processes, including environment variables and common commands.
+* **[Docker & Release Pipeline](deployment/docker.md)**: Local Docker workflow, production build targets, GHCR release publishing, and release bundle format.
+* **[Deploy to Fly.io](deployment/fly.md)**: Two-app Fly setup with private networking, managed/external Postgres, screenshot storage, and rolling updates.
+* **[Deploy to a VPS with Docker](deployment/vps-docker.md)**: Recommended VPS path using published GHCR images.
+* **[Deploy to a VPS without Docker](deployment/vps-native.md)**: Native systemd install for operators who cannot run Docker.
+* **[Updating LIME](deployment/updates.md)**: Update commands per target, backups, rollback notes, and the sidebar update notice.
+
+## Architecture
 
 1. **[Shopkeeper (Main Backend & Orchestrator)](architecture/shopkeeper.md)**: The core Go application that manages the entire lifecycle of a scan.
 2. **[Profiler](architecture/profiler.md)**: Module responsible for recursively extracting URLs from a sitemap (including sitemap indexes).
@@ -12,11 +19,9 @@ The project is divided into several core components:
 4. **[Sweetner](architecture/sweetner.md)**: Module responsible for refining, batching, and aggregating scan results to prevent duplicate issue reporting.
 5. **[User Interface (NextJS)](architecture/ui.md)**: The frontend application residing in the `lime` folder, interacting with the Shopkeeper API.
 
-## Additional Documentation
+## Reference
 
-* **[Local Development Setup](setup.md)**: How to set up and run the project locally, including environment variables and available commands.
 * **[Database Architecture](database.md)**: Details regarding the chosen database schema, technologies (PostgreSQL, Drizzle), and the Go backend DB strategy.
-* **[Docker & Deployment](deployment/docker.md)**: Local Docker workflow, production build targets, GHCR release publishing, and the release bundle format.
 * **[Development Roadmap & Build Steps](roadmap.md)**: Step-by-step track of what needs to be built and current progress.
 
 Operational notes for scan lifecycle behavior are documented primarily in:
@@ -39,7 +44,7 @@ Runtime proxy notes are documented primarily in:
 - `docs/architecture/ui.md` for the same-origin `/api/...` proxy behavior and screenshot delivery model
 - `docs/deployment/docker.md` for `SHOPKEEPER_URL`, external-DB release usage, and reverse-proxy deployment behavior
 
-## Guidelines for Contributing
+## Guidelines For Contributing
 
 * Ensure all new features or modules are documented here first before coding starts.
 * Code must be thoroughly commented to ensure maintainability and to help auto-generate future documentation.

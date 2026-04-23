@@ -19,8 +19,8 @@ services:
 
   shopkeeper:
     build:
-      context: ./shopkeeper
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: shopkeeper/Dockerfile
     container_name: lime-shopkeeper
     restart: unless-stopped
     depends_on:
@@ -37,11 +37,17 @@ services:
     volumes:
       - ./data:/shared-data:ro
       - screenshots:/app/screenshots
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   ui:
     build:
-      context: ./lime
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: lime/Dockerfile
       target: dev
     container_name: lime-ui
     restart: unless-stopped
@@ -51,6 +57,9 @@ services:
       ACT_RULES_PATH: /shared-data/act-rules.json
       DATABASE_URL: postgresql://${POSTGRES_USER:-lime}:${POSTGRES_PASSWORD:-lime_dev_password}@db:5432/${POSTGRES_DB:-lime_db}?sslmode=disable
       SHOPKEEPER_URL: http://shopkeeper:8080
+      LIME_UPDATE_CHECK: ${LIME_UPDATE_CHECK:-false}
+      LIME_GITHUB_REPO: ${LIME_GITHUB_REPO:-sumanbasuli/lime}
+      LIME_VERSION: ${LIME_VERSION:-0.0.0}
     ports:
       - "${LIME_UI_PORT:-3000}:3000"
     volumes:

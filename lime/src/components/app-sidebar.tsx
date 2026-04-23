@@ -5,6 +5,7 @@ import Link from "next/link"
 
 import { NavMain } from "@/components/nav-main"
 import { NavSecondary } from "@/components/nav-secondary"
+import { UpdateNotice } from "@/components/update-notice"
 import {
   Sidebar,
   SidebarContent,
@@ -16,7 +17,6 @@ import {
 import {
   LayoutDashboardIcon,
   ScanSearchIcon,
-  SettingsIcon,
   HeartPulseIcon,
   BookOpenIcon,
 } from "lucide-react"
@@ -43,11 +43,6 @@ const data = {
           url: "/scans/new",
         },
       ],
-    },
-    {
-      title: "Settings",
-      url: "#",
-      icon: <SettingsIcon />,
     },
   ],
   navSecondary: [
@@ -83,7 +78,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={data.navMain} />
-        <NavSecondary items={data.navSecondary} className="mt-auto" />
+        <div className="mt-auto">
+          <UpdateNotice />
+          <NavSecondary items={data.navSecondary} />
+        </div>
       </SidebarContent>
     </Sidebar>
   )
