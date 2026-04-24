@@ -10,7 +10,15 @@ import type { QueryResultRow } from "pg";
 type CsvValue = string | number | boolean | null | undefined;
 const CSV_OCCURRENCE_BATCH_SIZE = 5000;
 
-interface CsvOccurrenceRow extends QueryResultRow, ReportOccurrence {
+interface CsvReportOccurrence {
+  id: string;
+  urlId: string;
+  pageUrl: string;
+  cssSelector: string | null;
+  htmlSnippet: string | null;
+}
+
+interface CsvOccurrenceRow extends QueryResultRow, CsvReportOccurrence {
   cursorCreatedAt: string;
   cursorId: string;
 }
@@ -47,8 +55,8 @@ function formatCsvRow(values: CsvValue[]): string {
   return values.map(formatCsvCell).join(",");
 }
 
-function formatActRules(group: ReportIssueGroup): string {
-  return group.issue.actRules.map((rule) => rule.actRuleId).join("; ");
+function formatActRuleUrls(group: ReportIssueGroup): string {
+  return group.issue.actRules.map((rule) => rule.ruleUrl).join("; ");
 }
 
 function formatRequirements(group: ReportIssueGroup): string {
@@ -59,9 +67,10 @@ function formatRequirements(group: ReportIssueGroup): string {
 
 function buildRowForOccurrence(
   group: ReportIssueGroup,
-  occurrence: ReportOccurrence | null,
-  index: number,
-  includedCount: number
+  occurrence: Pick<
+    ReportOccurrence,
+    "pageUrl" | "cssSelector" | "htmlSnippet"
+  > | null
 ): CsvValue[] {
   const weight = getLighthouseAccessibilityWeight(group.issue.violationType);
 
@@ -72,18 +81,12 @@ function buildRowForOccurrence(
     group.issue.severity,
     weight > 0 ? weight : "not scored",
     group.occurrenceCount,
-    index + 1,
-    includedCount,
     occurrence?.pageUrl,
     occurrence?.cssSelector,
     occurrence?.htmlSnippet,
-    occurrence?.screenshotPath,
-    occurrence?.elementScreenshotPath,
     group.issue.helpUrl,
-    formatActRules(group),
+    formatActRuleUrls(group),
     formatRequirements(group),
-    group.axeSuggestedChange,
-    group.axeRuleDescription,
   ];
 }
 
@@ -91,9 +94,7 @@ function buildRowsForGroup(group: ReportIssueGroup): CsvValue[][] {
   const occurrences: Array<ReportOccurrence | null> =
     group.occurrences.length > 0 ? group.occurrences : [null];
 
-  return occurrences.map((occurrence, index) =>
-    buildRowForOccurrence(group, occurrence, index, group.occurrences.length)
-  );
+  return occurrences.map((occurrence) => buildRowForOccurrence(group, occurrence));
 }
 
 export function buildIssueReportCsv(data: IssueReportData): string {
@@ -111,18 +112,12 @@ const ISSUE_REPORT_CSV_HEADER = [
   "severity",
   "weight",
   "occurrence_count",
-  "sample_index",
-  "sample_count",
   "page_url",
   "css_selector",
   "html_snippet",
-  "screenshot_path",
-  "element_screenshot_path",
   "help_url",
-  "act_rule_ids",
+  "act_urls",
   "accessibility_requirements",
-  "suggested_change",
-  "rule_description",
 ];
 
 async function loadFailedOccurrenceBatch(
@@ -150,8 +145,6 @@ async function loadFailedOccurrenceBatch(
         io.issue_id::text AS "issueId",
         io.url_id::text AS "urlId",
         io.html_snippet AS "htmlSnippet",
-        io.screenshot_path AS "screenshotPath",
-        io.element_screenshot_path AS "elementScreenshotPath",
         io.css_selector AS "cssSelector",
         u.url AS "pageUrl",
         to_char(io.created_at, 'YYYY-MM-DD HH24:MI:SS.US') AS "cursorCreatedAt"
@@ -195,8 +188,6 @@ async function loadNeedsReviewOccurrenceBatch(
         uao.rule_id AS "ruleId",
         uao.url_id::text AS "urlId",
         uao.html_snippet AS "htmlSnippet",
-        uao.screenshot_path AS "screenshotPath",
-        uao.element_screenshot_path AS "elementScreenshotPath",
         uao.css_selector AS "cssSelector",
         u.url AS "pageUrl",
         to_char(uao.created_at, 'YYYY-MM-DD HH24:MI:SS.US') AS "cursorCreatedAt"
@@ -262,8 +253,6 @@ async function loadNeedsReviewAuditFallbackBatch(
     ruleId,
     urlId: row.urlId,
     htmlSnippet: null,
-    screenshotPath: null,
-    elementScreenshotPath: null,
     cssSelector: null,
     pageUrl: row.pageUrl,
   }));
@@ -294,7 +283,7 @@ async function loadOccurrenceBatch(
 
 async function* streamOccurrencesForGroup(
   group: ReportIssueGroup
-): AsyncGenerator<ReportOccurrence> {
+): AsyncGenerator<CsvReportOccurrence> {
   let cursor: OccurrenceCursor | null = null;
 
   for (;;) {
@@ -326,22 +315,15 @@ async function* streamIssueReportCsvRows(
   yield formatCsvRow(ISSUE_REPORT_CSV_HEADER);
 
   for (const group of data.issuesWithOccurrences) {
-    let occurrenceIndex = 0;
+    let wroteOccurrence = false;
 
     for await (const occurrence of streamOccurrencesForGroup(group)) {
-      yield formatCsvRow(
-        buildRowForOccurrence(
-          group,
-          occurrence,
-          occurrenceIndex,
-          group.occurrenceCount
-        )
-      );
-      occurrenceIndex += 1;
+      yield formatCsvRow(buildRowForOccurrence(group, occurrence));
+      wroteOccurrence = true;
     }
 
-    if (occurrenceIndex === 0) {
-      yield formatCsvRow(buildRowForOccurrence(group, null, 0, 0));
+    if (!wroteOccurrence) {
+      yield formatCsvRow(buildRowForOccurrence(group, null));
     }
   }
 }

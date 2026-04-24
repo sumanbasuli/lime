@@ -10,6 +10,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
+import { IssueCardReportDownloadButton } from "@/components/issue-card-report-download-button";
 import { IssueFalsePositiveButton } from "@/components/issue-false-positive-button";
 import { IssueScreenshotLightbox } from "@/components/issue-screenshot-lightbox";
 import { AuditStatusBadge, SeverityBadge } from "@/components/status-badge";
@@ -26,6 +27,7 @@ import {
   type IssueOccurrence,
   type IssueSummaryItem,
 } from "@/lib/scan-issues";
+import type { ReportSettings } from "@/lib/report-settings-config";
 import { cn } from "@/lib/utils";
 
 const ISSUE_SUMMARIES_PAGE_SIZE = 12;
@@ -46,6 +48,7 @@ interface IssueDetailsFeedProps {
   scanId: string;
   initialItems: IssueSummaryItem[];
   totalItemCount: number;
+  reportSettings: ReportSettings;
 }
 
 interface IssueDetailRouteResponse {
@@ -546,10 +549,12 @@ function IssueDetailLoading() {
 function IssueCard({
   scanId,
   item,
+  reportSettings,
   onFalsePositiveChange,
 }: {
   scanId: string;
   item: IssueSummaryItem;
+  reportSettings: ReportSettings;
   onFalsePositiveChange: (issueId: string, isFalsePositive: boolean) => void;
 }) {
   const [summary, setSummary] = useState(item);
@@ -653,6 +658,18 @@ function IssueCard({
 
   const ruleLabel =
     summary.kind === "failed" ? summary.violationType : summary.ruleId;
+  const exportActionsEnabled =
+    reportSettings.pdfReportsEnabled ||
+    reportSettings.csvReportsEnabled ||
+    reportSettings.llmReportsEnabled;
+  const headerPaddingClass =
+    summary.kind === "failed"
+      ? exportActionsEnabled
+        ? "pr-56 sm:pr-72"
+        : "pr-16 sm:pr-20"
+      : exportActionsEnabled
+        ? "pr-16"
+        : "pr-4";
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -673,7 +690,7 @@ function IssueCard({
           <div
             className={cn(
               "issue-card-header pointer-events-none relative z-10 flex items-start gap-3 p-4",
-              summary.kind === "failed" ? "pr-36 sm:pr-40" : "pr-4"
+              headerPaddingClass
             )}
           >
             <div className="issue-expander mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-all duration-200">
@@ -753,15 +770,25 @@ function IssueCard({
             </div>
           </div>
 
-          {summary.kind === "failed" && (
-            <IssueFalsePositiveButton
+          <div className="absolute right-4 top-4 z-20 flex items-start gap-2">
+            <IssueCardReportDownloadButton
               scanId={scanId}
-              issueId={summary.issueId}
-              isFalsePositive={summary.isFalsePositive}
-              onFalsePositiveChange={onFalsePositiveChange}
-              className="absolute right-4 top-4 z-20"
+              scope={{
+                kind: summary.kind,
+                key: summary.kind === "failed" ? summary.issueId : summary.ruleId,
+              }}
+              issueTitle={summary.title}
+              settings={reportSettings}
             />
-          )}
+            {summary.kind === "failed" && (
+              <IssueFalsePositiveButton
+                scanId={scanId}
+                issueId={summary.issueId}
+                isFalsePositive={summary.isFalsePositive}
+                onFalsePositiveChange={onFalsePositiveChange}
+              />
+            )}
+          </div>
         </div>
 
         <CollapsibleContent>
@@ -879,6 +906,7 @@ export function IssueDetailsFeed({
   scanId,
   initialItems,
   totalItemCount,
+  reportSettings,
 }: IssueDetailsFeedProps) {
   const [items, setItems] = useState(initialItems);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -952,6 +980,7 @@ export function IssueDetailsFeed({
           key={`${item.kind}-${item.key}`}
           scanId={scanId}
           item={item}
+          reportSettings={reportSettings}
           onFalsePositiveChange={handleFalsePositiveChange}
         />
       ))}

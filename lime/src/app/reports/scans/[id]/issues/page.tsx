@@ -1,22 +1,60 @@
 import { notFound } from "next/navigation";
 import { IssuesReportDocument } from "@/components/issues-report-document";
-import { loadIssueReportData } from "@/lib/issues-report-data";
+import {
+  loadScopedIssueReportData,
+  loadIssueReportData,
+} from "@/lib/issues-report-data";
+import {
+  getFirstSearchParam,
+  resolveIssueReportScope,
+} from "@/lib/issue-report-scope";
+import { getReportSettings } from "@/lib/report-settings";
 
 export const dynamic = "force-dynamic";
 
 interface ReportPageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{
+    kind?: string | string[];
+    key?: string | string[];
+  }>;
 }
 
 export default async function IssuesReportPage({
   params,
+  searchParams,
 }: ReportPageProps) {
   const { id } = await params;
-  const data = await loadIssueReportData(id);
+  const resolvedSearchParams = await searchParams;
+  const scope = resolveIssueReportScope(
+    getFirstSearchParam(resolvedSearchParams.kind),
+    getFirstSearchParam(resolvedSearchParams.key)
+  );
+
+  if (scope === null) {
+    notFound();
+  }
+
+  const reportSettings = await getReportSettings();
+  const data = scope
+    ? await loadScopedIssueReportData(id, scope, {
+        occurrenceLimit: reportSettings.singleIssuePdfOccurrenceLimit,
+        includeAffectedPages: true,
+      })
+    : await loadIssueReportData(id, {
+        occurrenceLimit: reportSettings.fullPdfOccurrenceLimit,
+        includeAffectedPages: true,
+      });
 
   if (!data) {
     notFound();
   }
 
-  return <IssuesReportDocument data={data} />;
+  return (
+    <IssuesReportDocument
+      data={data}
+      reportScope={scope ? "issue" : "scan"}
+      reportSettings={reportSettings}
+    />
+  );
 }

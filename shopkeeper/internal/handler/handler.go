@@ -44,7 +44,7 @@ type ScanRunner interface {
 
 // IssueReportGenerator defines the interface for rendering issue reports to PDF.
 type IssueReportGenerator interface {
-	GenerateIssueReportPDF(ctx context.Context, scanID string) ([]byte, error)
+	GenerateIssueReportPDF(ctx context.Context, scanID, kind, key string) ([]byte, error)
 }
 
 // Handler holds dependencies for HTTP handlers.
@@ -546,6 +546,15 @@ func (h *Handler) DownloadIssueReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	kind := r.URL.Query().Get("kind")
+	key := r.URL.Query().Get("key")
+	if (kind == "") != (key == "") || (kind != "" && kind != "failed" && kind != "needs_review") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "kind and key must describe a failed or needs_review issue scope",
+		})
+		return
+	}
+
 	scan, err := h.repo.GetScan(r.Context(), id)
 	if err != nil {
 		log.Printf("Failed to get scan: %v", err)
@@ -561,7 +570,7 @@ func (h *Handler) DownloadIssueReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pdf, err := h.reporter.GenerateIssueReportPDF(r.Context(), id)
+	pdf, err := h.reporter.GenerateIssueReportPDF(r.Context(), id, kind, key)
 	if err != nil {
 		log.Printf("Failed to generate issue report PDF for scan %s: %v", id, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -571,6 +580,9 @@ func (h *Handler) DownloadIssueReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filename := buildIssueReportFilename(scan.SitemapURL, scan.CreatedAt)
+	if kind != "" && key != "" {
+		filename = buildScopedIssueReportFilename(scan.SitemapURL, scan.CreatedAt, kind, key)
+	}
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.Header().Set("Cache-Control", "no-store")
@@ -696,9 +708,33 @@ func detectFileContentType(path string) (string, error) {
 }
 
 func buildIssueReportFilename(rawURL string, createdAt time.Time) string {
+	host := sanitizeFilenameToken(rawURL)
+
+	return fmt.Sprintf(
+		"lime-issue-report-%s-%s.pdf",
+		host,
+		createdAt.UTC().Format("2006-01-02"),
+	)
+}
+
+func buildScopedIssueReportFilename(rawURL string, createdAt time.Time, kind, key string) string {
+	host := sanitizeFilenameToken(rawURL)
+	scope := sanitizeFilenameToken(fmt.Sprintf("%s-%s", kind, key))
+
+	return fmt.Sprintf(
+		"lime-issue-report-%s-%s-%s.pdf",
+		host,
+		createdAt.UTC().Format("2006-01-02"),
+		scope,
+	)
+}
+
+func sanitizeFilenameToken(rawValue string) string {
 	host := "scan"
-	if parsedURL, err := url.Parse(rawURL); err == nil && parsedURL.Host != "" {
+	if parsedURL, err := url.Parse(rawValue); err == nil && parsedURL.Host != "" {
 		host = parsedURL.Host
+	} else if rawValue != "" {
+		host = rawValue
 	}
 
 	host = strings.ToLower(host)
@@ -708,17 +744,15 @@ func buildIssueReportFilename(rawURL string, createdAt time.Time) string {
 	for _, r := range host {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
 			sanitized.WriteRune(r)
+		} else if r == '_' || r == '/' || r == ':' {
+			sanitized.WriteRune('-')
 		}
 	}
 	if sanitized.Len() == 0 {
 		sanitized.WriteString("scan")
 	}
 
-	return fmt.Sprintf(
-		"lime-issue-report-%s-%s.pdf",
-		sanitized.String(),
-		createdAt.UTC().Format("2006-01-02"),
-	)
+	return sanitized.String()
 }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {

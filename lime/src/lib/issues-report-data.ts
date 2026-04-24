@@ -21,9 +21,12 @@ import {
   getLighthouseAccessibilityWeight,
   type ScanScoreSummary,
 } from "@/lib/scan-scoring";
+import type { IssueReportScope } from "@/lib/issue-report-scope";
 
 export const REPORT_OCCURRENCE_SAMPLE_LIMIT = 5;
 export const REPORT_MEDIA_SAMPLE_LIMIT = 5;
+export const REPORT_PDF_OCCURRENCE_LIMIT = 30;
+export const REPORT_PDF_SINGLE_ISSUE_OCCURRENCE_LIMIT = 2000;
 
 export interface ReportOccurrence {
   id: string;
@@ -35,6 +38,11 @@ export interface ReportOccurrence {
   elementScreenshotPath: string | null;
   cssSelector: string | null;
   pageUrl: string;
+}
+
+export interface ReportAffectedPage {
+  pageUrl: string;
+  occurrenceCount: number;
 }
 
 type ScanIssueRow = typeof issues.$inferSelect;
@@ -57,6 +65,7 @@ export interface ReportIssueGroup {
   kind: ReportIssueKind;
   issue: ReportIssue;
   occurrences: ReportOccurrence[];
+  affectedPages: ReportAffectedPage[];
   occurrenceCount: number;
   occurrenceSource: ReportOccurrenceSource;
   complianceReferences: AccessibilityReference[];
@@ -77,6 +86,7 @@ export interface IssueReportData {
 
 export interface IssueReportDataOptions {
   occurrenceLimit?: number | null;
+  includeAffectedPages?: boolean;
 }
 
 function isSeverityKey(
@@ -112,6 +122,10 @@ function resolveOccurrenceLimit(
     : options?.occurrenceLimit ?? REPORT_OCCURRENCE_SAMPLE_LIMIT;
 }
 
+function shouldIncludeAffectedPages(options?: IssueReportDataOptions): boolean {
+  return options?.includeAffectedPages ?? false;
+}
+
 async function loadFailedOccurrences(
   issueId: string,
   occurrenceLimit: number | null
@@ -135,6 +149,21 @@ async function loadFailedOccurrences(
   return occurrenceLimit === null
     ? await query
     : await query.limit(occurrenceLimit);
+}
+
+async function loadFailedAffectedPages(
+  issueId: string
+): Promise<ReportAffectedPage[]> {
+  return db
+    .select({
+      pageUrl: urls.url,
+      occurrenceCount: count(),
+    })
+    .from(issueOccurrences)
+    .innerJoin(urls, eq(urls.id, issueOccurrences.urlId))
+    .where(eq(issueOccurrences.issueId, issueId))
+    .groupBy(urls.url)
+    .orderBy(asc(urls.url));
 }
 
 async function loadNeedsReviewOccurrences(
@@ -168,6 +197,50 @@ async function loadNeedsReviewOccurrences(
   return occurrenceLimit === null
     ? await query
     : await query.limit(occurrenceLimit);
+}
+
+async function loadNeedsReviewAffectedPages(
+  scanId: string,
+  ruleId: string,
+  useOccurrenceRows: boolean
+): Promise<ReportAffectedPage[]> {
+  if (useOccurrenceRows) {
+    return db
+      .select({
+        pageUrl: urls.url,
+        occurrenceCount: count(),
+      })
+      .from(urlAuditOccurrences)
+      .innerJoin(urls, eq(urls.id, urlAuditOccurrences.urlId))
+      .where(
+        and(
+          eq(urls.scanId, scanId),
+          eq(urls.status, "completed"),
+          eq(urlAuditOccurrences.ruleId, ruleId),
+          eq(urlAuditOccurrences.outcome, "incomplete")
+        )
+      )
+      .groupBy(urls.url)
+      .orderBy(asc(urls.url));
+  }
+
+  return db
+    .select({
+      pageUrl: urls.url,
+      occurrenceCount: count(),
+    })
+    .from(urlAudits)
+    .innerJoin(urls, eq(urls.id, urlAudits.urlId))
+    .where(
+      and(
+        eq(urls.scanId, scanId),
+        eq(urls.status, "completed"),
+        eq(urlAudits.ruleId, ruleId),
+        eq(urlAudits.outcome, "incomplete")
+      )
+    )
+    .groupBy(urls.url)
+    .orderBy(asc(urls.url));
 }
 
 async function loadNeedsReviewAuditFallbackOccurrences(
@@ -209,7 +282,8 @@ async function loadNeedsReviewAuditFallbackOccurrences(
 
 async function loadFailedReportGroups(
   scanIssues: ScanIssueRow[],
-  occurrenceLimit: number | null
+  occurrenceLimit: number | null,
+  includeAffectedPages: boolean
 ): Promise<ReportIssueGroup[]> {
   const reportableScanIssues = scanIssues.filter(
     (issue) => !issue.isFalsePositive
@@ -217,7 +291,7 @@ async function loadFailedReportGroups(
 
   return Promise.all(
     reportableScanIssues.map(async (issue) => {
-      const [occurrenceCountRows, occurrences, enrichedIssue, axeContext] =
+      const [occurrenceCountRows, occurrences, enrichedIssue, axeContext, affectedPages] =
         await Promise.all([
           db
             .select({ value: count() })
@@ -226,12 +300,14 @@ async function loadFailedReportGroups(
           loadFailedOccurrences(issue.id, occurrenceLimit),
           enrichIssueWithACT(issue),
           resolveAxeRuleContext(issue.violationType),
+          includeAffectedPages ? loadFailedAffectedPages(issue.id) : [],
         ]);
 
       return {
         kind: "failed",
         issue: enrichedIssue,
         occurrences,
+        affectedPages,
         occurrenceCount: occurrenceCountRows[0]?.value ?? occurrences.length,
         occurrenceSource: "issue_occurrences",
         complianceReferences: axeContext.accessibilityRequirements,
@@ -242,10 +318,52 @@ async function loadFailedReportGroups(
   );
 }
 
+async function loadFailedReportGroup(
+  scanId: string,
+  issueId: string,
+  occurrenceLimit: number | null,
+  includeAffectedPages: boolean
+): Promise<ReportIssueGroup | null> {
+  const [issue] = await db
+    .select()
+    .from(issues)
+    .where(and(eq(issues.scanId, scanId), eq(issues.id, issueId)))
+    .limit(1);
+
+  if (!issue) {
+    return null;
+  }
+
+  const [occurrenceCountRows, occurrences, enrichedIssue, axeContext, affectedPages] =
+    await Promise.all([
+      db
+        .select({ value: count() })
+        .from(issueOccurrences)
+        .where(eq(issueOccurrences.issueId, issue.id)),
+      loadFailedOccurrences(issue.id, occurrenceLimit),
+      enrichIssueWithACT(issue),
+      resolveAxeRuleContext(issue.violationType),
+      includeAffectedPages ? loadFailedAffectedPages(issue.id) : [],
+    ]);
+
+  return {
+    kind: "failed",
+    issue: enrichedIssue,
+    occurrences,
+    affectedPages,
+    occurrenceCount: occurrenceCountRows[0]?.value ?? occurrences.length,
+    occurrenceSource: "issue_occurrences",
+    complianceReferences: axeContext.accessibilityRequirements,
+    axeSuggestedChange: axeContext.successCriterion,
+    axeRuleDescription: axeContext.ruleDescription,
+  } satisfies ReportIssueGroup;
+}
+
 async function loadNeedsReviewReportGroups(
   scanId: string,
   failedRuleIds: Set<string>,
-  occurrenceLimit: number | null
+  occurrenceLimit: number | null,
+  includeAffectedPages: boolean
 ): Promise<ReportIssueGroup[]> {
   const [incompleteAuditCounts, incompleteOccurrenceCounts, axeRuleCatalog] =
     await Promise.all([
@@ -338,6 +456,13 @@ async function loadNeedsReviewReportGroups(
           axeAccessibilityRequirements: axeContext.accessibilityRequirements,
         },
         occurrences,
+        affectedPages: includeAffectedPages
+          ? await loadNeedsReviewAffectedPages(
+              scanId,
+              ruleId,
+              occurrenceCount > 0
+            )
+          : [],
         occurrenceCount: occurrenceCount || auditCount || occurrences.length,
         occurrenceSource,
         complianceReferences: axeContext.accessibilityRequirements,
@@ -348,29 +473,96 @@ async function loadNeedsReviewReportGroups(
   );
 }
 
-export async function loadIssueReportData(
+async function loadNeedsReviewReportGroup(
   scanId: string,
-  options?: IssueReportDataOptions
-): Promise<IssueReportData | null> {
-  const [scan] = await db.select().from(scans).where(eq(scans.id, scanId));
-  if (!scan) {
+  ruleId: string,
+  occurrenceLimit: number | null,
+  includeAffectedPages: boolean
+): Promise<ReportIssueGroup | null> {
+  const [failedRuleRows, incompleteAuditCounts, incompleteOccurrenceCounts, actContext, axeContext, axeRuleCatalog] =
+    await Promise.all([
+      db
+        .select({ value: count() })
+        .from(issues)
+        .where(and(eq(issues.scanId, scanId), eq(issues.violationType, ruleId))),
+      db
+        .select({ value: count() })
+        .from(urlAudits)
+        .innerJoin(urls, eq(urls.id, urlAudits.urlId))
+        .where(
+          and(
+            eq(urls.scanId, scanId),
+            eq(urls.status, "completed"),
+            eq(urlAudits.ruleId, ruleId),
+            eq(urlAudits.outcome, "incomplete")
+          )
+        ),
+      db
+        .select({ value: count() })
+        .from(urlAuditOccurrences)
+        .innerJoin(urls, eq(urls.id, urlAuditOccurrences.urlId))
+        .where(
+          and(
+            eq(urls.scanId, scanId),
+            eq(urls.status, "completed"),
+            eq(urlAuditOccurrences.ruleId, ruleId),
+            eq(urlAuditOccurrences.outcome, "incomplete")
+          )
+        ),
+      resolveACTContext(ruleId),
+      resolveAxeRuleContext(ruleId),
+      getAxeRuleCatalog(),
+    ]);
+
+  if ((failedRuleRows[0]?.value ?? 0) > 0) {
     return null;
   }
 
-  const auditReports = await getScanAuditReports([
-    { id: scan.id, status: scan.status ?? "pending" },
-  ]);
-  const scoreSummary = auditReports[scan.id].summary;
+  const occurrenceCount = incompleteOccurrenceCounts[0]?.value ?? 0;
+  const auditCount = incompleteAuditCounts[0]?.value ?? 0;
 
-  const scanIssues = await db.select().from(issues).where(eq(issues.scanId, scanId));
-  const failedRuleIds = new Set(scanIssues.map((issue) => issue.violationType));
-  const occurrenceLimit = resolveOccurrenceLimit(options);
-  const [failedGroups, needsReviewGroups] = await Promise.all([
-    loadFailedReportGroups(scanIssues, occurrenceLimit),
-    loadNeedsReviewReportGroups(scanId, failedRuleIds, occurrenceLimit),
-  ]);
+  if (occurrenceCount === 0 && auditCount === 0) {
+    return null;
+  }
 
-  const issuesWithOccurrences = [...failedGroups, ...needsReviewGroups];
+  const metadata = axeRuleCatalog[ruleId];
+  const occurrences =
+    occurrenceCount > 0
+      ? await loadNeedsReviewOccurrences(scanId, ruleId, occurrenceLimit)
+      : await loadNeedsReviewAuditFallbackOccurrences(
+          scanId,
+          ruleId,
+          occurrenceLimit
+        );
+
+  return {
+    kind: "needs_review",
+    issue: {
+      id: `needs-review:${ruleId}`,
+      scanId,
+      violationType: ruleId,
+      description: metadata?.help || ruleId,
+      helpUrl: metadata?.helpUrl || null,
+      severity: null,
+      isFalsePositive: false,
+      createdAt: null,
+      actRules: actContext.actRules,
+      suggestedFixes: actContext.suggestedFixes,
+      axeAccessibilityRequirements: axeContext.accessibilityRequirements,
+    },
+    occurrences,
+    affectedPages: includeAffectedPages
+      ? await loadNeedsReviewAffectedPages(scanId, ruleId, occurrenceCount > 0)
+      : [],
+    occurrenceCount: occurrenceCount || auditCount || occurrences.length,
+    occurrenceSource: occurrenceCount > 0 ? "url_audit_occurrences" : "url_audits",
+    complianceReferences: axeContext.accessibilityRequirements,
+    axeSuggestedChange: axeContext.successCriterion,
+    axeRuleDescription: axeContext.ruleDescription,
+  } satisfies ReportIssueGroup;
+}
+
+function sortIssueReportGroups(issuesWithOccurrences: ReportIssueGroup[]) {
   issuesWithOccurrences.sort(
     (a, b) =>
       (a.kind === "failed" ? 0 : 1) - (b.kind === "failed" ? 0 : 1) ||
@@ -379,11 +571,23 @@ export async function loadIssueReportData(
       severitySortOrder(a.issue.severity) - severitySortOrder(b.issue.severity) ||
       a.issue.description.localeCompare(b.issue.description)
   );
+}
 
-  const failedIssueCount = failedGroups.length;
-  const needsReviewIssueCount = needsReviewGroups.length;
+function buildIssueReportData(
+  scan: typeof scans.$inferSelect,
+  scoreSummary: ScanScoreSummary,
+  issuesWithOccurrences: ReportIssueGroup[]
+): IssueReportData {
+  sortIssueReportGroups(issuesWithOccurrences);
+
+  const failedIssueCount = issuesWithOccurrences.filter(
+    (group) => group.kind === "failed"
+  ).length;
+  const needsReviewIssueCount = issuesWithOccurrences.filter(
+    (group) => group.kind === "needs_review"
+  ).length;
   const activeIssueCount = failedIssueCount + needsReviewIssueCount;
-  const totalIssueCardCount = activeIssueCount;
+  const totalIssueCardCount = issuesWithOccurrences.length;
   const severityBreakdown = issuesWithOccurrences.reduce(
     (summary, { issue }) => {
       if (isSeverityKey(issue.severity)) {
@@ -411,4 +615,77 @@ export async function loadIssueReportData(
     totalIssueCardCount,
     severityBreakdown,
   };
+}
+
+export async function loadIssueReportData(
+  scanId: string,
+  options?: IssueReportDataOptions
+): Promise<IssueReportData | null> {
+  const [scan] = await db.select().from(scans).where(eq(scans.id, scanId));
+  if (!scan) {
+    return null;
+  }
+
+  const auditReports = await getScanAuditReports([
+    { id: scan.id, status: scan.status ?? "pending" },
+  ]);
+  const scoreSummary = auditReports[scan.id].summary;
+
+  const scanIssues = await db.select().from(issues).where(eq(issues.scanId, scanId));
+  const failedRuleIds = new Set(scanIssues.map((issue) => issue.violationType));
+  const occurrenceLimit = resolveOccurrenceLimit(options);
+  const includeAffectedPages = shouldIncludeAffectedPages(options);
+  const [failedGroups, needsReviewGroups] = await Promise.all([
+    loadFailedReportGroups(scanIssues, occurrenceLimit, includeAffectedPages),
+    loadNeedsReviewReportGroups(
+      scanId,
+      failedRuleIds,
+      occurrenceLimit,
+      includeAffectedPages
+    ),
+  ]);
+
+  return buildIssueReportData(scan, scoreSummary, [
+    ...failedGroups,
+    ...needsReviewGroups,
+  ]);
+}
+
+export async function loadScopedIssueReportData(
+  scanId: string,
+  scope: IssueReportScope,
+  options?: IssueReportDataOptions
+): Promise<IssueReportData | null> {
+  const [scan] = await db.select().from(scans).where(eq(scans.id, scanId));
+  if (!scan) {
+    return null;
+  }
+
+  const auditReports = await getScanAuditReports([
+    { id: scan.id, status: scan.status ?? "pending" },
+  ]);
+  const scoreSummary = auditReports[scan.id].summary;
+  const occurrenceLimit = resolveOccurrenceLimit(options);
+  const includeAffectedPages = shouldIncludeAffectedPages(options);
+
+  const group =
+    scope.kind === "failed"
+      ? await loadFailedReportGroup(
+          scanId,
+          scope.key,
+          occurrenceLimit,
+          includeAffectedPages
+        )
+      : await loadNeedsReviewReportGroup(
+          scanId,
+          scope.key,
+          occurrenceLimit,
+          includeAffectedPages
+        );
+
+  if (!group) {
+    return null;
+  }
+
+  return buildIssueReportData(scan, scoreSummary, [group]);
 }

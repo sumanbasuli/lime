@@ -1,7 +1,4 @@
-import {
-  buildIssueReportCsv,
-  buildIssueReportCsvStream,
-} from "@/lib/issues-report-csv";
+import { buildIssueReportLlmText } from "@/lib/issues-report-llm";
 import {
   loadScopedIssueReportData,
   loadIssueReportData,
@@ -11,8 +8,6 @@ import { getReportSettings } from "@/lib/report-settings";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-type CsvReportMode = "full" | "small";
 
 function sanitizeReportHost(rawUrl: string): string {
   let host = rawUrl;
@@ -41,48 +36,25 @@ function sanitizeFilenameToken(rawValue: string): string {
   return sanitized || "issue";
 }
 
-function buildCsvFilename(
+function buildLlmFilename(
   rawUrl: string,
   createdAt: Date,
-  mode: CsvReportMode,
   scopeSuffix?: string
 ): string {
   return `lime-issue-report-${sanitizeReportHost(rawUrl)}-${createdAt
     .toISOString()
-    .slice(0, 10)}${scopeSuffix ?? ""}-${mode}.csv`;
-}
-
-function resolveCsvMode(request: Request): CsvReportMode | null {
-  const mode = new URL(request.url).searchParams.get("mode");
-
-  if (mode == null || mode === "full") {
-    return "full";
-  }
-
-  if (mode === "small") {
-    return "small";
-  }
-
-  return null;
+    .slice(0, 10)}${scopeSuffix ?? ""}-llm.txt`;
 }
 
 export async function GET(
   request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  const mode = resolveCsvMode(request);
-  if (!mode) {
-    return Response.json(
-      { error: 'Invalid CSV mode. Expected "full" or "small".' },
-      { status: 400 }
-    );
-  }
-
   const { id } = await context.params;
   const reportSettings = await getReportSettings();
-  if (!reportSettings.csvReportsEnabled) {
+  if (!reportSettings.llmReportsEnabled) {
     return Response.json(
-      { error: "CSV exports are disabled in settings." },
+      { error: "LLM exports are disabled in settings." },
       { status: 403 }
     );
   }
@@ -100,12 +72,10 @@ export async function GET(
 
   const data = scope
     ? await loadScopedIssueReportData(id, scope, {
-        occurrenceLimit:
-          mode === "full" ? 0 : reportSettings.smallCsvOccurrenceLimit,
+        occurrenceLimit: reportSettings.llmOccurrenceLimit,
       })
     : await loadIssueReportData(id, {
-        occurrenceLimit:
-          mode === "full" ? 0 : reportSettings.smallCsvOccurrenceLimit,
+        occurrenceLimit: reportSettings.llmOccurrenceLimit,
       });
 
   if (!data) {
@@ -115,19 +85,15 @@ export async function GET(
     );
   }
 
-  const csv =
-    mode === "full"
-      ? buildIssueReportCsvStream(data)
-      : buildIssueReportCsv(data);
+  const text = buildIssueReportLlmText(data, reportSettings.llmOccurrenceLimit);
 
-  return new Response(csv, {
+  return new Response(text, {
     status: 200,
     headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${buildCsvFilename(
+      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${buildLlmFilename(
         data.scan.sitemapUrl,
         data.scan.createdAt,
-        mode,
         scope ? `-${sanitizeFilenameToken(`${scope.kind}-${scope.key}`)}` : undefined
       )}"`,
       "Cache-Control": "no-store",

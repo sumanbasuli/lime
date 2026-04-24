@@ -44,11 +44,17 @@ function formatScanCoverage(
 }
 
 export default async function Home() {
-  const recentScans = await db
-    .select()
-    .from(scans)
-    .orderBy(desc(scans.createdAt))
-    .limit(10);
+  const [recentScans, [scanCount], [issueCount], [pageCount]] =
+    await Promise.all([
+      db.select().from(scans).orderBy(desc(scans.createdAt)).limit(10),
+      db.select({ value: count() }).from(scans),
+      db.select({ value: count() }).from(issues),
+      db
+        .select({
+          value: sql<number>`COALESCE(SUM(${scans.scannedUrls}), 0)`,
+        })
+        .from(scans),
+    ]);
   const scoreSummaries = await getScanScoreSummaries(
     recentScans.map((scan) => ({
       id: scan.id,
@@ -62,14 +68,6 @@ export default async function Home() {
         scan.status !== "paused" &&
         scan.status !== "failed")
   );
-
-  const [scanCount] = await db.select({ value: count() }).from(scans);
-  const [issueCount] = await db.select({ value: count() }).from(issues);
-  const [pageCount] = await db
-    .select({
-      value: sql<number>`COALESCE(SUM(${scans.scannedUrls}), 0)`,
-    })
-    .from(scans);
 
   const totalScans = scanCount?.value ?? 0;
   const totalIssues = issueCount?.value ?? 0;

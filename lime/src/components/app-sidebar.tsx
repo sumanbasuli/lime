@@ -17,6 +17,7 @@ import {
 import {
   LayoutDashboardIcon,
   ScanSearchIcon,
+  Settings2Icon,
   HeartPulseIcon,
   BookOpenIcon,
 } from "lucide-react"
@@ -27,7 +28,6 @@ const data = {
       title: "Dashboard",
       url: "/",
       icon: <LayoutDashboardIcon />,
-      isActive: true,
     },
     {
       title: "Scans",
@@ -43,6 +43,11 @@ const data = {
           url: "/scans/new",
         },
       ],
+    },
+    {
+      title: "Settings",
+      url: "/settings",
+      icon: <Settings2Icon />,
     },
   ],
   navSecondary: [

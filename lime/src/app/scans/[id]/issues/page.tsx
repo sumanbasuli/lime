@@ -10,6 +10,7 @@ import {
   ISSUE_SUMMARIES_PAGE_SIZE,
   loadIssueSummariesPage,
 } from "@/lib/scan-issues";
+import { getReportSettings } from "@/lib/report-settings";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,8 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
     notFound();
   }
 
-  const [urlCoverageRows, initialIssuePage] = await Promise.all([
+  const [reportSettings, urlCoverageRows, initialIssuePage] = await Promise.all([
+    getReportSettings(),
     db
       .select({
         status: urls.status,
@@ -113,7 +115,7 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
           </p>
         </div>
 
-        <IssueReportDownloadButton scanId={id} />
+        <IssueReportDownloadButton scanId={id} settings={reportSettings} />
       </div>
 
       {totalIssueCardCount === 0 ? (
@@ -125,6 +127,7 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
           scanId={id}
           initialItems={initialIssuePage.items}
           totalItemCount={totalIssueCardCount}
+          reportSettings={reportSettings}
         />
       )}
     </div>

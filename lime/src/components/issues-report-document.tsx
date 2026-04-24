@@ -5,16 +5,14 @@ import {
   getAccessibilityScoreBand,
   getLighthouseAccessibilityWeight,
 } from "@/lib/scan-scoring";
-import {
-  REPORT_MEDIA_SAMPLE_LIMIT,
-  REPORT_OCCURRENCE_SAMPLE_LIMIT,
-} from "@/lib/issues-report-data";
 import type {
   IssueReportData,
+  ReportAffectedPage,
   ReportIssueGroup,
   ReportOccurrence,
 } from "@/lib/issues-report-data";
 import type { ACTRule, AccessibilityReference } from "@/lib/act-rules";
+import type { ReportSettings } from "@/lib/report-settings-config";
 
 const reportStyles = `
   @page {
@@ -725,6 +723,49 @@ const reportStyles = `
     margin: 0;
   }
 
+  .affected-pages-card {
+    border-radius: 14px;
+    border: 1px solid var(--report-line);
+    background: var(--report-muted);
+    padding: 12px 14px;
+  }
+
+  .affected-pages-list {
+    margin-top: 10px;
+    display: block;
+  }
+
+  .affected-pages-list > * + * {
+    margin-top: 8px;
+  }
+
+  .affected-page-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: start;
+    font-size: 12px;
+  }
+
+  .affected-page-link {
+    color: var(--report-green);
+    text-decoration: none;
+    word-break: break-word;
+  }
+
+  .affected-page-link:hover {
+    text-decoration: underline;
+  }
+
+  .affected-page-count {
+    white-space: nowrap;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--report-ink-soft);
+  }
+
   .footer-note {
     margin-top: 6mm;
     font-size: 10px;
@@ -887,6 +928,10 @@ function occurrencePageCapture(occ: { screenshotPath: string | null }) {
 
 function formatOccurrenceLabel(count: number): string {
   return `${count} occurrence${count === 1 ? "" : "s"}`;
+}
+
+function formatAffectedUrlLabel(count: number): string {
+  return `${count} affected URL${count === 1 ? "" : "s"}`;
 }
 
 function getScoreChip(summary: IssueReportData["scoreSummary"]): {
@@ -1153,14 +1198,21 @@ function GuidanceSection({
 function OccurrenceSection({
   occurrences,
   mediaLimit,
+  dedupeRepeatedContext = false,
+  renderHtmlSnippets = true,
 }: {
   occurrences: ReportOccurrence[];
   mediaLimit: number;
+  dedupeRepeatedContext?: boolean;
+  renderHtmlSnippets?: boolean;
 }) {
+  const firstOccurrenceBySnippet = new Map<string, number>();
+  const firstOccurrenceByMedia = new Map<string, number>();
+
   return (
     <section className="occurrence-list">
       {occurrences.map((occurrence, index) => {
-        const shouldRenderMedia = index < mediaLimit;
+        const shouldRenderMedia = mediaLimit < 0 || index < mediaLimit;
         const hasStoredMedia =
           Boolean(occurrence.elementScreenshotPath) ||
           Boolean(occurrence.screenshotPath);
@@ -1170,12 +1222,33 @@ function OccurrenceSection({
         const pageCapture = shouldRenderMedia
           ? occurrencePageCapture(occurrence)
           : null;
+        const occurrenceNumber = index + 1;
+        const snippetKey =
+          renderHtmlSnippets
+            ? occurrence.htmlSnippet?.replace(/\s+/g, " ").trim() || null
+            : null;
+        const duplicateSnippetOf =
+          dedupeRepeatedContext && snippetKey
+            ? (firstOccurrenceBySnippet.get(snippetKey) ?? null)
+            : null;
+        if (dedupeRepeatedContext && snippetKey && duplicateSnippetOf === null) {
+          firstOccurrenceBySnippet.set(snippetKey, occurrenceNumber);
+        }
+
+        const mediaPath = screenshot?.path ?? pageCapture?.path ?? null;
+        const duplicateMediaOf =
+          dedupeRepeatedContext && mediaPath
+            ? (firstOccurrenceByMedia.get(mediaPath) ?? null)
+            : null;
+        if (dedupeRepeatedContext && mediaPath && duplicateMediaOf === null) {
+          firstOccurrenceByMedia.set(mediaPath, occurrenceNumber);
+        }
 
         return (
           <article key={occurrence.id} className="occurrence-card">
             <div className="occurrence-meta">
               <div>
-                <div className="occurrence-label">URL</div>
+                <div className="occurrence-label">Occurrence {occurrenceNumber}</div>
                 <a href={occurrence.pageUrl} className="occurrence-link">
                   {occurrence.pageUrl}
                 </a>
@@ -1187,16 +1260,26 @@ function OccurrenceSection({
               )}
             </div>
 
-            {occurrence.htmlSnippet && (
+            {renderHtmlSnippets &&
+              occurrence.htmlSnippet &&
+              duplicateSnippetOf === null && (
               <div style={{ marginTop: "10px" }}>
                 <div className="occurrence-label" style={{ marginBottom: "6px" }}>
                   HTML snippet
                 </div>
                 <pre className="code-block">{occurrence.htmlSnippet}</pre>
               </div>
-            )}
+              )}
 
-            {(screenshot || pageCapture) && (
+            {renderHtmlSnippets &&
+              occurrence.htmlSnippet &&
+              duplicateSnippetOf !== null && (
+              <p className="small-copy" style={{ marginTop: "10px" }}>
+                Same HTML snippet as occurrence {duplicateSnippetOf}.
+              </p>
+              )}
+
+            {(screenshot || pageCapture) && duplicateMediaOf === null && (
               <div className="occurrence-media-grid">
                 {screenshot && (
                   <div className="media-card">
@@ -1219,6 +1302,12 @@ function OccurrenceSection({
               </div>
             )}
 
+            {(screenshot || pageCapture) && duplicateMediaOf !== null && (
+              <p className="small-copy" style={{ marginTop: "10px" }}>
+                Same screenshot context as occurrence {duplicateMediaOf}.
+              </p>
+            )}
+
             {!occurrence.htmlSnippet && !screenshot && !pageCapture && (
               <p className="small-copy" style={{ marginTop: "10px" }}>
                 {hasStoredMedia
@@ -1233,11 +1322,58 @@ function OccurrenceSection({
   );
 }
 
-function ReportIssueCard({ issueGroup }: { issueGroup: ReportIssueGroup }) {
+function AffectedPagesSection({
+  affectedPages,
+}: {
+  affectedPages: ReportAffectedPage[];
+}) {
+  if (affectedPages.length === 0) {
+    return (
+      <section className="affected-pages-card">
+        <p className="small-copy">
+          No affected page URLs were persisted for this issue.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="affected-pages-card">
+      <p className="small-copy">
+        Every affected page URL is listed below. Counts show how many stored
+        occurrences for this issue were found on each page.
+      </p>
+      <div className="affected-pages-list">
+        {affectedPages.map((affectedPage) => (
+          <div
+            key={affectedPage.pageUrl}
+            className="affected-page-row"
+          >
+            <a href={affectedPage.pageUrl} className="affected-page-link">
+              {affectedPage.pageUrl}
+            </a>
+            <span className="affected-page-count">
+              {formatOccurrenceLabel(affectedPage.occurrenceCount)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReportIssueCard({
+  issueGroup,
+  reportScope,
+}: {
+  issueGroup: ReportIssueGroup;
+  reportScope: "scan" | "issue";
+}) {
   const {
     kind,
     issue,
     occurrences,
+    affectedPages,
     occurrenceCount,
     complianceReferences,
     axeRuleDescription,
@@ -1246,6 +1382,20 @@ function ReportIssueCard({ issueGroup }: { issueGroup: ReportIssueGroup }) {
   const weight = getLighthouseAccessibilityWeight(issue.violationType);
   const omittedOccurrenceCount = Math.max(occurrenceCount - occurrences.length, 0);
   const isNeedsReview = kind === "needs_review";
+  const isIssueScopedReport = reportScope === "issue";
+  const isFullScanReport = reportScope === "scan";
+  const detailedExampleCount = occurrences.length;
+  const hasTruncatedOccurrences = omittedOccurrenceCount > 0;
+  const mediaSummary = isFullScanReport
+    ? "Repeated screenshots are consolidated by reference when the stored context is identical, and HTML snippets are omitted to reduce file size."
+    : "Repeated screenshots and repeated HTML snippets are consolidated by reference when the stored context is identical.";
+  const occurrenceSummary = isIssueScopedReport
+    ? hasTruncatedOccurrences
+      ? `This issue-specific PDF includes the first ${detailedExampleCount} occurrences in detail. The remaining ${omittedOccurrenceCount} ${omittedOccurrenceCount === 1 ? "occurrence is" : "occurrences are"} omitted from the PDF; download the CSV export for the full occurrence list. The affected URL list below still covers every page where this issue was found. ${mediaSummary}`
+      : `This issue-specific PDF includes all ${formatOccurrenceLabel(occurrenceCount)} as detailed examples. ${mediaSummary}`
+    : hasTruncatedOccurrences
+      ? `This PDF includes ${formatOccurrenceLabel(detailedExampleCount)} as detailed examples. The remaining ${omittedOccurrenceCount} ${omittedOccurrenceCount === 1 ? "occurrence is" : "occurrences are"} summarized in the affected URL list below. ${mediaSummary}`
+      : `This PDF includes all ${formatOccurrenceLabel(occurrenceCount)} as detailed examples. ${mediaSummary}`;
 
   return (
     <article className="issue-card">
@@ -1274,11 +1424,12 @@ function ReportIssueCard({ issueGroup }: { issueGroup: ReportIssueGroup }) {
           <span className="pill pill-neutral">
             {formatOccurrenceLabel(occurrenceCount)}
           </span>
-          {omittedOccurrenceCount > 0 && (
-            <span className="pill pill-neutral">
-              Showing first {occurrences.length}
-            </span>
-          )}
+          <span className="pill pill-neutral">
+            Detailed examples {detailedExampleCount}
+          </span>
+          <span className="pill pill-neutral">
+            {formatAffectedUrlLabel(affectedPages.length)}
+          </span>
         </div>
       </header>
 
@@ -1303,27 +1454,40 @@ function ReportIssueCard({ issueGroup }: { issueGroup: ReportIssueGroup }) {
 
         <section>
           <div className="section-kicker">Affected elements</div>
-          {omittedOccurrenceCount > 0 && (
-            <p className="small-copy" style={{ marginBottom: "10px" }}>
-              This PDF includes the first {occurrences.length} examples from{" "}
-              {formatOccurrenceLabel(occurrenceCount)} with screenshot previews to
-              keep report generation fast. Open the interactive issue page to load the remaining{" "}
-              {omittedOccurrenceCount} occurrence
-              {omittedOccurrenceCount === 1 ? "" : "s"} on demand.
-            </p>
-          )}
+          <p className="small-copy" style={{ marginBottom: "10px" }}>
+            {occurrenceSummary}
+          </p>
           <OccurrenceSection
             occurrences={occurrences}
-            mediaLimit={REPORT_MEDIA_SAMPLE_LIMIT}
+            mediaLimit={-1}
+            dedupeRepeatedContext
+            renderHtmlSnippets={!isFullScanReport}
           />
+        </section>
+
+        <section>
+          <div className="section-kicker">Affected URLs</div>
+          <AffectedPagesSection affectedPages={affectedPages} />
         </section>
       </div>
     </article>
   );
 }
 
-function CoverPage({ data }: { data: IssueReportData }) {
+function CoverPage({
+  data,
+  reportScope,
+  reportSettings,
+}: {
+  data: IssueReportData;
+  reportScope: "scan" | "issue";
+  reportSettings: ReportSettings;
+}) {
   const { scan, totalIssueCardCount } = data;
+  const detailedOccurrenceLimit =
+    reportScope === "issue"
+      ? reportSettings.singleIssuePdfOccurrenceLimit
+      : reportSettings.fullPdfOccurrenceLimit;
   const siteInfoItems = [
     { label: "Target URL", value: scan.sitemapUrl },
     { label: "Scan type", value: formatScanType(scan.scanType) },
@@ -1348,8 +1512,11 @@ function CoverPage({ data }: { data: IssueReportData }) {
         </h1>
         <p className="cover-subtitle">
           A printable, fast-loading record of failed and review-required
-          accessibility findings captured by Lime for this scan, with
-          representative affected-element examples.
+          accessibility findings captured by Lime for this scan, with up to{" "}
+          {detailedOccurrenceLimit} detailed examples per issue
+          {reportScope === "issue"
+            ? " before the PDF truncates and the remaining occurrence details move to CSV."
+            : " and a full affected-URL list for each finding."}
         </p>
       </div>
 
@@ -1361,11 +1528,21 @@ function CoverPage({ data }: { data: IssueReportData }) {
   );
 }
 
-function TableOfContentsPage({ data }: { data: IssueReportData }) {
+function TableOfContentsPage({
+  data,
+  reportScope,
+  reportSettings,
+}: {
+  data: IssueReportData;
+  reportScope: "scan" | "issue";
+  reportSettings: ReportSettings;
+}) {
   const issueCopy =
-    data.needsReviewIssueCount > 0
-      ? `${data.failedIssueCount} failed issue groups and ${data.needsReviewIssueCount} review-required checks included, with up to ${REPORT_OCCURRENCE_SAMPLE_LIMIT} affected-element examples per group.`
-      : `${data.failedIssueCount} failed issue groups included, with up to ${REPORT_OCCURRENCE_SAMPLE_LIMIT} affected-element examples per group.`;
+    reportScope === "issue"
+      ? `Each issue includes up to ${reportSettings.singleIssuePdfOccurrenceLimit} detailed occurrences. If an issue exceeds that cap, the PDF truncates the remaining occurrence details and points to CSV for the full list, while the full affected URL list with per-page counts remains included.`
+      : data.needsReviewIssueCount > 0
+        ? `${data.failedIssueCount} failed issue groups and ${data.needsReviewIssueCount} review-required checks included. Each issue includes up to ${reportSettings.fullPdfOccurrenceLimit} detailed occurrences plus a complete affected URL list, with repeated screenshots consolidated by reference and HTML snippets omitted to reduce file size.`
+        : `${data.failedIssueCount} failed issue groups included. Each issue includes up to ${reportSettings.fullPdfOccurrenceLimit} detailed occurrences plus a complete affected URL list, with repeated screenshots consolidated by reference and HTML snippets omitted to reduce file size.`
   const tocItems = [
     {
       title: "Accessibility score and severity breakdown",
@@ -1406,7 +1583,15 @@ function TableOfContentsPage({ data }: { data: IssueReportData }) {
   );
 }
 
-export function IssuesReportDocument({ data }: { data: IssueReportData }) {
+export function IssuesReportDocument({
+  data,
+  reportScope = "scan",
+  reportSettings,
+}: {
+  data: IssueReportData;
+  reportScope?: "scan" | "issue";
+  reportSettings: ReportSettings;
+}) {
   const scoreBand =
     data.scoreSummary.hasScore && data.scoreSummary.score !== null
       ? getAccessibilityScoreBand(data.scoreSummary.score)
@@ -1416,8 +1601,16 @@ export function IssuesReportDocument({ data }: { data: IssueReportData }) {
     <div data-report-page="true" data-report-ready="true">
       <style>{reportStyles}</style>
       <main className="report-root" aria-label={`Lime issue report for ${extractHost(data.scan.sitemapUrl)}`}>
-        <CoverPage data={data} />
-        <TableOfContentsPage data={data} />
+        <CoverPage
+          data={data}
+          reportScope={reportScope}
+          reportSettings={reportSettings}
+        />
+        <TableOfContentsPage
+          data={data}
+          reportScope={reportScope}
+          reportSettings={reportSettings}
+        />
 
         <section id="accessibility-summary" className="page">
           <div className="section-header">
@@ -1479,6 +1672,7 @@ export function IssuesReportDocument({ data }: { data: IssueReportData }) {
               <ReportIssueCard
                 key={`${issueGroup.kind}-${issueGroup.issue.id}`}
                 issueGroup={issueGroup}
+                reportScope={reportScope}
               />
             ))}
           </div>

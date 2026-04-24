@@ -119,3 +119,24 @@ export const urlAuditOccurrences = pgTable("url_audit_occurrences", {
   cssSelector: text("css_selector"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  fullPdfOccurrenceLimit: integer("full_pdf_occurrence_limit")
+    .notNull()
+    .default(30),
+  singleIssuePdfOccurrenceLimit: integer("single_issue_pdf_occurrence_limit")
+    .notNull()
+    .default(2000),
+  smallCsvOccurrenceLimit: integer("small_csv_occurrence_limit")
+    .notNull()
+    .default(5),
+  llmOccurrenceLimit: integer("llm_occurrence_limit")
+    .notNull()
+    .default(3),
+  pdfReportsEnabled: boolean("pdf_reports_enabled").notNull().default(true),
+  csvReportsEnabled: boolean("csv_reports_enabled").notNull().default(true),
+  llmReportsEnabled: boolean("llm_reports_enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});

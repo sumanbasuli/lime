@@ -1,0 +1,14 @@
+                                                                                                                    row_to_json                                                                                                                    
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {"id":"e49890b6-9c68-4f41-97ac-728f1e4b8068","scan_id":"66386d89-8564-40bb-93b3-c4a6fe70fcd4","url":"http://www.theatretusc.com/","status":"completed","created_at":"2026-04-23T09:02:10.178565"}
+ {"id":"eb2f1974-4dec-4037-a3de-61a621d2c028","scan_id":"66386d89-8564-40bb-93b3-c4a6fe70fcd4","url":"http://www.visittuscaloosa.com/","status":"completed","created_at":"2026-04-23T09:02:10.178565"}
+ {"id":"6d5e52e9-4efa-4063-a36d-2d7ce64b685e","scan_id":"66386d89-8564-40bb-93b3-c4a6fe70fcd4","url":"https://apps.sheltonstate.edu/2017-2018-Annual-Report/index.html","status":"failed","created_at":"2026-04-23T09:02:10.178565"}
+ {"id":"5e5b3b14-83bb-492e-bc46-a9f878f2ce22","scan_id":"66386d89-8564-40bb-93b3-c4a6fe70fcd4","url":"https://secure.touchnet.net/C21370_tsa/web/login.jsp","status":"completed","created_at":"2026-04-23T09:02:10.178565"}
+ {"id":"4c370c5a-d9f6-4b3c-a452-178c0cfaeebb","scan_id":"66386d89-8564-40bb-93b3-c4a6fe70fcd4","url":"https://sheltonstate.formstack.com/forms/help","status":"completed","created_at":"2026-04-23T09:02:10.178565"}
+ {"id":"6bf0c173-a308-4b77-ac6a-18a83ff82872","scan_id":"66386d89-8564-40bb-93b3-c4a6fe70fcd4","url":"https://sheltonstate.interviewstream.com/Account/Login?ReturnUrl=/default.aspx","status":"failed","created_at":"2026-04-23T09:02:10.178565"}
+ {"id":"6a5f5d2b-0da9-4ac9-87af-c865d4a68f83","scan_id":"66386d89-8564-40bb-93b3-c4a6fe70fcd4","url":"https://sheltonstate.lightcastcc.com/?radius=50%20miles&region=Alabama","status":"completed","created_at":"2026-04-23T09:02:10.178565"}
+ {"id":"c57cfd45-6122-4ae7-97a4-f3454821501f","scan_id":"66386d89-8564-40bb-93b3-c4a6fe70fcd4","url":"https://sheltonstate.zenfolio.com/","status":"completed","created_at":"2026-04-23T09:02:10.178565"}
+ {"id":"891a51d0-1370-44ed-9f7b-fda99993e5e4","scan_id":"66386d89-8564-40bb-93b3-c4a6fe70fcd4","url":"https://www.accs.edu/about-accs/board-of-trustees/","status":"completed","created_at":"2026-04-23T09:02:10.178565"}
+ {"id":"f5e897fe-7cdb-4742-9167-3aeffa51516e","scan_id":"66386d89-8564-40bb-93b3-c4a6fe70fcd4","url":"https://www.youtube.com/sheltonstatecc","status":"completed","created_at":"2026-04-23T09:02:10.178565"}
+(10 rows)
+

@@ -32,12 +32,18 @@ func New(allocCtx context.Context, baseReportURL string) *Reporter {
 }
 
 // GenerateIssueReportPDF renders the expanded issue report for a scan as a PDF.
-func (r *Reporter) GenerateIssueReportPDF(ctx context.Context, scanID string) ([]byte, error) {
+func (r *Reporter) GenerateIssueReportPDF(ctx context.Context, scanID, kind, key string) ([]byte, error) {
 	if r.baseReportURL == "" {
 		return nil, fmt.Errorf("report base URL is not configured")
 	}
 
 	reportURL := fmt.Sprintf("%s/reports/scans/%s/issues", r.baseReportURL, url.PathEscape(scanID))
+	if kind != "" && key != "" {
+		query := url.Values{}
+		query.Set("kind", kind)
+		query.Set("key", key)
+		reportURL = fmt.Sprintf("%s?%s", reportURL, query.Encode())
+	}
 	browserCtx, browserCancel := chromedp.NewContext(r.allocCtx)
 	defer browserCancel()
 
