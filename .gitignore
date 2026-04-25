@@ -22,6 +22,8 @@ lime-v*-release.tar.gz
 
 # Screenshots stored locally during scans
 screenshots/
+!docs-site/public/screenshots/
+!docs-site/public/screenshots/*.png
 
 # Local tool and build caches
 .cache/

@@ -12,7 +12,7 @@ Scan sitemaps, capture screenshots, review issues in a dashboard.
 [![GHCR - Shopkeeper](https://img.shields.io/badge/GHCR-shopkeeper-6f42c1?logo=github)](https://github.com/sumanbasuli/lime/pkgs/container/lime-shopkeeper)
 [![GHCR - UI](https://img.shields.io/badge/GHCR-ui-6f42c1?logo=github)](https://github.com/sumanbasuli/lime/pkgs/container/lime-ui)
 
-[Quick start](#quick-start) | [Deploy](#deploy) | [Docs](docs/index.md) | [Roadmap](docs/roadmap.md) | [Releases](https://github.com/sumanbasuli/lime/releases)
+[Quick start](#quick-start) | [Deploy](#deploy) | [Docs](https://sumanbasuli.github.io/lime/) | [Roadmap](https://sumanbasuli.github.io/lime/roadmap/) | [Releases](https://github.com/sumanbasuli/lime/releases)
 
 </div>
 
@@ -29,8 +29,9 @@ Built to be cheap to run on a small server, straightforward to push to Fly.io, a
 - **Full-site scans** driven by sitemap or sitemap-index, with viewport presets (desktop / laptop / tablet / mobile).
 - **Per-issue screenshots** - highlighted visible capture + inline preview, spotlight overlay, focus/hover settle pass.
 - **Axe-core + ACT** - Lighthouse-aligned rule set, ACT catalog bundled locally (no runtime W3C calls).
-- **PDF issue reports** - downloadable per scan.
+- **Reports** - PDF, CSV, and compact LLM-ready exports per scan or issue.
 - **False-positive triage** flag per issue.
+- **Partial scan retry** - retry failed pages inside the same scan without creating a second scan.
 - **Scan recovery** - non-terminal scans resume after Shopkeeper restarts.
 - **Update notice** - opt-in sidebar banner when a new GitHub release is available.
 - **Three deploy targets** - Fly.io, Docker, and Linux systemd.
@@ -47,11 +48,11 @@ Shopkeeper pipeline:
 
 | Stage | What it does |
 |-------|--------------|
-| **[Profiler](docs/architecture/profiler.md)** | Expands sitemap and sitemap-index inputs into a validated, deduplicated URL set for the scan. |
-| **[Juicer](docs/architecture/juicer.md)** | Takes those URLs, drives Chromium workers, runs axe-core, captures screenshots, and records per-page audit outcomes. |
-| **[Sweetner](docs/architecture/sweetner.md)** | Takes Juicer audit output and writes normalized issues, occurrences, audits, and review-required records. |
+| **[Profiler](https://sumanbasuli.github.io/lime/docs/architecture/profiler/)** | Expands sitemap and sitemap-index inputs into a validated, deduplicated URL set for the scan. |
+| **[Juicer](https://sumanbasuli.github.io/lime/docs/architecture/juicer/)** | Takes those URLs, drives Chromium workers, runs axe-core, captures screenshots, and records per-page audit outcomes. |
+| **[Sweetner](https://sumanbasuli.github.io/lime/docs/architecture/sweetner/)** | Takes Juicer audit output and writes normalized issues, occurrences, audits, and review-required records. |
 
-Full architecture docs: [docs/architecture/](docs/architecture/).
+Full architecture docs: [sumanbasuli.github.io/lime/docs/architecture/shopkeeper](https://sumanbasuli.github.io/lime/docs/architecture/shopkeeper/).
 
 ## Quick start
 
@@ -71,13 +72,13 @@ Stop: `make stop-all`. Reset volumes: `make clean`.
 
 ## Deploy
 
-LIME publishes versioned Docker images to GHCR from the main-branch release workflow. Use the release tag you want to deploy, for example `v0.1.0`.
+LIME publishes versioned Docker images to GHCR from the main-branch release workflow. Use the release tag you want to deploy, for example `v1.0.0`.
 
 | Target | One-liner | Guide |
 |--------|-----------|-------|
-| **Fly.io** | `./scripts/fly-deploy.sh v0.1.0` | [docs/deployment/fly.md](docs/deployment/fly.md) |
-| **Docker** | `docker compose -f docker-compose.release.yml up -d` | [docs/deployment/vps-docker.md](docs/deployment/vps-docker.md) |
-| **Linux systemd** | `make build && sudo ./scripts/vps-install.sh` | [docs/deployment/vps-native.md](docs/deployment/vps-native.md) |
+| **Fly.io** | `./scripts/fly-deploy.sh v1.0.0` | [Fly.io guide](https://sumanbasuli.github.io/lime/docs/deployment/fly/) |
+| **Docker** | `docker compose -f docker-compose.release.yml up -d` | [Docker guide](https://sumanbasuli.github.io/lime/docs/deployment/vps-docker/) |
+| **Linux systemd** | `make build && sudo ./scripts/vps-install.sh` | [Linux guide](https://sumanbasuli.github.io/lime/docs/deployment/vps-native/) |
 
 ### Deploy to Fly.io
 
@@ -93,10 +94,10 @@ Use either an external PostgreSQL URL:
 
 ```bash
 export DATABASE_URL='postgresql://...'
-./scripts/fly-deploy.sh v0.1.0
+./scripts/fly-deploy.sh v1.0.0
 ```
 
-Or attach Fly Managed Postgres to both apps first; the helper will reuse existing `DATABASE_URL` Fly secrets. Details: [docs/deployment/fly.md](docs/deployment/fly.md).
+Or attach Fly Managed Postgres to both apps first; the helper will reuse existing `DATABASE_URL` Fly secrets. Details: [Fly.io deployment docs](https://sumanbasuli.github.io/lime/docs/deployment/fly/).
 
 ### Updating
 
@@ -108,7 +109,7 @@ make update-release TAG=v0.2.0            # Docker (release bundle)
 sudo ./scripts/vps-update.sh v0.2.0       # Linux systemd
 ```
 
-Details and rollback: [docs/deployment/updates.md](docs/deployment/updates.md).
+Details and rollback: [update docs](https://sumanbasuli.github.io/lime/docs/deployment/updates/).
 
 ## Configuration
 
@@ -125,11 +126,12 @@ Runtime configuration lives in `.env` (root) or deploy-specific env files.
 | `LIME_GITHUB_REPO` | optional | Override the update-check repo (default `sumanbasuli/lime`). |
 | `ACT_RULES_PATH` | optional | Override the bundled ACT catalog path. |
 
-See [docs/setup.md](docs/setup.md) for the full table.
+See the [setup docs](https://sumanbasuli.github.io/lime/docs/setup/) for the full table.
 
 ## Development
 
 ```bash
+make start-dev           # full Docker stack with UI hot reload
 make start-db            # only Postgres
 make dev-shopkeeper      # Go backend with Air hot reload
 make dev-ui              # NextJS with hot reload
@@ -137,10 +139,14 @@ make dev-ui              # NextJS with hot reload
 
 | Command | Description |
 |---------|-------------|
-| `make start-all` | Full stack in Docker |
+| `make start-all` | Production-style Docker stack built from source |
+| `make start-dev` | Development Docker stack with NextJS hot reload |
 | `make migrate-all` | Apply DB migrations |
 | `make build` | Build Go + Next + release bundle into `dist/` |
 | `make build-docker` | Build versioned Docker images locally |
+| `make docs` | Refresh the static docs site with isolated heysuman.com demo screenshots |
+| `make docs-run` | Build and serve the static docs site locally |
+| `make docs-dev` | Run the docs site with NextJS hot reload |
 | `make backup-db` | Dump the bundled Postgres to `dist/backups/` |
 | `make update TAG=vX.Y.Z` | Rebuild from a tag and rolling-restart |
 | `make clean` | Stop the stack and remove volumes |
@@ -154,17 +160,9 @@ make dev-ui              # NextJS with hot reload
 
 ## Docs
 
-- [Setup & environment](docs/setup.md)
-- [Architecture overview](docs/architecture/)
-- [Database schema](docs/database.md)
-- [Performance and caching strategy](docs/performance.md)
-- [MCP integration](docs/mcp.md)
-- [Docker & release pipeline](docs/deployment/docker.md)
-- [Deploy to Fly.io](docs/deployment/fly.md)
-- [Deploy with Docker](docs/deployment/vps-docker.md)
-- [Deploy on Linux (systemd)](docs/deployment/vps-native.md)
-- [Updating LIME](docs/deployment/updates.md)
-- [Roadmap](docs/roadmap.md)
+Public docs are published at [sumanbasuli.github.io/lime](https://sumanbasuli.github.io/lime/). The repo-local Markdown in [docs/](docs/) remains the source content and contributor fallback.
+
+`make docs` refreshes the docs site locally. It uses a separate `lime-docs` Docker Compose project, separate Postgres and screenshot volumes, non-default ports, and fresh single-page demo scans for `https://heysuman.com`, `https://www.fake-university.com/`, and `https://overlaysdontwork.com/` so it never screenshots current private/local scans.
 
 ## Contributing
 

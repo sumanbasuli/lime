@@ -35,7 +35,8 @@ All environment configuration is managed through `.env` files:
 ### Full Stack (Docker)
 
 ```bash
-make start-all      # Build and start all services
+make start-all      # Build and start production-style services
+make start-dev      # Build and start services with UI hot reload
 make migrate-all    # Apply DB migrations without stopping services
 make stop-all       # Stop all services
 make clean          # Stop and remove all data volumes
@@ -64,7 +65,7 @@ make dev-ui            # NextJS with hot reload (in a new terminal)
 
 `make dev-ui` automatically points the Next proxy at `http://localhost:<LIME_API_PORT>`, so native UI development stays aligned with the local Go backend even though the Dockerized UI container talks to `http://shopkeeper:8080` internally.
 
-Note: scans now recover automatically when Shopkeeper starts again, but `make dev-shopkeeper` still restarts the Go process frequently during code edits. For stable long-running scans, prefer `make start-shopkeeper` or `make start-all`.
+Note: scans now recover automatically when Shopkeeper starts again, but `make dev-shopkeeper` still restarts the Go process frequently during code edits. For stable long-running scans, prefer `make start-shopkeeper`, `make start-dev`, or production-style `make start-all`.
 
 ACT catalog note:
 - Docker sets `ACT_RULES_PATH=/shared-data/act-rules.json` automatically for both services.

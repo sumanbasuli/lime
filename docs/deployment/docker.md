@@ -1,7 +1,8 @@
 # Docker & Deployment
 
-LIME now has two distinct Docker surfaces:
-- `docker-compose.yml` for local development
+LIME now has three distinct Docker surfaces:
+- `docker-compose.yml` for production-style local builds from source
+- `docker-compose.dev.yml` as the local development override for UI hot reload
 - `docker-compose.release.yml` for published runtime images
 
 The runtime model is intentionally split:
@@ -28,6 +29,7 @@ make migrate-all
 make start-shopkeeper
 make start-ui
 make start-all
+make start-dev
 make stop-all
 ```
 
@@ -39,6 +41,8 @@ The root `.env` controls:
 
 Important local detail:
 - the Docker services override `DATABASE_URL` and `SHOPKEEPER_URL` internally to use Docker service names (`db` and `shopkeeper`)
+- `make start-all` builds the production UI image and serves the built Next app
+- `make start-dev` applies `docker-compose.dev.yml` and runs the UI with NextJS hot reload
 - `make dev-ui` overrides `SHOPKEEPER_URL` to `http://localhost:<LIME_API_PORT>` for native Next development
 
 ## Production Build Targets

@@ -11,13 +11,14 @@ UI_IMAGE ?= lime-ui
 SHOPKEEPER_IMAGE ?= lime-shopkeeper
 LIME_API_PORT ?= 8080
 LIME_UI_PORT ?= 3000
+LIME_DOCS_PORT ?= 3001
 LIME_IMAGE_TAG ?= v$(VERSION)
 DOCKER_BUILD_FLAGS ?= --pull
 SHOPKEEPER_LDFLAGS := -s -w \
   -X github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo.Version=$(VERSION) \
   -X github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo.Commit=$(GIT_COMMIT)
 
-.PHONY: start-db start-shopkeeper start-ui start-all stop-all \
+.PHONY: start-db start-shopkeeper start-ui start-dev start-all stop-all \
        logs-db logs-shopkeeper logs-ui \
        dev-ui dev-shopkeeper \
        migrate-all \
@@ -25,6 +26,7 @@ SHOPKEEPER_LDFLAGS := -s -w \
        build-docker build-docker-ui build-docker-shopkeeper \
        publish-release-images \
        backup-db update update-release \
+       docs docs-run docs-dev docs-build docs-site-build \
        clean
 
 # ---- Docker commands ----
@@ -44,12 +46,21 @@ start-shopkeeper: start-db
 	@echo "Shopkeeper is starting on port $(LIME_API_PORT)..."
 
 start-ui: start-db
-	docker compose up -d --build ui
+	docker compose up -d --build --force-recreate ui
 	@echo "UI is starting on port $(LIME_UI_PORT)..."
 
+start-dev: start-db
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build shopkeeper
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --force-recreate ui
+	@echo "Development services starting with NextJS hot reload..."
+	@echo "  DB:         bundled local PostgreSQL on localhost:5432"
+	@echo "  Shopkeeper: http://localhost:$(LIME_API_PORT)"
+	@echo "  UI:         http://localhost:$(LIME_UI_PORT)"
+
 start-all: start-db
-	docker compose up -d --build
-	@echo "All services starting..."
+	docker compose up -d --build shopkeeper
+	docker compose up -d --build --force-recreate ui
+	@echo "Production services starting from built images..."
 	@echo "  DB:         bundled local PostgreSQL on localhost:5432"
 	@echo "  Shopkeeper: http://localhost:$(LIME_API_PORT)"
 	@echo "  UI:         http://localhost:$(LIME_UI_PORT)"
@@ -127,6 +138,20 @@ publish-release-images:
 	PUBLISH_LATEST="$(PUBLISH_LATEST)" \
 	PUSH_IMAGES="$(PUSH_IMAGES)" \
 	./scripts/publish-release-images.sh $(LIME_IMAGE_TAG)
+
+# ---- Docs site ----
+
+docs:
+	./scripts/docs-refresh.sh
+
+docs-run: docs-build
+	npm --prefix docs-site run serve -- --port $(LIME_DOCS_PORT)
+
+docs-dev:
+	npm --prefix docs-site run dev -- -p $(LIME_DOCS_PORT)
+
+docs-build docs-site-build:
+	npm --prefix docs-site run build
 
 # ---- Backup + update ----
 

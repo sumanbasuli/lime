@@ -1,66 +1,64 @@
 services:
   db:
     image: postgres:17-alpine
-    container_name: lime-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-lime}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lime_dev_password}
-      POSTGRES_DB: ${POSTGRES_DB:-lime_db}
+      POSTGRES_USER: lime
+      POSTGRES_PASSWORD: lime_docs_password
+      POSTGRES_DB: lime_docs_db
     ports:
-      - "${LIME_DB_PORT:-5432}:5432"
+      - "${LIME_DOCS_DB_PORT:-15432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lime} -d ${POSTGRES_DB:-lime_db}"]
+      test: ["CMD-SHELL", "pg_isready -U lime -d lime_docs_db"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   shopkeeper:
     build:
       context: .
       dockerfile: shopkeeper/Dockerfile
-    container_name: lime-shopkeeper
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
     environment:
       ACT_RULES_PATH: /shared-data/act-rules.json
-      DATABASE_URL: postgresql://${POSTGRES_USER:-lime}:${POSTGRES_PASSWORD:-lime_dev_password}@db:5432/${POSTGRES_DB:-lime_db}?sslmode=disable
+      DATABASE_URL: postgresql://lime:lime_docs_password@db:5432/lime_docs_db?sslmode=disable
       REPORT_BASE_URL: http://ui:3000
       SHOPKEEPER_PORT: 8080
     ports:
-      - "${LIME_API_PORT:-8080}:8080"
+      - "${LIME_DOCS_API_PORT:-18080}:8080"
     shm_size: "2gb"
     volumes:
       - ./data:/shared-data:ro
       - screenshots:/app/screenshots
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
-      interval: 15s
+      interval: 10s
       timeout: 5s
-      retries: 10
+      retries: 18
       start_period: 30s
 
   ui:
     build:
       context: .
       dockerfile: lime/Dockerfile
-    container_name: lime-ui
     restart: unless-stopped
     depends_on:
-      - shopkeeper
+      shopkeeper:
+        condition: service_healthy
     environment:
       ACT_RULES_PATH: /shared-data/act-rules.json
-      DATABASE_URL: postgresql://${POSTGRES_USER:-lime}:${POSTGRES_PASSWORD:-lime_dev_password}@db:5432/${POSTGRES_DB:-lime_db}?sslmode=disable
+      DATABASE_URL: postgresql://lime:lime_docs_password@db:5432/lime_docs_db?sslmode=disable
       SHOPKEEPER_URL: http://shopkeeper:8080
-      LIME_UPDATE_CHECK: ${LIME_UPDATE_CHECK:-false}
-      LIME_GITHUB_REPO: ${LIME_GITHUB_REPO:-sumanbasuli/lime}
-      LIME_VERSION: ${LIME_VERSION:-0.0.0}
+      LIME_UPDATE_CHECK: "false"
+      LIME_GITHUB_REPO: sumanbasuli/lime
+      LIME_VERSION: docs-demo
     ports:
-      - "${LIME_UI_PORT:-3000}:3000"
+      - "${LIME_DOCS_UI_PORT:-13000}:3000"
     volumes:
       - ./data:/shared-data:ro
 

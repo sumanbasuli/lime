@@ -3,6 +3,24 @@
 All notable changes to LIME are tracked here. The release workflow uses the
 section matching `VERSION` to populate GitHub Release notes.
 
+## [1.0.0] - 2026-04-25
+
+Hello OSS.
+
+- Added the static LIME product and documentation site under `docs-site/`, built for GitHub Pages at `https://sumanbasuli.github.io/lime/`.
+- Added a polished shadcn-style docs experience with product pages, user guides, developer docs, API reference, screenshot gallery, and LIME dashboard branding.
+- Added the GitHub Pages workflow for static docs publishing, separate from the Docker/release workflow.
+- Added `make docs` to refresh real product screenshots from an isolated production `lime-docs` Docker Compose stack using fresh demo scans for `heysuman.com`, `fake-university.com`, and `overlaysdontwork.com`.
+- Added `make docs-build`, `make docs-run`, and `make docs-dev` for static docs builds, local static serving, and docs hot reload.
+- Changed `make start-all` and `make start-ui` to run the production Next standalone build, with `make start-dev` reserved for the Next development server.
+- Added PostgreSQL-first performance and cache work for dashboard summaries, scan score summaries, issue pages, and report generation inputs.
+- Added large-report improvements including paginated issue details, bounded PDF occurrences, small/full CSV modes, and compact LLM text exports.
+- Added same-scan retry support for failed pages in completed partial scans.
+- Added report settings for PDF, CSV, and LLM availability plus operator-controlled report limits and performance knobs.
+- Added Docker and Fly.io release readiness with GHCR image publishing, changelog-driven release notes, and release bundle generation.
+- Added public OSS readiness docs including contribution, security, roadmap, deployment, architecture, and support guidance.
+- Added strict host verification in the scan profiling flow to keep scans on the entered host after redirect checks.
+
 ## [0.1.0] - 2026-04-23
 
 - Added the Shopkeeper scan pipeline with sitemap profiling, Chromium/axe-core scanning, result refinement, screenshots, and PostgreSQL persistence.
