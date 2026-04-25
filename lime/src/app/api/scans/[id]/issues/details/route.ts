@@ -3,6 +3,7 @@ import {
   ISSUE_OCCURRENCES_PAGE_SIZE,
   loadIssueDetailWithSummary,
 } from "@/lib/scan-issues";
+import { measureServerAction } from "@/lib/performance-logging";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -43,12 +44,17 @@ export async function GET(
     100
   );
 
-  const result = await loadIssueDetailWithSummary(
-    id,
-    kind,
-    key,
-    occurrenceOffset,
-    occurrenceLimit
+  const result = await measureServerAction(
+    `issue detail ${id} ${kind}`,
+    () =>
+      loadIssueDetailWithSummary(
+        id,
+        kind,
+        key,
+        occurrenceOffset,
+        occurrenceLimit
+      ),
+    500
   );
 
   if (!result) {

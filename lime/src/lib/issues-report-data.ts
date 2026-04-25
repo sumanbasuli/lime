@@ -16,7 +16,7 @@ import {
   type ACTRule,
   type AccessibilityReference,
 } from "@/lib/act-rules";
-import { getScanAuditReports } from "@/lib/scan-score-data";
+import { getScanScoreSummaries } from "@/lib/scan-score-data";
 import {
   getLighthouseAccessibilityWeight,
   type ScanScoreSummary,
@@ -626,10 +626,10 @@ export async function loadIssueReportData(
     return null;
   }
 
-  const auditReports = await getScanAuditReports([
+  const scoreSummaries = await getScanScoreSummaries([
     { id: scan.id, status: scan.status ?? "pending" },
   ]);
-  const scoreSummary = auditReports[scan.id].summary;
+  const scoreSummary = scoreSummaries[scan.id];
 
   const scanIssues = await db.select().from(issues).where(eq(issues.scanId, scanId));
   const failedRuleIds = new Set(scanIssues.map((issue) => issue.violationType));
@@ -661,10 +661,10 @@ export async function loadScopedIssueReportData(
     return null;
   }
 
-  const auditReports = await getScanAuditReports([
+  const scoreSummaries = await getScanScoreSummaries([
     { id: scan.id, status: scan.status ?? "pending" },
   ]);
-  const scoreSummary = auditReports[scan.id].summary;
+  const scoreSummary = scoreSummaries[scan.id];
   const occurrenceLimit = resolveOccurrenceLimit(options);
   const includeAffectedPages = shouldIncludeAffectedPages(options);
 

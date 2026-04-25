@@ -1,10 +1,10 @@
 import { DashboardSettingsForm } from "@/components/dashboard-settings-form";
-import { getReportSettings } from "@/lib/report-settings";
+import { getSystemSettings } from "@/lib/report-settings";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
-  const reportSettings = await getReportSettings();
+  const settings = await getSystemSettings();
 
   return (
     <div className="space-y-4">
@@ -23,7 +23,7 @@ export default async function SettingsPage() {
             formats on or off.
           </p>
         </div>
-        <DashboardSettingsForm initialSettings={reportSettings} />
+        <DashboardSettingsForm initialSettings={settings} />
       </section>
     </div>
   );

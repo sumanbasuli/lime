@@ -10,6 +10,7 @@ import {
   ScanTypeBadge,
   TagBadge,
 } from "@/components/status-badge";
+import { measureServerAction } from "@/lib/performance-logging";
 import { getScanScoreSummaries } from "@/lib/scan-score-data";
 import type { ScanScoreSummary } from "@/lib/scan-scoring";
 
@@ -49,23 +50,30 @@ export default async function ScansPage({
   const params = await searchParams;
   const tagFilter = params.tag;
 
-  const allScans = tagFilter
-    ? await db
-        .select()
-        .from(scans)
-        .where(eq(scans.tag, tagFilter))
-        .orderBy(desc(scans.createdAt))
-    : await db.select().from(scans).orderBy(desc(scans.createdAt));
-
-  const allScansForTags = await db
-        .select({ tag: scans.tag })
-        .from(scans)
-        .orderBy(scans.tag);
-  const scoreSummaries = await getScanScoreSummaries(
-    allScans.map((scan) => ({
-      id: scan.id,
-      status: scan.status ?? "pending",
-    }))
+  const [allScans, allScansForTags] = await measureServerAction(
+    "scans list data",
+    () =>
+      Promise.all([
+        tagFilter
+          ? db
+              .select()
+              .from(scans)
+              .where(eq(scans.tag, tagFilter))
+              .orderBy(desc(scans.createdAt))
+          : db.select().from(scans).orderBy(desc(scans.createdAt)),
+        db.select({ tag: scans.tag }).from(scans).orderBy(scans.tag),
+      ])
+  );
+  const scoreSummaries = await measureServerAction(
+    "scans score summaries",
+    () =>
+      getScanScoreSummaries(
+        allScans.map((scan) => ({
+          id: scan.id,
+          status: scan.status ?? "pending",
+          updatedAt: scan.updatedAt,
+        }))
+      )
   );
   const hasActiveScans = allScans.some(
     (scan) =>

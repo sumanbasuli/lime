@@ -94,6 +94,7 @@ type IssueOccurrence struct {
 	ID                    string    `json:"id"`
 	IssueID               string    `json:"issue_id"`
 	URLID                 string    `json:"url_id"`
+	RuleID                string    `json:"rule_id,omitempty"`
 	HTMLSnippet           *string   `json:"html_snippet"`
 	ScreenshotPath        *string   `json:"screenshot_path"`
 	ElementScreenshotPath *string   `json:"element_screenshot_path"`
@@ -127,4 +128,69 @@ type Stats struct {
 	TotalScans  int `json:"total_scans"`
 	TotalIssues int `json:"total_issues"`
 	TotalPages  int `json:"total_pages"`
+}
+
+// MCPAuthSettings controls access to the read-only MCP endpoint.
+type MCPAuthSettings struct {
+	Enabled   bool      `json:"enabled"`
+	KeyHash   *string   `json:"-"`
+	RevokedAt time.Time `json:"revoked_at"`
+}
+
+// MCPScanScoreSummary mirrors the persisted scan score read model for MCP reads.
+type MCPScanScoreSummary struct {
+	Score              *int   `json:"score"`
+	HasScore           bool   `json:"has_score"`
+	HasAuditData       bool   `json:"has_audit_data"`
+	CompletedURLCount  int    `json:"completed_url_count"`
+	FailedURLCount     int    `json:"failed_url_count"`
+	TotalURLCount      int    `json:"total_url_count"`
+	HasFullCoverage    bool   `json:"has_full_coverage"`
+	IsPartialScan      bool   `json:"is_partial_scan"`
+	PassedCount        int    `json:"passed_count"`
+	FailedCount        int    `json:"failed_count"`
+	NotApplicableCount int    `json:"not_applicable_count"`
+	NeedsReviewCount   int    `json:"needs_review_count"`
+	ExcludedCount      int    `json:"excluded_count"`
+	WeightedPassed     int    `json:"weighted_passed"`
+	WeightedFailed     int    `json:"weighted_failed"`
+	WeightedTotal      int    `json:"weighted_total"`
+	ScoredAuditCount   int    `json:"scored_audit_count"`
+	UpdatedAt          string `json:"updated_at"`
+}
+
+// MCPScanDetail includes progress and cached score data for one scan.
+type MCPScanDetail struct {
+	Scan         *Scan                `json:"scan"`
+	Progress     map[string]any       `json:"progress,omitempty"`
+	ScoreSummary *MCPScanScoreSummary `json:"score_summary"`
+}
+
+// MCPVisibleSettings exposes non-sensitive server settings to MCP clients.
+type MCPVisibleSettings struct {
+	Reporting    map[string]any `json:"reporting"`
+	Performance  map[string]any `json:"performance"`
+	Integrations map[string]any `json:"integrations"`
+}
+
+// MCPIssueSummary is a bounded issue group row for MCP clients.
+type MCPIssueSummary struct {
+	Kind            string  `json:"kind"`
+	Key             string  `json:"key"`
+	IssueID         *string `json:"issue_id,omitempty"`
+	RuleID          string  `json:"rule_id"`
+	Title           string  `json:"title"`
+	HelpURL         *string `json:"help_url,omitempty"`
+	Severity        *string `json:"severity,omitempty"`
+	IsFalsePositive bool    `json:"is_false_positive"`
+	OccurrenceCount int     `json:"occurrence_count"`
+}
+
+// MCPIssueDetail contains a paginated issue detail payload for MCP clients.
+type MCPIssueDetail struct {
+	Summary          MCPIssueSummary   `json:"summary"`
+	Occurrences      []IssueOccurrence `json:"occurrences"`
+	OccurrenceOffset int               `json:"occurrence_offset"`
+	OccurrenceLimit  int               `json:"occurrence_limit"`
+	HasMore          bool              `json:"has_more"`
 }

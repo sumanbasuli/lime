@@ -12,7 +12,7 @@ Scan sitemaps, capture screenshots, review issues in a dashboard.
 [![GHCR - Shopkeeper](https://img.shields.io/badge/GHCR-shopkeeper-6f42c1?logo=github)](https://github.com/sumanbasuli/lime/pkgs/container/lime-shopkeeper)
 [![GHCR - UI](https://img.shields.io/badge/GHCR-ui-6f42c1?logo=github)](https://github.com/sumanbasuli/lime/pkgs/container/lime-ui)
 
-[Quick start](#quick-start) | [Deploy](#deploy) | [Docs](docs/index.md) | [Releases](https://github.com/sumanbasuli/lime/releases)
+[Quick start](#quick-start) | [Deploy](#deploy) | [Docs](docs/index.md) | [Roadmap](docs/roadmap.md) | [Releases](https://github.com/sumanbasuli/lime/releases)
 
 </div>
 
@@ -157,6 +157,8 @@ make dev-ui              # NextJS with hot reload
 - [Setup & environment](docs/setup.md)
 - [Architecture overview](docs/architecture/)
 - [Database schema](docs/database.md)
+- [Performance and caching strategy](docs/performance.md)
+- [MCP integration](docs/mcp.md)
 - [Docker & release pipeline](docs/deployment/docker.md)
 - [Deploy to Fly.io](docs/deployment/fly.md)
 - [Deploy with Docker](docs/deployment/vps-docker.md)
@@ -172,6 +174,8 @@ Issues and pull requests welcome. Before opening a PR:
 2. Keep migrations forward-only and mirror any schema change in [`lime/src/db/schema.ts`](lime/src/db/schema.ts).
 3. Document new features in `docs/` first; [`docs/index.md`](docs/index.md) is the source of truth.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks, and PR expectations.
+
 ## Release Checklist
 
 Maintainers publish a release by updating [VERSION](VERSION), adding matching notes in [CHANGELOG.md](CHANGELOG.md), and merging to `main`. [release-docker.yml](.github/workflows/release-docker.yml) now runs `make build`, publishes the GHCR images through [`scripts/publish-release-images.sh`](scripts/publish-release-images.sh), and creates or updates the GitHub Release through [`scripts/publish-github-release.sh`](scripts/publish-github-release.sh). The release tag must be new; bump `VERSION` for every release.
@@ -179,6 +183,8 @@ Maintainers publish a release by updating [VERSION](VERSION), adding matching no
 ## Support
 
 Use [GitHub Issues](https://github.com/sumanbasuli/lime/issues) for bugs and deployment questions. Include the deploy target, release tag, relevant logs, and whether the scan was sitemap or single-page.
+
+Security reports should follow [SECURITY.md](SECURITY.md).
 
 ## License
 

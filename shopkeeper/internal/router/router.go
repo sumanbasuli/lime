@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/cors"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/handler"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/mcp"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
 )
 
@@ -36,6 +37,8 @@ func Setup(
 		AllowCredentials: true,
 	})
 	r.Use(c.Handler)
+
+	r.Handle("/mcp", mcp.New(repo))
 
 	// Routes
 	r.Route("/api", func(r chi.Router) {

@@ -1,6 +1,6 @@
-# VPS Deployment with Docker
+# Docker Deployment
 
-This is the recommended VPS option. You run the published GHCR images via Docker Compose and point them at a PostgreSQL database you own.
+This is the recommended Docker option. You run the published GHCR images via Docker Compose and point them at a PostgreSQL database you own.
 
 ## Prerequisites
 

@@ -12,6 +12,7 @@ import {
   TagBadge,
 } from "@/components/status-badge";
 import { ArrowRightIcon } from "lucide-react";
+import { measureServerAction } from "@/lib/performance-logging";
 import { getScanScoreSummaries } from "@/lib/scan-score-data";
 import type { ScanScoreSummary } from "@/lib/scan-scoring";
 
@@ -45,7 +46,7 @@ function formatScanCoverage(
 
 export default async function Home() {
   const [recentScans, [scanCount], [issueCount], [pageCount]] =
-    await Promise.all([
+    await measureServerAction("dashboard initial data", () => Promise.all([
       db.select().from(scans).orderBy(desc(scans.createdAt)).limit(10),
       db.select({ value: count() }).from(scans),
       db.select({ value: count() }).from(issues),
@@ -54,12 +55,17 @@ export default async function Home() {
           value: sql<number>`COALESCE(SUM(${scans.scannedUrls}), 0)`,
         })
         .from(scans),
-    ]);
-  const scoreSummaries = await getScanScoreSummaries(
-    recentScans.map((scan) => ({
-      id: scan.id,
-      status: scan.status ?? "pending",
-    }))
+    ]));
+  const scoreSummaries = await measureServerAction(
+    "dashboard score summaries",
+    () =>
+      getScanScoreSummaries(
+        recentScans.map((scan) => ({
+          id: scan.id,
+          status: scan.status ?? "pending",
+          updatedAt: scan.updatedAt,
+        }))
+      )
   );
   const hasActiveScans = recentScans.some(
     (scan) =>

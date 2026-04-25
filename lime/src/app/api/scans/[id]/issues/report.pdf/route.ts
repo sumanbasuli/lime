@@ -1,5 +1,7 @@
 import { NextRequest } from "next/server";
-import { getReportSettings } from "@/lib/report-settings";
+import { getSystemSettings } from "@/lib/report-settings";
+import { measureServerAction } from "@/lib/performance-logging";
+import { reportGenerationLimiter } from "@/lib/report-generation-limiter";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -28,8 +30,8 @@ export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const reportSettings = await getReportSettings();
-  if (!reportSettings.pdfReportsEnabled) {
+  const settings = await getSystemSettings();
+  if (!settings.reporting.pdfReportsEnabled) {
     return Response.json(
       { error: "PDF exports are disabled in settings." },
       { status: 403 }
@@ -66,12 +68,21 @@ export async function GET(
 
   let upstream: Response;
   try {
-    upstream = await fetch(targetUrl, {
-      method: "GET",
-      headers,
-      cache: "no-store",
-      redirect: "manual",
-    });
+    upstream = await reportGenerationLimiter.run(
+      settings.performance.reportGenerationConcurrency,
+      () =>
+        measureServerAction(
+          `pdf report proxy ${id}`,
+          () =>
+            fetch(targetUrl, {
+              method: "GET",
+              headers,
+              cache: "no-store",
+              redirect: "manual",
+            }),
+          1000
+        )
+    );
   } catch {
     return Response.json(
       {

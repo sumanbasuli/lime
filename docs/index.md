@@ -7,9 +7,10 @@ LIME is a self-hosted accessibility scanner powered by axe-core, Chromium, Postg
 * **[Local Development Setup](setup.md)**: Run LIME locally with Docker or native processes, including environment variables and common commands.
 * **[Docker & Release Pipeline](deployment/docker.md)**: Local Docker workflow, production build targets, GHCR release publishing, and release bundle format.
 * **[Deploy to Fly.io](deployment/fly.md)**: Two-app Fly setup with private networking, managed/external Postgres, screenshot storage, and rolling updates.
-* **[Deploy to a VPS with Docker](deployment/vps-docker.md)**: Recommended VPS path using published GHCR images.
-* **[Deploy to a VPS without Docker](deployment/vps-native.md)**: Native systemd install for operators who cannot run Docker.
+* **[Deploy with Docker](deployment/vps-docker.md)**: Recommended Docker path using published GHCR images.
+* **[Deploy on Linux without Docker](deployment/vps-native.md)**: Native systemd install for operators who cannot run Docker.
 * **[Updating LIME](deployment/updates.md)**: Update commands per target, backups, rollback notes, and the sidebar update notice.
+* **[Product Roadmap](roadmap.md)**: `v1.0` optimization and public-release plan, plus the `v2.0` MCP direction.
 
 ## Architecture
 
@@ -22,7 +23,8 @@ LIME is a self-hosted accessibility scanner powered by axe-core, Chromium, Postg
 ## Reference
 
 * **[Database Architecture](database.md)**: Details regarding the chosen database schema, technologies (PostgreSQL, Drizzle), and the Go backend DB strategy.
-* **[Development Roadmap & Build Steps](roadmap.md)**: Step-by-step track of what needs to be built and current progress.
+* **[Performance And Caching Strategy](performance.md)**: PostgreSQL-first optimization plan for large scans and reports.
+* **[MCP Integration](mcp.md)**: Read-only MCP transport, authentication, and capability model.
 
 Operational notes for scan lifecycle behavior are documented primarily in:
 - `docs/architecture/shopkeeper.md` for backend ownership, deletion/rescan rules, and restart recovery
@@ -40,12 +42,20 @@ Release and production build notes are documented primarily in:
 - `docs/setup.md` for `make build`, `make build-docker`, native local env expectations, and release runtime env requirements
 - `README.md` for the quick-start release workflow
 
+Performance and `v1.0` optimization notes are documented primarily in:
+- `docs/performance.md` for the PostgreSQL-first cache/read-model strategy
+- `docs/roadmap.md` for milestone sequencing and exit criteria
+
+MCP integration notes are documented primarily in:
+- `docs/mcp.md` for transport, authentication, and read-only capabilities
+- `docs/roadmap.md` for the `v2.0` milestone
+
 Runtime proxy notes are documented primarily in:
 - `docs/architecture/ui.md` for the same-origin `/api/...` proxy behavior and screenshot delivery model
 - `docs/deployment/docker.md` for `SHOPKEEPER_URL`, external-DB release usage, and reverse-proxy deployment behavior
 
 ## Guidelines For Contributing
 
-* Ensure all new features or modules are documented here first before coding starts.
-* Code must be thoroughly commented to ensure maintainability and to help auto-generate future documentation.
-* The `docs/index.md` serves as the single source of truth for the project. Keep the structure organized and up to date.
+* Read `../CONTRIBUTING.md` before opening a pull request.
+* Ensure new features, deployment changes, and schema changes are documented before release.
+* Keep `docs/index.md` as the map of the documentation set.

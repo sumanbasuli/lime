@@ -1,0 +1,9 @@
+DROP INDEX IF EXISTS idx_url_audit_occurrences_url_outcome_rule_created;
+DROP INDEX IF EXISTS idx_url_audits_url_outcome_rule;
+DROP INDEX IF EXISTS idx_issue_occurrences_issue_url_created;
+DROP INDEX IF EXISTS idx_issues_scan_violation_type;
+DROP INDEX IF EXISTS idx_issues_scan_false_positive;
+DROP INDEX IF EXISTS idx_urls_scan_url;
+DROP INDEX IF EXISTS idx_urls_scan_status;
+DROP INDEX IF EXISTS idx_scans_tag_created_at_desc;
+DROP INDEX IF EXISTS idx_scans_created_at_desc;

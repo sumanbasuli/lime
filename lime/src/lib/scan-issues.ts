@@ -1,8 +1,10 @@
-import { and, asc, count, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   issueOccurrences,
   issues,
+  scanIssueSummaryCache,
+  scans,
   urlAuditOccurrences,
   urlAudits,
   urls,
@@ -15,6 +17,7 @@ import {
   type ACTRule,
   type AccessibilityReference,
 } from "@/lib/act-rules";
+import { getPerformanceSettings } from "@/lib/report-settings";
 import { getLighthouseAccessibilityWeight } from "@/lib/scan-scoring";
 
 export const ISSUE_SUMMARIES_PAGE_SIZE = 12;
@@ -123,6 +126,18 @@ function compareFailedIssueSummaries(
     right.weight - left.weight ||
     severitySortOrder(left.severity) - severitySortOrder(right.severity) ||
     left.title.localeCompare(right.title)
+  );
+}
+
+function isFreshCacheRow(
+  cacheUpdatedAt: Date,
+  cacheScanUpdatedAt: Date,
+  scanUpdatedAt: Date,
+  ttlSeconds: number
+): boolean {
+  return (
+    cacheScanUpdatedAt.getTime() >= scanUpdatedAt.getTime() &&
+    Date.now() - cacheUpdatedAt.getTime() <= ttlSeconds * 1000
   );
 }
 
@@ -255,6 +270,162 @@ async function loadIssueSummaries(scanId: string): Promise<{
   };
 }
 
+function summaryToCacheRow(
+  scanId: string,
+  scanUpdatedAt: Date,
+  item: IssueSummaryItem
+) {
+  const sortBucket =
+    item.kind === "failed" && item.isFalsePositive
+      ? 2
+      : item.kind === "needs_review"
+        ? 1
+        : 0;
+  const sortSeverity =
+    item.kind === "failed" ? severitySortOrder(item.severity) : 0;
+
+  return {
+    scanId,
+    kind: item.kind,
+    itemKey: item.key,
+    issueId: item.kind === "failed" ? item.issueId : null,
+    ruleId: item.kind === "failed" ? item.violationType : item.ruleId,
+    title: item.title,
+    helpUrl: item.helpUrl,
+    severity: item.kind === "failed" ? item.severity : null,
+    isFalsePositive: item.kind === "failed" ? item.isFalsePositive : false,
+    occurrenceCount: item.occurrenceCount,
+    weight: item.weight,
+    scored: item.scored,
+    sortBucket,
+    sortSeverity,
+    sortTitle: item.title,
+    scanUpdatedAt,
+    updatedAt: new Date(),
+  };
+}
+
+type CachedIssueSummaryRow = typeof scanIssueSummaryCache.$inferSelect;
+
+function cacheRowsToIssueSummaries(
+  rows: CachedIssueSummaryRow[]
+): IssueSummaryItem[] {
+  return rows.map((row) => {
+    if (row.kind === "failed") {
+      return {
+        kind: "failed",
+        key: row.itemKey,
+        issueId: row.issueId ?? row.itemKey,
+        violationType: row.ruleId ?? row.itemKey,
+        title: row.title,
+        helpUrl: row.helpUrl,
+        severity: row.severity ?? "moderate",
+        isFalsePositive: row.isFalsePositive,
+        occurrenceCount: row.occurrenceCount,
+        weight: row.weight,
+        scored: row.scored,
+      };
+    }
+
+    return {
+      kind: "needs_review",
+      key: row.itemKey,
+      ruleId: row.ruleId ?? row.itemKey,
+      title: row.title,
+      helpUrl: row.helpUrl,
+      occurrenceCount: row.occurrenceCount,
+      weight: row.weight,
+      scored: row.scored,
+    };
+  });
+}
+
+function buildIssueCounts(items: IssueSummaryItem[]): IssueListCounts {
+  const activeIssueCount = items.filter(
+    (item) => item.kind === "failed" && !item.isFalsePositive
+  ).length;
+  const excludedIssueCount = items.filter(
+    (item) => item.kind === "failed" && item.isFalsePositive
+  ).length;
+  const needsReviewCount = items.filter(
+    (item) => item.kind === "needs_review"
+  ).length;
+
+  return {
+    activeIssueCount,
+    excludedIssueCount,
+    needsReviewCount,
+    totalIssueCardCount: activeIssueCount + excludedIssueCount + needsReviewCount,
+  };
+}
+
+async function loadCachedIssueSummaries(
+  scanId: string
+): Promise<{
+  items: IssueSummaryItem[];
+  counts: IssueListCounts;
+} | null> {
+  const [[scan], performanceSettings] = await Promise.all([
+    db
+      .select({ updatedAt: scans.updatedAt })
+      .from(scans)
+      .where(eq(scans.id, scanId))
+      .limit(1),
+    getPerformanceSettings(),
+  ]);
+
+  if (!scan) {
+    return null;
+  }
+
+  const rows = await db
+    .select()
+    .from(scanIssueSummaryCache)
+    .where(eq(scanIssueSummaryCache.scanId, scanId))
+    .orderBy(
+      asc(scanIssueSummaryCache.sortBucket),
+      desc(scanIssueSummaryCache.weight),
+      asc(scanIssueSummaryCache.sortSeverity),
+      asc(scanIssueSummaryCache.sortTitle),
+      asc(scanIssueSummaryCache.itemKey)
+    );
+
+  if (
+    rows.length > 0 &&
+    rows.every((row) =>
+      isFreshCacheRow(
+        row.updatedAt,
+        row.scanUpdatedAt,
+        scan.updatedAt,
+        performanceSettings.summaryCacheTtlSeconds
+      )
+    )
+  ) {
+    const items = cacheRowsToIssueSummaries(rows);
+    return {
+      items,
+      counts: buildIssueCounts(items),
+    };
+  }
+
+  const fresh = await loadIssueSummaries(scanId);
+  const cacheRows = fresh.items.map((item) =>
+    summaryToCacheRow(scanId, scan.updatedAt, item)
+  );
+
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(scanIssueSummaryCache)
+      .where(eq(scanIssueSummaryCache.scanId, scanId));
+
+    if (cacheRows.length > 0) {
+      await tx.insert(scanIssueSummaryCache).values(cacheRows);
+    }
+  });
+
+  return fresh;
+}
+
 export async function loadIssueSummariesPage(
   scanId: string,
   offset: number,
@@ -263,7 +434,8 @@ export async function loadIssueSummariesPage(
   items: IssueSummaryItem[];
   counts: IssueListCounts;
 }> {
-  const { items, counts } = await loadIssueSummaries(scanId);
+  const { items, counts } =
+    (await loadCachedIssueSummaries(scanId)) ?? (await loadIssueSummaries(scanId));
   return {
     items: items.slice(offset, offset + limit),
     counts,

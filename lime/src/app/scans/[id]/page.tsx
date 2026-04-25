@@ -15,6 +15,7 @@ import {
 } from "@/components/status-badge";
 import { ScanProgress } from "@/components/scan-progress";
 import { ArrowRightIcon, ChevronRightIcon } from "lucide-react";
+import { measureServerAction } from "@/lib/performance-logging";
 import { formatViewportLabel } from "@/lib/viewport-presets";
 import { getScanAuditReports } from "@/lib/scan-score-data";
 import {
@@ -191,29 +192,43 @@ function IssueDetailsButton({ scanId }: { scanId: string }) {
 export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
   const { id } = await params;
 
-  const [scan] = await db.select().from(scans).where(eq(scans.id, id));
+  const [scan] = await measureServerAction(
+    `scan detail scan ${id}`,
+    () => db.select().from(scans).where(eq(scans.id, id)),
+    250
+  );
 
   if (!scan) {
     notFound();
   }
 
-  const scanIssues = await db
-    .select({
-      id: issues.id,
-      violationType: issues.violationType,
-      description: issues.description,
-      severity: issues.severity,
-      isFalsePositive: issues.isFalsePositive,
-      createdAt: issues.createdAt,
-      occurrenceCount: count(issueOccurrences.id),
-    })
-    .from(issues)
-    .leftJoin(issueOccurrences, eq(issueOccurrences.issueId, issues.id))
-    .where(eq(issues.scanId, id))
-    .groupBy(issues.id);
-  const auditReports = await getScanAuditReports([
-    { id: scan.id, status: scan.status ?? "pending" },
-  ]);
+  const [scanIssues, auditReports] = await measureServerAction(
+    `scan detail issue and audit summaries ${id}`,
+    () =>
+      Promise.all([
+        db
+          .select({
+            id: issues.id,
+            violationType: issues.violationType,
+            description: issues.description,
+            severity: issues.severity,
+            isFalsePositive: issues.isFalsePositive,
+            createdAt: issues.createdAt,
+            occurrenceCount: count(issueOccurrences.id),
+          })
+          .from(issues)
+          .leftJoin(issueOccurrences, eq(issueOccurrences.issueId, issues.id))
+          .where(eq(issues.scanId, id))
+          .groupBy(issues.id),
+        getScanAuditReports([
+          {
+            id: scan.id,
+            status: scan.status ?? "pending",
+            updatedAt: scan.updatedAt,
+          },
+        ]),
+      ])
+  );
   const auditReport = auditReports[scan.id];
   const scoreSummary = auditReport.summary;
   const progressPercent =

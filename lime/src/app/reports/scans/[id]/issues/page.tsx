@@ -8,6 +8,7 @@ import {
   getFirstSearchParam,
   resolveIssueReportScope,
 } from "@/lib/issue-report-scope";
+import { measureServerAction } from "@/lib/performance-logging";
 import { getReportSettings } from "@/lib/report-settings";
 
 export const dynamic = "force-dynamic";
@@ -35,16 +36,24 @@ export default async function IssuesReportPage({
     notFound();
   }
 
-  const reportSettings = await getReportSettings();
-  const data = scope
-    ? await loadScopedIssueReportData(id, scope, {
-        occurrenceLimit: reportSettings.singleIssuePdfOccurrenceLimit,
-        includeAffectedPages: true,
-      })
-    : await loadIssueReportData(id, {
-        occurrenceLimit: reportSettings.fullPdfOccurrenceLimit,
-        includeAffectedPages: true,
-      });
+  const [reportSettings, data] = await measureServerAction(
+    `pdf report page data ${id}${scope ? ` ${scope.kind}` : ""}`,
+    async () => {
+      const settings = await getReportSettings();
+      const reportData = scope
+        ? await loadScopedIssueReportData(id, scope, {
+            occurrenceLimit: settings.singleIssuePdfOccurrenceLimit,
+            includeAffectedPages: true,
+          })
+        : await loadIssueReportData(id, {
+            occurrenceLimit: settings.fullPdfOccurrenceLimit,
+            includeAffectedPages: true,
+          });
+
+      return [settings, reportData] as const;
+    },
+    1000
+  );
 
   if (!data) {
     notFound();

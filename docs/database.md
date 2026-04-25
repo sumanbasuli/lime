@@ -1,102 +1,137 @@
 # Database Architecture
 
-The system requires reliable data persistence to store scan configurations, progress states, and the final refined results.
+LIME uses PostgreSQL as the shared durable store for scan configuration, scan progress, issue data, audit outcomes, report settings, and future read-model caches.
 
-## Database Engine
+## Engine And Access Model
 
-* **Engine**: PostgreSQL 17 (Alpine image via Docker).
-* **Single Instance**: Both the Go backend and NextJS frontend connect to the same PostgreSQL database (`lime_db`).
+- **Engine**: PostgreSQL 17.
+- **Backend access**: Shopkeeper uses `pgxpool` and owns scan lifecycle writes, scan results, screenshots metadata, migrations, and cleanup.
+- **UI access**: the NextJS app uses Drizzle ORM for server-rendered reads and UI-owned settings routes.
+- **Migrations**: SQL migrations live in `shopkeeper/migrations/`; matching Drizzle table definitions live in `lime/src/db/schema.ts`.
 
-## NextJS UI Database Access
+## Core Tables
 
-* **ORM**: Drizzle ORM.
-* **Access**: Read-only. Schema defined in `lime/src/db/schema.ts`.
-* **Responsibility**: Display scan results, dashboard data, and issue details.
+### `scans`
 
-## Go Backend (Shopkeeper) Database Strategy
+Top-level scan records.
 
-* **Driver**: `pgx` v5 with `pgxpool` connection pooling.
-* **Migrations**: `golang-migrate` v4. Migration files in `shopkeeper/migrations/`.
-* **Access**: Full read/write. Shopkeeper owns all writes for scan progress and results.
+Key fields:
 
-## Schema
+- target URL, scan type, tag, viewport preset, and stored viewport dimensions
+- status and pause-request state
+- total and scanned URL counters
+- created and updated timestamps
 
-All primary keys are UUIDs (`gen_random_uuid()`). Foreign keys use `ON DELETE CASCADE`.
+### `urls`
 
-### Custom Enums
+Discovered or provided URLs for a scan.
 
-| Enum | Values |
-|------|--------|
-| `scan_status` | `pending`, `profiling`, `scanning`, `processing`, `completed`, `failed` |
-| `url_status` | `pending`, `scanning`, `completed`, `failed` |
-| `severity` | `critical`, `serious`, `moderate`, `minor` |
-| `audit_outcome` | `passed`, `failed`, `not_applicable`, `incomplete` |
+Key fields:
 
-### Tables
+- scan ID
+- URL
+- URL status: `pending`, `scanning`, `completed`, or `failed`
+- created timestamp
 
-#### `scans`
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID | Primary key, auto-generated |
-| `sitemap_url` | TEXT | NOT NULL |
-| `status` | `scan_status` | Default: `pending` |
-| `total_urls` | INTEGER | Default: 0 |
-| `scanned_urls` | INTEGER | Default: 0 |
-| `created_at` | TIMESTAMP | Default: NOW() |
-| `updated_at` | TIMESTAMP | Default: NOW() |
+### `issues`
 
-#### `urls`
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID | Primary key |
-| `scan_id` | UUID | FK -> scans(id), CASCADE |
-| `url` | TEXT | NOT NULL |
-| `status` | `url_status` | Default: `pending` |
-| `created_at` | TIMESTAMP | Default: NOW() |
+Deduplicated failed axe issue groups for a scan.
 
-#### `issues`
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID | Primary key |
-| `scan_id` | UUID | FK -> scans(id), CASCADE |
-| `violation_type` | TEXT | NOT NULL |
-| `description` | TEXT | NOT NULL |
-| `severity` | `severity` | NOT NULL |
-| `created_at` | TIMESTAMP | Default: NOW() |
+Key fields:
 
-#### `issue_occurrences`
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID | Primary key |
-| `issue_id` | UUID | FK -> issues(id), CASCADE |
-| `url_id` | UUID | FK -> urls(id), CASCADE |
-| `html_snippet` | TEXT | Nullable |
-| `screenshot_path` | TEXT | Nullable |
-| `created_at` | TIMESTAMP | Default: NOW() |
+- scan ID
+- axe rule ID in `violation_type`
+- title/description, help URL, severity, and false-positive flag
+- created timestamp
 
-#### `url_audits`
-| Column | Type | Notes |
-|--------|------|-------|
-| `id` | UUID | Primary key |
-| `url_id` | UUID | FK -> urls(id), CASCADE |
-| `rule_id` | TEXT | axe/Lighthouse-style audit rule ID |
-| `outcome` | `audit_outcome` | `passed`, `failed`, `not_applicable`, `incomplete` |
-| `created_at` | TIMESTAMP | Default: NOW() |
+### `issue_occurrences`
 
-### Indexes
+Failed issue occurrences.
 
-* `idx_urls_scan_id` on `urls(scan_id)`
-* `idx_issues_scan_id` on `issues(scan_id)`
-* `idx_issues_severity` on `issues(severity)`
-* `idx_issue_occurrences_issue_id` on `issue_occurrences(issue_id)`
-* `idx_issue_occurrences_url_id` on `issue_occurrences(url_id)`
-* `idx_url_audits_url_id` on `url_audits(url_id)`
-* `idx_url_audits_rule_id` on `url_audits(rule_id)`
+Key fields:
 
-## Schema Sync Strategy
+- issue ID
+- URL ID
+- CSS selector
+- HTML snippet
+- page and element screenshot paths
+- created timestamp
 
-All schema changes originate in the Go SQL migrations (`shopkeeper/migrations/`). The Drizzle schema in `lime/src/db/schema.ts` must be updated to match. Drizzle Kit's `pull` command can introspect the database to verify alignment.
+### `url_audits`
 
-## Notes
+Per-page audit outcomes for axe/Lighthouse-aligned rules.
 
-Both systems (Go and NextJS) interact with the PostgreSQL database. Shopkeeper owns all writes regarding scan progress and results. NextJS should only read these tables.
+Key fields:
+
+- URL ID
+- rule ID
+- outcome: `passed`, `failed`, `not_applicable`, or `incomplete`
+- created timestamp
+
+### `url_audit_occurrences`
+
+Occurrence rows for audit outcomes that need review or additional context.
+
+Key fields:
+
+- URL ID
+- rule ID
+- outcome
+- CSS selector
+- HTML snippet
+- page and element screenshot paths
+- created timestamp
+
+### `app_settings`
+
+Server-wide settings.
+
+Current fields include:
+
+- full PDF occurrence limit
+- single-issue PDF occurrence limit
+- small CSV occurrence limit
+- LLM occurrence limit
+- PDF, CSV, and LLM export enablement flags
+- summary cache TTL
+- report-data cache TTL
+- report generation concurrency cap
+- MCP enablement and hashed key metadata
+
+The raw MCP key is never stored; only its hash and display hint are persisted.
+
+### `scan_score_summary_cache`
+
+Per-scan score, coverage, and audit-count read model used to avoid repeated full audit aggregation on dashboard and report reads.
+
+### `scan_issue_summary_cache`
+
+Per-scan failed and needs-review issue-card read model used by the issues page. Occurrence details remain live and paginated.
+
+### `scan_report_data_cache`
+
+Bounded report metadata cache keyed by scan, scope, format, and settings fingerprint. The cache stores metadata only; generated report files are still produced on demand.
+
+## Index Strategy
+
+The base schema includes indexes for direct foreign-key lookups. Later migrations add composite indexes for large-scan read paths.
+
+Current read-path indexes include:
+
+- recent scans: `scans(created_at DESC)`
+- scans by tag: `scans(tag, created_at DESC)`
+- URL coverage: `urls(scan_id, status)`
+- URL ordering within a scan: `urls(scan_id, url)`
+- score summaries and false-positive filtering: `issues(scan_id, is_false_positive)`
+- scoped issue lookups: `issues(scan_id, violation_type)`
+- issue occurrence paging: `issue_occurrences(issue_id, url_id, created_at)`
+- audit aggregation: `url_audits(url_id, outcome, rule_id)`
+- needs-review occurrence paging: `url_audit_occurrences(url_id, outcome, rule_id, created_at)`
+
+## Schema Sync Rules
+
+- Add schema changes through Shopkeeper SQL migrations first.
+- Add matching Drizzle schema changes in the UI.
+- Keep migrations forward-only in release history.
+- Do not let NextJS become the writer for scan lifecycle or scan result tables.
+- Document materialized read models or cache tables when they are added.

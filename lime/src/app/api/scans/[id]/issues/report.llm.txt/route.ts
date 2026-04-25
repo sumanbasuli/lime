@@ -4,6 +4,7 @@ import {
   loadIssueReportData,
 } from "@/lib/issues-report-data";
 import { resolveIssueReportScope } from "@/lib/issue-report-scope";
+import { measureServerAction } from "@/lib/performance-logging";
 import { getReportSettings } from "@/lib/report-settings";
 
 export const dynamic = "force-dynamic";
@@ -70,13 +71,18 @@ export async function GET(
     );
   }
 
-  const data = scope
-    ? await loadScopedIssueReportData(id, scope, {
-        occurrenceLimit: reportSettings.llmOccurrenceLimit,
-      })
-    : await loadIssueReportData(id, {
-        occurrenceLimit: reportSettings.llmOccurrenceLimit,
-      });
+  const data = await measureServerAction(
+    `llm report data ${id}${scope ? ` ${scope.kind}` : ""}`,
+    () =>
+      scope
+        ? loadScopedIssueReportData(id, scope, {
+            occurrenceLimit: reportSettings.llmOccurrenceLimit,
+          })
+        : loadIssueReportData(id, {
+            occurrenceLimit: reportSettings.llmOccurrenceLimit,
+          }),
+    500
+  );
 
   if (!data) {
     return Response.json(

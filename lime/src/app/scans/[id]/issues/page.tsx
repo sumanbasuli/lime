@@ -10,6 +10,7 @@ import {
   ISSUE_SUMMARIES_PAGE_SIZE,
   loadIssueSummariesPage,
 } from "@/lib/scan-issues";
+import { measureServerAction } from "@/lib/performance-logging";
 import { getReportSettings } from "@/lib/report-settings";
 
 export const dynamic = "force-dynamic";
@@ -21,23 +22,30 @@ interface IssuesPageProps {
 export default async function IssuesPage({ params }: IssuesPageProps) {
   const { id } = await params;
 
-  const [scan] = await db.select().from(scans).where(eq(scans.id, id));
+  const [scan] = await measureServerAction(
+    `issues page scan ${id}`,
+    () => db.select().from(scans).where(eq(scans.id, id)),
+    250
+  );
   if (!scan) {
     notFound();
   }
 
-  const [reportSettings, urlCoverageRows, initialIssuePage] = await Promise.all([
-    getReportSettings(),
-    db
-      .select({
-        status: urls.status,
-        urlCount: count(),
-      })
-      .from(urls)
-      .where(eq(urls.scanId, scan.id))
-      .groupBy(urls.status),
-    loadIssueSummariesPage(id, 0, ISSUE_SUMMARIES_PAGE_SIZE),
-  ]);
+  const [reportSettings, urlCoverageRows, initialIssuePage] =
+    await measureServerAction(`issues page initial data ${id}`, () =>
+      Promise.all([
+        getReportSettings(),
+        db
+          .select({
+            status: urls.status,
+            urlCount: count(),
+          })
+          .from(urls)
+          .where(eq(urls.scanId, scan.id))
+          .groupBy(urls.status),
+        loadIssueSummariesPage(id, 0, ISSUE_SUMMARIES_PAGE_SIZE),
+      ])
+    );
 
   const {
     activeIssueCount,

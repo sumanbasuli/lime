@@ -1,0 +1,35 @@
+name: Feature request
+description: Suggest an improvement to LIME.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow or limitation should this improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should LIME do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Scanning
+        - Reports and exports
+        - Dashboard UI
+        - Deployment
+        - Performance
+        - MCP or integrations
+        - Other

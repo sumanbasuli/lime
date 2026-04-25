@@ -1,4 +1,4 @@
-# VPS Deployment without Docker
+# Linux Deployment Without Docker
 
 This path compiles LIME from source and runs both services under systemd. Use it when you cannot or do not want to run Docker on the host.
 

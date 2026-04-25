@@ -3,6 +3,7 @@ import {
   ISSUE_SUMMARIES_PAGE_SIZE,
   loadIssueSummariesPage,
 } from "@/lib/scan-issues";
+import { measureServerAction } from "@/lib/performance-logging";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -33,6 +34,10 @@ export async function GET(
     50
   );
 
-  const result = await loadIssueSummariesPage(id, offset, limit);
+  const result = await measureServerAction(
+    `issues chunk ${id}`,
+    () => loadIssueSummariesPage(id, offset, limit),
+    500
+  );
   return Response.json(result);
 }

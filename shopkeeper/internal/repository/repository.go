@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -508,7 +510,13 @@ func (r *Repository) CreateIssue(ctx context.Context, scanID, violationType, des
 
 // SetIssueFalsePositive updates the false-positive flag for an issue in the given scan.
 func (r *Repository) SetIssueFalsePositive(ctx context.Context, scanID, issueID string, isFalsePositive bool) (*models.Issue, error) {
-	row := r.pool.QueryRow(ctx,
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin false-positive transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx,
 		`UPDATE issues
 		 SET is_false_positive = $1
 		 WHERE id = $2 AND scan_id = $3
@@ -522,6 +530,14 @@ func (r *Repository) SetIssueFalsePositive(ctx context.Context, scanID, issueID 
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to update false-positive state: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `UPDATE scans SET updated_at = NOW() WHERE id = $1`, scanID); err != nil {
+		return nil, fmt.Errorf("failed to touch scan after false-positive update: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit false-positive transaction: %w", err)
 	}
 
 	return issue, nil
@@ -702,6 +718,443 @@ func (r *Repository) GetStats(ctx context.Context) (*models.Stats, error) {
 		return nil, fmt.Errorf("failed to get stats: %w", err)
 	}
 	return stats, nil
+}
+
+// GetMCPAuthSettings returns the current MCP enablement and key hash.
+func (r *Repository) GetMCPAuthSettings(ctx context.Context) (*models.MCPAuthSettings, error) {
+	settings := &models.MCPAuthSettings{}
+	err := r.pool.QueryRow(ctx,
+		`SELECT mcp_enabled, mcp_key_hash, mcp_sessions_revoked_at
+		 FROM app_settings
+		 WHERE key = 'global'`,
+	).Scan(&settings.Enabled, &settings.KeyHash, &settings.RevokedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return &models.MCPAuthSettings{}, nil
+		}
+		return nil, fmt.Errorf("failed to get MCP settings: %w", err)
+	}
+	return settings, nil
+}
+
+// GetMCPScanScoreSummary returns the cached score summary for a scan when one exists.
+func (r *Repository) GetMCPScanScoreSummary(ctx context.Context, scanID string) (*models.MCPScanScoreSummary, error) {
+	var summary models.MCPScanScoreSummary
+	var score int
+	var scorePresent bool
+	var updatedAt time.Time
+
+	err := r.pool.QueryRow(ctx,
+		`SELECT
+		   COALESCE(score, 0),
+		   score IS NOT NULL,
+		   has_score,
+		   has_audit_data,
+		   completed_url_count,
+		   failed_url_count,
+		   total_url_count,
+		   has_full_coverage,
+		   is_partial_scan,
+		   passed_count,
+		   failed_count,
+		   not_applicable_count,
+		   needs_review_count,
+		   excluded_count,
+		   weighted_passed,
+		   weighted_failed,
+		   weighted_total,
+		   scored_audit_count,
+		   updated_at
+		 FROM scan_score_summary_cache
+		 WHERE scan_id = $1`,
+		scanID,
+	).Scan(
+		&score,
+		&scorePresent,
+		&summary.HasScore,
+		&summary.HasAuditData,
+		&summary.CompletedURLCount,
+		&summary.FailedURLCount,
+		&summary.TotalURLCount,
+		&summary.HasFullCoverage,
+		&summary.IsPartialScan,
+		&summary.PassedCount,
+		&summary.FailedCount,
+		&summary.NotApplicableCount,
+		&summary.NeedsReviewCount,
+		&summary.ExcludedCount,
+		&summary.WeightedPassed,
+		&summary.WeightedFailed,
+		&summary.WeightedTotal,
+		&summary.ScoredAuditCount,
+		&updatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get MCP scan score summary: %w", err)
+	}
+
+	if scorePresent {
+		summary.Score = &score
+	}
+	summary.UpdatedAt = updatedAt.UTC().Format(time.RFC3339)
+	return &summary, nil
+}
+
+// GetMCPVisibleSettings returns non-sensitive reporting, performance, and MCP settings.
+func (r *Repository) GetMCPVisibleSettings(ctx context.Context) (*models.MCPVisibleSettings, error) {
+	var fullPDFOccurrenceLimit int
+	var singleIssuePDFOccurrenceLimit int
+	var smallCSVOccurrenceLimit int
+	var llmOccurrenceLimit int
+	var pdfReportsEnabled bool
+	var csvReportsEnabled bool
+	var llmReportsEnabled bool
+	var summaryCacheTTLSeconds int
+	var reportDataCacheTTLSeconds int
+	var reportGenerationConcurrency int
+	var mcpEnabled bool
+	var mcpConfigured bool
+	var mcpKeyHint sql.NullString
+	var mcpKeyGeneratedAt sql.NullTime
+
+	err := r.pool.QueryRow(ctx,
+		`SELECT
+		   full_pdf_occurrence_limit,
+		   single_issue_pdf_occurrence_limit,
+		   small_csv_occurrence_limit,
+		   llm_occurrence_limit,
+		   pdf_reports_enabled,
+		   csv_reports_enabled,
+		   llm_reports_enabled,
+		   summary_cache_ttl_seconds,
+		   report_data_cache_ttl_seconds,
+		   report_generation_concurrency,
+		   mcp_enabled,
+		   mcp_key_hash IS NOT NULL,
+		   mcp_key_hint,
+		   mcp_key_generated_at
+		 FROM app_settings
+		 WHERE key = 'global'`,
+	).Scan(
+		&fullPDFOccurrenceLimit,
+		&singleIssuePDFOccurrenceLimit,
+		&smallCSVOccurrenceLimit,
+		&llmOccurrenceLimit,
+		&pdfReportsEnabled,
+		&csvReportsEnabled,
+		&llmReportsEnabled,
+		&summaryCacheTTLSeconds,
+		&reportDataCacheTTLSeconds,
+		&reportGenerationConcurrency,
+		&mcpEnabled,
+		&mcpConfigured,
+		&mcpKeyHint,
+		&mcpKeyGeneratedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return defaultMCPVisibleSettings(), nil
+		}
+		return nil, fmt.Errorf("failed to get MCP visible settings: %w", err)
+	}
+
+	var keyHint any
+	if mcpKeyHint.Valid {
+		keyHint = mcpKeyHint.String
+	}
+	var keyGeneratedAt any
+	if mcpKeyGeneratedAt.Valid {
+		keyGeneratedAt = mcpKeyGeneratedAt.Time.UTC().Format(time.RFC3339)
+	}
+
+	return &models.MCPVisibleSettings{
+		Reporting: map[string]any{
+			"full_pdf_occurrence_limit":         fullPDFOccurrenceLimit,
+			"single_issue_pdf_occurrence_limit": singleIssuePDFOccurrenceLimit,
+			"small_csv_occurrence_limit":        smallCSVOccurrenceLimit,
+			"llm_occurrence_limit":              llmOccurrenceLimit,
+			"pdf_reports_enabled":               pdfReportsEnabled,
+			"csv_reports_enabled":               csvReportsEnabled,
+			"llm_reports_enabled":               llmReportsEnabled,
+		},
+		Performance: map[string]any{
+			"summary_cache_ttl_seconds":       summaryCacheTTLSeconds,
+			"report_data_cache_ttl_seconds":   reportDataCacheTTLSeconds,
+			"report_generation_concurrency":   reportGenerationConcurrency,
+			"cache_storage":                   "postgres",
+			"report_generation_limiter_scope": "ui_process",
+		},
+		Integrations: map[string]any{
+			"mcp_enabled":          mcpEnabled,
+			"mcp_configured":       mcpConfigured,
+			"mcp_key_hint":         keyHint,
+			"mcp_key_generated_at": keyGeneratedAt,
+			"mcp_mode":             "read_only",
+		},
+	}, nil
+}
+
+func defaultMCPVisibleSettings() *models.MCPVisibleSettings {
+	return &models.MCPVisibleSettings{
+		Reporting: map[string]any{
+			"full_pdf_occurrence_limit":         30,
+			"single_issue_pdf_occurrence_limit": 2000,
+			"small_csv_occurrence_limit":        5,
+			"llm_occurrence_limit":              3,
+			"pdf_reports_enabled":               true,
+			"csv_reports_enabled":               true,
+			"llm_reports_enabled":               true,
+		},
+		Performance: map[string]any{
+			"summary_cache_ttl_seconds":       60,
+			"report_data_cache_ttl_seconds":   300,
+			"report_generation_concurrency":   1,
+			"cache_storage":                   "postgres",
+			"report_generation_limiter_scope": "ui_process",
+		},
+		Integrations: map[string]any{
+			"mcp_enabled":          false,
+			"mcp_configured":       false,
+			"mcp_key_hint":         nil,
+			"mcp_key_generated_at": nil,
+			"mcp_mode":             "read_only",
+		},
+	}
+}
+
+// ListMCPScans returns a bounded list of scans for MCP clients.
+func (r *Repository) ListMCPScans(ctx context.Context, limit, offset int) ([]models.Scan, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+scanColumns+`
+		 FROM scans
+		 ORDER BY created_at DESC
+		 LIMIT $1 OFFSET $2`,
+		limit,
+		offset,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list MCP scans: %w", err)
+	}
+	defer rows.Close()
+
+	var scans []models.Scan
+	for rows.Next() {
+		var s models.Scan
+		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.PauseRequested, &s.ScanType, &s.Tag,
+			&s.ViewportPreset, &s.ViewportWidth, &s.ViewportHeight,
+			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan MCP scan row: %w", err)
+		}
+		scans = append(scans, s)
+	}
+	if scans == nil {
+		scans = []models.Scan{}
+	}
+	return scans, nil
+}
+
+// GetMCPIssueSummaries returns failed and needs-review issue groups without loading occurrences.
+func (r *Repository) GetMCPIssueSummaries(ctx context.Context, scanID string, limit, offset int) ([]models.MCPIssueSummary, int, error) {
+	rows, err := r.pool.Query(ctx,
+		`WITH failed AS (
+		   SELECT
+		     'failed' AS kind,
+		     i.id::text AS key,
+		     i.id AS issue_id,
+		     i.violation_type AS rule_id,
+		     i.description AS title,
+		     i.help_url,
+		     i.severity::text AS severity,
+		     i.is_false_positive,
+		     COUNT(io.id)::int AS occurrence_count
+		   FROM issues i
+		   LEFT JOIN issue_occurrences io ON io.issue_id = i.id
+		   WHERE i.scan_id = $1
+		   GROUP BY i.id
+		 ),
+		 incomplete_audits AS (
+		   SELECT ua.rule_id, COUNT(*)::int AS audit_count
+		   FROM url_audits ua
+		   JOIN urls u ON u.id = ua.url_id
+		   WHERE u.scan_id = $1
+		     AND u.status = 'completed'
+		     AND ua.outcome = 'incomplete'
+		   GROUP BY ua.rule_id
+		 ),
+		 incomplete_occurrences AS (
+		   SELECT uao.rule_id, COUNT(*)::int AS occurrence_count
+		   FROM url_audit_occurrences uao
+		   JOIN urls u ON u.id = uao.url_id
+		   WHERE u.scan_id = $1
+		     AND u.status = 'completed'
+		     AND uao.outcome = 'incomplete'
+		   GROUP BY uao.rule_id
+		 ),
+		 needs_review AS (
+		   SELECT
+		     'needs_review' AS kind,
+		     COALESCE(io.rule_id, ia.rule_id) AS key,
+		     NULL::uuid AS issue_id,
+		     COALESCE(io.rule_id, ia.rule_id) AS rule_id,
+		     COALESCE(io.rule_id, ia.rule_id) AS title,
+		     NULL::text AS help_url,
+		     NULL::text AS severity,
+		     false AS is_false_positive,
+		     COALESCE(io.occurrence_count, ia.audit_count, 0)::int AS occurrence_count
+		   FROM incomplete_audits ia
+		   FULL OUTER JOIN incomplete_occurrences io ON io.rule_id = ia.rule_id
+		   WHERE NOT EXISTS (
+		     SELECT 1
+		     FROM issues i
+		     WHERE i.scan_id = $1
+		       AND i.violation_type = COALESCE(io.rule_id, ia.rule_id)
+		   )
+		 ),
+		 combined AS (
+		   SELECT * FROM failed
+		   UNION ALL
+		   SELECT * FROM needs_review
+		 )
+		 SELECT *, COUNT(*) OVER()::int AS total_count
+		 FROM combined
+		 ORDER BY
+		   CASE
+		     WHEN kind = 'failed' AND is_false_positive = false THEN 0
+		     WHEN kind = 'needs_review' THEN 1
+		     ELSE 2
+		   END,
+		   occurrence_count DESC,
+		   title ASC
+		 LIMIT $2 OFFSET $3`,
+		scanID,
+		limit,
+		offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get MCP issue summaries: %w", err)
+	}
+	defer rows.Close()
+
+	var summaries []models.MCPIssueSummary
+	total := 0
+	for rows.Next() {
+		var summary models.MCPIssueSummary
+		var totalCount int
+		if err := rows.Scan(
+			&summary.Kind,
+			&summary.Key,
+			&summary.IssueID,
+			&summary.RuleID,
+			&summary.Title,
+			&summary.HelpURL,
+			&summary.Severity,
+			&summary.IsFalsePositive,
+			&summary.OccurrenceCount,
+			&totalCount,
+		); err != nil {
+			return nil, 0, fmt.Errorf("failed to scan MCP issue summary row: %w", err)
+		}
+		total = totalCount
+		summaries = append(summaries, summary)
+	}
+	if summaries == nil {
+		summaries = []models.MCPIssueSummary{}
+	}
+	return summaries, total, nil
+}
+
+// GetMCPIssueDetail returns a paginated issue detail for MCP clients.
+func (r *Repository) GetMCPIssueDetail(ctx context.Context, scanID, kind, key string, limit, offset int) (*models.MCPIssueDetail, error) {
+	summaries, _, err := r.GetMCPIssueSummaries(ctx, scanID, 1000, 0)
+	if err != nil {
+		return nil, err
+	}
+
+	var summary *models.MCPIssueSummary
+	for _, candidate := range summaries {
+		if candidate.Kind == kind && candidate.Key == key {
+			copy := candidate
+			summary = &copy
+			break
+		}
+	}
+	if summary == nil {
+		return nil, nil
+	}
+
+	var occurrences []models.IssueOccurrence
+	if kind == "failed" {
+		rows, err := r.pool.Query(ctx,
+			`SELECT io.id, io.issue_id, io.url_id, io.html_snippet, io.screenshot_path,
+			        io.element_screenshot_path, io.css_selector, io.created_at, u.url
+			 FROM issue_occurrences io
+			 JOIN urls u ON u.id = io.url_id
+			 WHERE io.issue_id = $1
+			 ORDER BY u.url, io.created_at
+			 LIMIT $2 OFFSET $3`,
+			key,
+			limit,
+			offset,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get MCP failed issue occurrences: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var occurrence models.IssueOccurrence
+			if err := rows.Scan(&occurrence.ID, &occurrence.IssueID, &occurrence.URLID, &occurrence.HTMLSnippet, &occurrence.ScreenshotPath,
+				&occurrence.ElementScreenshotPath, &occurrence.CSSSelector, &occurrence.CreatedAt, &occurrence.PageURL); err != nil {
+				return nil, fmt.Errorf("failed to scan MCP failed occurrence row: %w", err)
+			}
+			occurrences = append(occurrences, occurrence)
+		}
+	} else {
+		rows, err := r.pool.Query(ctx,
+			`SELECT uao.id, uao.url_id, uao.html_snippet, uao.screenshot_path,
+			        uao.element_screenshot_path, uao.css_selector, uao.created_at, u.url
+			 FROM url_audit_occurrences uao
+			 JOIN urls u ON u.id = uao.url_id
+			 WHERE u.scan_id = $1
+			   AND u.status = 'completed'
+			   AND uao.rule_id = $2
+			   AND uao.outcome = 'incomplete'
+			 ORDER BY u.url, uao.created_at
+			 LIMIT $3 OFFSET $4`,
+			scanID,
+			key,
+			limit,
+			offset,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get MCP needs-review occurrences: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var occurrence models.IssueOccurrence
+			if err := rows.Scan(&occurrence.ID, &occurrence.URLID, &occurrence.HTMLSnippet, &occurrence.ScreenshotPath,
+				&occurrence.ElementScreenshotPath, &occurrence.CSSSelector, &occurrence.CreatedAt, &occurrence.PageURL); err != nil {
+				return nil, fmt.Errorf("failed to scan MCP needs-review occurrence row: %w", err)
+			}
+			occurrence.RuleID = key
+			occurrences = append(occurrences, occurrence)
+		}
+	}
+	if occurrences == nil {
+		occurrences = []models.IssueOccurrence{}
+	}
+
+	return &models.MCPIssueDetail{
+		Summary:          *summary,
+		Occurrences:      occurrences,
+		OccurrenceOffset: offset,
+		OccurrenceLimit:  limit,
+		HasMore:          offset+len(occurrences) < summary.OccurrenceCount,
+	}, nil
 }
 
 // GetScanURLs returns all URL records for a scan.

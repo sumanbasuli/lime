@@ -7,6 +7,7 @@ import {
   loadIssueReportData,
 } from "@/lib/issues-report-data";
 import { resolveIssueReportScope } from "@/lib/issue-report-scope";
+import { measureServerAction } from "@/lib/performance-logging";
 import { getReportSettings } from "@/lib/report-settings";
 
 export const dynamic = "force-dynamic";
@@ -98,15 +99,20 @@ export async function GET(
     );
   }
 
-  const data = scope
-    ? await loadScopedIssueReportData(id, scope, {
-        occurrenceLimit:
-          mode === "full" ? 0 : reportSettings.smallCsvOccurrenceLimit,
-      })
-    : await loadIssueReportData(id, {
-        occurrenceLimit:
-          mode === "full" ? 0 : reportSettings.smallCsvOccurrenceLimit,
-      });
+  const data = await measureServerAction(
+    `csv report data ${id} ${mode}${scope ? ` ${scope.kind}` : ""}`,
+    () =>
+      scope
+        ? loadScopedIssueReportData(id, scope, {
+            occurrenceLimit:
+              mode === "full" ? 0 : reportSettings.smallCsvOccurrenceLimit,
+          })
+        : loadIssueReportData(id, {
+            occurrenceLimit:
+              mode === "full" ? 0 : reportSettings.smallCsvOccurrenceLimit,
+          }),
+    500
+  );
 
   if (!data) {
     return Response.json(

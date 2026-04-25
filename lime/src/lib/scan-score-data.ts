@@ -1,7 +1,8 @@
 import { and, count, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { issues, urlAudits, urls } from "@/db/schema";
+import { issues, scanScoreSummaryCache, scans, urlAudits, urls } from "@/db/schema";
 import { getAxeRuleCatalog } from "@/lib/act-rules";
+import { getPerformanceSettings } from "@/lib/report-settings";
 import {
   buildScanAuditReportFromPageCounts,
   type ScanAuditReport,
@@ -13,7 +14,14 @@ import {
 interface ScanLike {
   id: string;
   status: string;
+  updatedAt?: Date;
 }
+
+interface ScanCacheState extends ScanLike {
+  updatedAt: Date;
+}
+
+type ScanScoreSummaryCacheInsert = typeof scanScoreSummaryCache.$inferInsert;
 
 function getErrorDetails(error: unknown): { code?: string; message: string } {
   if (error instanceof Error) {
@@ -174,15 +182,254 @@ export async function getScanAuditReports(
     });
   }
 
+  await refreshScoreSummaryCaches(scansToLoad, reports);
+
   return reports;
+}
+
+function cachedRowToSummary(
+  row: typeof scanScoreSummaryCache.$inferSelect
+): ScanScoreSummary {
+  return {
+    score: row.score,
+    hasScore: row.hasScore,
+    hasAuditData: row.hasAuditData,
+    completedUrlCount: row.completedUrlCount,
+    failedUrlCount: row.failedUrlCount,
+    totalUrlCount: row.totalUrlCount,
+    hasFullCoverage: row.hasFullCoverage,
+    isPartialScan: row.isPartialScan,
+    passedCount: row.passedCount,
+    failedCount: row.failedCount,
+    notApplicableCount: row.notApplicableCount,
+    needsReviewCount: row.needsReviewCount,
+    excludedCount: row.excludedCount,
+    weightedPassed: row.weightedPassed,
+    weightedFailed: row.weightedFailed,
+    weightedTotal: row.weightedTotal,
+    scoredAuditCount: row.scoredAuditCount,
+  };
+}
+
+function isFreshSummaryCache(
+  row: typeof scanScoreSummaryCache.$inferSelect,
+  scan: ScanCacheState,
+  ttlSeconds: number
+): boolean {
+  return (
+    row.scanUpdatedAt.getTime() >= scan.updatedAt.getTime() &&
+    Date.now() - row.updatedAt.getTime() <= ttlSeconds * 1000
+  );
+}
+
+async function loadScanCacheStates(scanIds: string[]): Promise<ScanCacheState[]> {
+  const rows = await db
+    .select({
+      id: scans.id,
+      status: scans.status,
+      updatedAt: scans.updatedAt,
+    })
+    .from(scans)
+    .where(inArray(scans.id, scanIds));
+
+  return rows.map((row) => ({
+    id: row.id,
+    status: row.status ?? "pending",
+    updatedAt: row.updatedAt,
+  }));
+}
+
+async function resolveScanCacheStates(
+  scansToLoad: ScanLike[]
+): Promise<ScanCacheState[]> {
+  const statesById = new Map<string, ScanCacheState>();
+  const missingIds: string[] = [];
+
+  for (const scan of scansToLoad) {
+    if (scan.updatedAt instanceof Date) {
+      statesById.set(scan.id, {
+        id: scan.id,
+        status: scan.status,
+        updatedAt: scan.updatedAt,
+      });
+    } else {
+      missingIds.push(scan.id);
+    }
+  }
+
+  if (missingIds.length > 0) {
+    const loadedStates = await loadScanCacheStates(missingIds);
+    for (const state of loadedStates) {
+      statesById.set(state.id, state);
+    }
+  }
+
+  return scansToLoad
+    .map((scan) => statesById.get(scan.id))
+    .filter((scan): scan is ScanCacheState => Boolean(scan));
+}
+
+async function upsertScoreSummaryCache(
+  scan: ScanCacheState,
+  summary: ScanScoreSummary
+) {
+  const now = new Date();
+
+  await db
+    .insert(scanScoreSummaryCache)
+    .values({
+      scanId: scan.id,
+      scanUpdatedAt: scan.updatedAt,
+      scanStatus: scan.status as ScanScoreSummaryCacheInsert["scanStatus"],
+      score: summary.score,
+      hasScore: summary.hasScore,
+      hasAuditData: summary.hasAuditData,
+      completedUrlCount: summary.completedUrlCount,
+      failedUrlCount: summary.failedUrlCount,
+      totalUrlCount: summary.totalUrlCount,
+      hasFullCoverage: summary.hasFullCoverage,
+      isPartialScan: summary.isPartialScan,
+      passedCount: summary.passedCount,
+      failedCount: summary.failedCount,
+      notApplicableCount: summary.notApplicableCount,
+      needsReviewCount: summary.needsReviewCount,
+      excludedCount: summary.excludedCount,
+      weightedPassed: summary.weightedPassed,
+      weightedFailed: summary.weightedFailed,
+      weightedTotal: summary.weightedTotal,
+      scoredAuditCount: summary.scoredAuditCount,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: scanScoreSummaryCache.scanId,
+      set: {
+        scanUpdatedAt: scan.updatedAt,
+        scanStatus: scan.status as ScanScoreSummaryCacheInsert["scanStatus"],
+        score: summary.score,
+        hasScore: summary.hasScore,
+        hasAuditData: summary.hasAuditData,
+        completedUrlCount: summary.completedUrlCount,
+        failedUrlCount: summary.failedUrlCount,
+        totalUrlCount: summary.totalUrlCount,
+        hasFullCoverage: summary.hasFullCoverage,
+        isPartialScan: summary.isPartialScan,
+        passedCount: summary.passedCount,
+        failedCount: summary.failedCount,
+        notApplicableCount: summary.notApplicableCount,
+        needsReviewCount: summary.needsReviewCount,
+        excludedCount: summary.excludedCount,
+        weightedPassed: summary.weightedPassed,
+        weightedFailed: summary.weightedFailed,
+        weightedTotal: summary.weightedTotal,
+        scoredAuditCount: summary.scoredAuditCount,
+        updatedAt: now,
+      },
+    });
+}
+
+async function refreshScoreSummaryCaches(
+  scansToLoad: ScanLike[],
+  reports: Record<string, ScanAuditReport>
+) {
+  const scanStates = await resolveScanCacheStates(scansToLoad);
+  if (scanStates.length === 0) {
+    return;
+  }
+
+  const scanIds = scanStates.map((scan) => scan.id);
+  const [performanceSettings, cachedRows] = await Promise.all([
+    getPerformanceSettings(),
+    db
+      .select()
+      .from(scanScoreSummaryCache)
+      .where(inArray(scanScoreSummaryCache.scanId, scanIds)),
+  ]);
+  const cachedRowsByScan = new Map(cachedRows.map((row) => [row.scanId, row]));
+
+  await Promise.all(
+    scanStates.map(async (scan) => {
+      const summary = reports[scan.id]?.summary;
+      if (!summary) {
+        return;
+      }
+
+      const cachedRow = cachedRowsByScan.get(scan.id);
+      if (
+        cachedRow &&
+        isFreshSummaryCache(
+          cachedRow,
+          scan,
+          performanceSettings.summaryCacheTtlSeconds
+        )
+      ) {
+        return;
+      }
+
+      await upsertScoreSummaryCache(scan, summary);
+    })
+  );
 }
 
 export async function getScanScoreSummaries(
   scansToLoad: ScanLike[]
 ): Promise<Record<string, ScanScoreSummary>> {
-  const reports = await getScanAuditReports(scansToLoad);
+  if (scansToLoad.length === 0) {
+    return {};
+  }
 
-  return Object.fromEntries(
-    Object.entries(reports).map(([scanId, report]) => [scanId, report.summary])
-  );
+  const scanIds = scansToLoad.map((scan) => scan.id);
+  const [scanStates, performanceSettings, cachedRows] = await Promise.all([
+    loadScanCacheStates(scanIds),
+    getPerformanceSettings(),
+    db
+      .select()
+      .from(scanScoreSummaryCache)
+      .where(inArray(scanScoreSummaryCache.scanId, scanIds)),
+  ]);
+
+  const scanStateById = new Map(scanStates.map((scan) => [scan.id, scan]));
+  const cachedRowsByScan = new Map(cachedRows.map((row) => [row.scanId, row]));
+  const summaries: Record<string, ScanScoreSummary> = {};
+  const missingScans: ScanCacheState[] = [];
+
+  for (const scan of scanStates) {
+    const cachedRow = cachedRowsByScan.get(scan.id);
+    if (
+      cachedRow &&
+      isFreshSummaryCache(
+        cachedRow,
+        scan,
+        performanceSettings.summaryCacheTtlSeconds
+      )
+    ) {
+      summaries[scan.id] = cachedRowToSummary(cachedRow);
+      continue;
+    }
+
+    missingScans.push(scan);
+  }
+
+  if (missingScans.length > 0) {
+    const reports = await getScanAuditReports(missingScans);
+    for (const scan of missingScans) {
+      const summary = reports[scan.id]?.summary;
+      if (summary) {
+        summaries[scan.id] = summary;
+      }
+    }
+  }
+
+  for (const scan of scansToLoad) {
+    if (!summaries[scan.id]) {
+      const scanState = scanStateById.get(scan.id);
+      if (!scanState) {
+        continue;
+      }
+
+      const reports = await getScanAuditReports([scanState]);
+      summaries[scan.id] = reports[scan.id].summary;
+    }
+  }
+
+  return summaries;
 }
