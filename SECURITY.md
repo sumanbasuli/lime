@@ -25,7 +25,7 @@ Security-sensitive areas include:
 - scan target validation and same-host enforcement
 - screenshot serving
 - report export routes
-- MCP authentication and runtime enablement when MCP ships
+- MCP authentication and runtime enablement
 - database migrations and backup/restore behavior
 - update and release scripts
 

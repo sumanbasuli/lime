@@ -59,7 +59,7 @@ export const apiGroups: ApiGroup[] = [
         method: "POST",
         path: "/api/scans/{id}/rescan",
         title: "Full rescan",
-        description: "Creates a brand-new scan using the original target and viewport.",
+        description: "Creates a new scan using the original target and viewport.",
         auth: "None in self-hosted v1.0.",
         response: "New scan record.",
       },

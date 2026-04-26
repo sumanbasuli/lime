@@ -1,6 +1,6 @@
 # LIME Product Roadmap
 
-This roadmap tracks the work needed to move LIME from the current stable self-hosted scanner to a public `v1.0` release and then to a read-only MCP-enabled `v2.0`.
+This roadmap tracks the work needed to move LIME from the current stable self-hosted scanner to a public `v1.0` release, then harden MCP and future integrations after release.
 
 ## Current Baseline
 
@@ -13,6 +13,7 @@ LIME already has the core product shape in place:
 - partial-scan failed-page retry inside the same scan
 - full-scan and per-issue PDF, CSV, and LLM exports
 - server-wide Settings for report limits and export feature flags
+- read-only MCP endpoint with generated bearer key auth
 - Docker, Fly.io, GHCR images, release bundles, and update scripts
 
 The remaining work before `v1.0` is primarily performance hardening, release polish, and public project hygiene.
@@ -88,7 +89,7 @@ Evolve Settings into three sections:
 
 - Reporting: existing PDF, CSV, and LLM limits and feature flags.
 - Performance: summary cache TTL, report-data cache TTL, and report concurrency cap.
-- Integrations: reserved for MCP controls in `v2.0`.
+- Integrations: MCP enablement and key generation controls.
 
 Exit criteria:
 
@@ -111,26 +112,34 @@ Exit criteria:
 - Docker and Fly.io smoke checks are documented.
 - Public docs are sufficient for a self-hosted operator to install, update, report issues, and contribute.
 
-## V2.0: Read-Only MCP Integration
+## V2.0: MCP Hardening And Integration Polish
 
 ### Goal
 
-Expose LIME to third-party AI tools through MCP so users can inspect scans and reports from their preferred AI client without needing that client to run inside the LIME dashboard.
+Harden the existing read-only MCP integration so more third-party AI tools can inspect scans and reports from outside the LIME dashboard.
 
-### Transport And Auth
+### Current Baseline
 
-- Use the official Streamable HTTP MCP transport model.
-- Expose MCP on the existing Shopkeeper HTTP service at a dedicated endpoint such as `/mcp`.
-- Control MCP runtime availability from Settings.
-- Allow users to generate and regenerate an MCP key in Settings.
-- Store only a hash of the MCP key.
-- Show the raw key only at generation or regeneration time.
-- Require `Authorization: Bearer <mcp-key>` on MCP requests.
+LIME already:
+
+- Exposes `POST /mcp` on the existing Shopkeeper HTTP service.
+- Controls MCP runtime availability from Settings.
+- Allows users to generate and regenerate an MCP key in Settings.
+- Stores only a hash of the MCP key.
+- Shows the raw key only at generation or regeneration time.
+- Requires `Authorization: Bearer <mcp-key>` on MCP requests.
+- Exposes read-only tools for scans, issue summaries, issue details, report metadata, and visible settings.
+
+### Planned Hardening
+
+- Add configurable origin allowlisting for non-local browser-based MCP clients.
+- Improve compatibility with clients that expect full Streamable HTTP session behavior.
+- Add clearer runtime diagnostics for disabled MCP, missing keys, and rejected origins.
 - Leave OAuth-based MCP authorization for a later version.
 
-### First MCP Capability Set
+### Current MCP Capability Set
 
-The first MCP release is read-only.
+The current MCP endpoint is read-only.
 
 Expose tools or resources for:
 
@@ -155,13 +164,14 @@ Do not expose:
 - Regenerating the key revokes the old key.
 - MCP responses must use bounded pagination for large scans.
 - MCP must not expose screenshot files outside the existing authenticated request model.
-- MCP must not trigger report generation automatically in the first release.
+- MCP must not trigger report generation automatically.
 
 Exit criteria:
 
-- A third-party MCP client can connect over HTTP with the generated key.
+- Common third-party MCP clients can connect over HTTP with the generated key.
 - Unauthorized requests return `401`.
 - Disabled MCP returns a clear unavailable response.
+- Rejected origins are understandable and configurable.
 - Read-only scan and issue inspection works against large scans.
 
 ## Deferred

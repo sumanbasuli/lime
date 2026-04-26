@@ -25,11 +25,11 @@ export function ScreenshotGallery({
             className="group block w-full text-left"
           >
             <figure className="overflow-hidden rounded-3xl border bg-muted shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
-              <div className="relative bg-muted p-2">
+              <div className="relative bg-muted p-1">
                 <img
                   src={assetPath(shot.src)}
                   alt={shot.alt}
-                  className="h-auto w-full rounded-2xl border bg-white object-contain"
+                  className="h-auto w-full rounded-[1.35rem] border bg-white object-contain"
                 />
                 <span className="absolute right-3 top-3 inline-flex rounded-full border bg-background/90 p-2 shadow-sm">
                   <ZoomInIcon className="size-4" />
@@ -55,7 +55,7 @@ export function ScreenshotGallery({
           onClick={() => setSelected(null)}
         >
           <Card
-            className="max-h-[92vh] w-full max-w-6xl overflow-hidden py-0"
+            className="max-h-[94vh] w-full max-w-[96rem] overflow-hidden py-0"
             onClick={(event) => event.stopPropagation()}
           >
             <CardHeader className="flex-row items-start justify-between gap-4 border-b py-4">

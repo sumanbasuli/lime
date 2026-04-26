@@ -57,16 +57,16 @@ export default function ApiReferencePage() {
 
   return (
     <SiteShell>
-    <main className="mx-auto w-full max-w-5xl px-4 py-8 md:px-8">
+    <main className="mx-auto w-full max-w-[96rem] px-3 py-8 md:px-6">
       <section className="mb-8">
-        <h1 className="font-heading text-[clamp(3rem,8vw,7rem)] leading-[0.86] tracking-[-0.06em]">
+        <h1 className="font-heading text-[clamp(2rem,4vw,3.5rem)] leading-[1.02] tracking-[-0.035em]">
           API reference for scans, issues, reports, and settings.
         </h1>
         <p className="mt-5 max-w-3xl text-lg leading-8 text-muted-foreground">
-          These docs are generated from <code>docs-site/content/api.ts</code> so
-          the public contract stays explicit. Use the examples against
-          Shopkeeper on port <code>8080</code> or through the dashboard proxy
-          where applicable.
+          Use these examples against Shopkeeper on port <code>8080</code> or
+          through the dashboard proxy where applicable. Endpoints are grouped
+          by method so reads, lifecycle actions, settings updates, and deletes
+          stay easy to scan.
         </p>
       </section>
 
@@ -82,7 +82,7 @@ export default function ApiReferencePage() {
                 >
                   {group.method}
                 </span>
-                <h2 className="font-heading text-4xl tracking-tight">
+                <h2 className="font-heading text-3xl tracking-tight">
                   {group.method} endpoints
                 </h2>
               </div>

@@ -101,6 +101,64 @@ wait_for_scan() {
   return 1
 }
 
+origin_for_target() {
+  local target="$1"
+  node -e "const target = new URL(process.argv[1]); process.stdout.write(target.origin);" "${target}"
+}
+
+seed_partial_retry_demo() {
+  local scan_id="$1"
+  local target="$2"
+  local failed_url
+
+  failed_url="$(origin_for_target "${target}")/__lime-docs-intentional-failed-page"
+
+  echo "Seeding one intentional failed URL for partial retry docs (${failed_url})..."
+  compose exec -T db psql -U lime -d lime_docs_db -v ON_ERROR_STOP=1 \
+    -v scan_id="${scan_id}" \
+    -v failed_url="${failed_url}" <<'SQL'
+WITH coverage AS (
+  SELECT COUNT(*) FILTER (WHERE status = 'completed') AS completed_count
+  FROM urls
+  WHERE scan_id = :'scan_id'::uuid
+),
+inserted_failed_url AS (
+  INSERT INTO urls (scan_id, url, status)
+  SELECT :'scan_id'::uuid, :'failed_url', 'failed'
+  WHERE (SELECT completed_count FROM coverage) > 0
+  RETURNING id
+),
+updated_scan AS (
+  UPDATE scans
+  SET status = 'completed',
+      pause_requested = false,
+      total_urls = (
+        SELECT COUNT(*)
+        FROM urls
+        WHERE scan_id = :'scan_id'::uuid
+      ),
+      scanned_urls = (
+        SELECT COUNT(*)
+        FROM urls
+        WHERE scan_id = :'scan_id'::uuid
+          AND status IN ('completed', 'failed')
+      ),
+      updated_at = NOW()
+  WHERE id = :'scan_id'::uuid
+    AND EXISTS (SELECT 1 FROM inserted_failed_url)
+  RETURNING id
+)
+DELETE FROM scan_score_summary_cache
+WHERE scan_id = :'scan_id'::uuid;
+
+DELETE FROM scan_issue_summary_cache
+WHERE scan_id = :'scan_id'::uuid;
+
+DELETE FROM scan_report_data_cache
+WHERE scan_id = :'scan_id'::uuid;
+SQL
+}
+
 scan_issue_score() {
   local scan_id="$1"
   local issues_json
@@ -140,8 +198,15 @@ if [ ! -d "${ROOT_DIR}/docs-site/node_modules" ]; then
   npm --prefix "${ROOT_DIR}/docs-site" ci
 fi
 
-echo "Ensuring Playwright Chromium is installed..."
-npm --prefix "${ROOT_DIR}/docs-site" exec playwright install chromium
+echo "Checking Playwright Chromium..."
+if node -e "const { chromium } = require(process.argv[1]); const fs = require('fs'); process.exit(fs.existsSync(chromium.executablePath()) ? 0 : 1);" "${ROOT_DIR}/docs-site/node_modules/playwright" >/dev/null 2>&1; then
+  echo "Playwright Chromium is already installed."
+elif [ "${LIME_DOCS_INSTALL_PLAYWRIGHT:-false}" = "true" ]; then
+  npm --prefix "${ROOT_DIR}/docs-site" exec playwright install chromium
+else
+  echo "Playwright Chromium is missing. Run with LIME_DOCS_INSTALL_PLAYWRIGHT=true if this machine needs a browser install." >&2
+  exit 1
+fi
 
 echo "Resetting isolated ${COMPOSE_PROJECT} docs stack..."
 compose down -v --remove-orphans
@@ -175,6 +240,8 @@ fi
 
 CAPTURE_SCAN_ID="${SCAN_IDS[0]}"
 CAPTURE_SCAN_LABEL="${SCAN_LABELS[0]}"
+PARTIAL_SCAN_ID="${SCAN_IDS[0]}"
+PARTIAL_SCAN_LABEL="${SCAN_LABELS[0]}"
 BEST_SCORE="-1"
 
 echo "Selecting richest docs scan for issue screenshots..."
@@ -189,11 +256,14 @@ for index in "${!SCAN_IDS[@]}"; do
   fi
 done
 
+seed_partial_retry_demo "${PARTIAL_SCAN_ID}" "${PARTIAL_SCAN_LABEL}"
+
 mkdir -p "${SCREENSHOT_DIR}"
 echo "Capturing docs screenshots from ${UI_BASE} for scan ${CAPTURE_SCAN_ID} (${CAPTURE_SCAN_LABEL})..."
 npm --prefix "${ROOT_DIR}/docs-site" run docs:screenshots -- \
   --base-url "${UI_BASE}" \
   --scan-id "${CAPTURE_SCAN_ID}" \
+  --partial-scan-id "${PARTIAL_SCAN_ID}" \
   --output "${SCREENSHOT_DIR}"
 
 echo "Building static docs site..."

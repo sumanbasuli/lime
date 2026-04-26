@@ -1,81 +1,153 @@
+"use client";
+
+import type { ComponentProps } from "react";
+import { useState } from "react";
 import {
-  BookOpenIcon,
-  Code2Icon,
+  ChevronRightIcon,
   GithubIcon,
-  HomeIcon,
-  ImagesIcon,
   RocketIcon,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { navigationGroups } from "@/content/navigation";
 import { assetPath, siteConfig, withBasePath } from "@/lib/site";
-import { Separator } from "@/components/ui/separator";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+  SidebarRail,
+} from "@/components/ui/sidebar";
 
-const iconByTitle: Record<string, ReactNode> = {
-  Overview: <HomeIcon className="size-4" />,
-  "Docs Home": <BookOpenIcon className="size-4" />,
-  Screenshots: <ImagesIcon className="size-4" />,
-  "API Reference": <Code2Icon className="size-4" />,
-};
+function normalizePath(path: string) {
+  if (path.length > 1 && path.endsWith("/")) {
+    return path.slice(0, -1);
+  }
 
-export function DocsSidebar() {
+  return path;
+}
+
+function isCurrentPath(pathname: string, href: string) {
+  const current = normalizePath(pathname);
+  const target = normalizePath(href);
+
+  if (target === "/") {
+    return current === "/";
+  }
+
+  return current === target || current.startsWith(`${target}/`);
+}
+
+export function DocsSidebar(props: ComponentProps<typeof Sidebar>) {
+  const pathname = usePathname();
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(navigationGroups.map((group) => [group.title, true]))
+  );
+
+  function toggleGroup(title: string) {
+    setOpenGroups((current) => ({
+      ...current,
+      [title]: !(current[title] ?? true),
+    }));
+  }
+
   return (
-    <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col bg-sidebar p-2 text-sidebar-foreground lg:flex">
-      <div className="flex h-full flex-col rounded-2xl border bg-background/70 shadow-sm">
-        <a
-          href={withBasePath("/")}
-          className="flex items-center px-4 py-4 no-underline"
-        >
-          <img src={assetPath("/brand/lime.svg")} alt="LIME" className="h-12 w-auto" />
-        </a>
-        <Separator />
-        <nav className="flex-1 space-y-5 overflow-y-auto p-3">
-          {navigationGroups.map((group) => (
-            <div key={group.title}>
-              <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                {group.title}
-              </div>
-              <div className="space-y-1">
-                {group.items.map((item) => (
-                  <a
-                    key={item.href}
-                    href={withBasePath(item.href)}
-                    className="group flex items-start gap-2 rounded-xl px-2 py-2 text-sm text-muted-foreground no-underline transition-colors hover:bg-accent hover:text-accent-foreground"
-                  >
-                    <span className="mt-0.5 text-foreground/80">
-                      {iconByTitle[item.title] ?? <span className="block size-4 rounded-full border" />}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block font-medium leading-5">{item.title}</span>
-                      {item.description ? (
-                        <span className="mt-0.5 line-clamp-2 block text-xs leading-4 text-muted-foreground">
-                          {item.description}
-                        </span>
-                      ) : null}
-                    </span>
-                  </a>
-                ))}
-              </div>
-            </div>
-          ))}
-        </nav>
-        <div className="space-y-1 p-3">
-          <a
-            href={siteConfig.repoUrl}
-            className="flex items-center gap-2 rounded-xl px-2 py-2 text-sm text-muted-foreground no-underline hover:bg-accent hover:text-accent-foreground"
-          >
-            <GithubIcon className="size-4" />
-            GitHub repository
-          </a>
-          <a
-            href={siteConfig.releasesUrl}
-            className="flex items-center gap-2 rounded-xl px-2 py-2 text-sm text-muted-foreground no-underline hover:bg-accent hover:text-accent-foreground"
-          >
-            <RocketIcon className="size-4" />
-            Latest release
-          </a>
-        </div>
-      </div>
-    </aside>
+    <Sidebar collapsible="offcanvas" {...props}>
+      <SidebarHeader>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              size="lg"
+              className="h-auto py-2 hover:bg-transparent active:bg-transparent"
+              render={<a href={withBasePath("/")} />}
+            >
+              <img
+                src={assetPath("/brand/lime.svg")}
+                alt="LIME"
+                className="h-10 w-auto"
+              />
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarMenu>
+            {navigationGroups.map((group) => {
+              const isOpen = openGroups[group.title] ?? true;
+              const isActive =
+                isCurrentPath(pathname, group.href) ||
+                group.items.some((item) => isCurrentPath(pathname, item.href));
+
+              return (
+              <SidebarMenuItem key={group.title}>
+                <SidebarMenuButton
+                  isActive={isActive}
+                  render={
+                    <a
+                      href={withBasePath(group.href)}
+                      className="font-medium"
+                    />
+                  }
+                >
+                  <span>{group.title}</span>
+                </SidebarMenuButton>
+                <SidebarMenuAction
+                  type="button"
+                  aria-expanded={isOpen}
+                  aria-label={`${isOpen ? "Collapse" : "Expand"} ${group.title}`}
+                  onClick={() => toggleGroup(group.title)}
+                >
+                  <ChevronRightIcon
+                    className={`transition-transform ${
+                      isOpen ? "rotate-90" : ""
+                    }`}
+                  />
+                </SidebarMenuAction>
+                {isOpen && group.items.length ? (
+                  <SidebarMenuSub>
+                    {group.items.map((item) => (
+                      <SidebarMenuSubItem key={item.href}>
+                        <SidebarMenuSubButton
+                          isActive={isCurrentPath(pathname, item.href)}
+                          render={<a href={withBasePath(item.href)} />}
+                        >
+                          <span>{item.title}</span>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    ))}
+                  </SidebarMenuSub>
+                ) : null}
+              </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+        </SidebarGroup>
+      </SidebarContent>
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton render={<a href={siteConfig.repoUrl} />}>
+              <GithubIcon />
+              <span>GitHub repository</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton render={<a href={siteConfig.releasesUrl} />}>
+              <RocketIcon />
+              <span>Latest release</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+      <SidebarRail />
+    </Sidebar>
   );
 }

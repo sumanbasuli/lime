@@ -14,7 +14,7 @@ export default function GetStartedPage() {
     <SiteShell>
     <main className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8">
       <section className="mb-8">
-        <h1 className="font-heading text-[clamp(3rem,8vw,7rem)] leading-[0.86] tracking-[-0.06em]">
+        <h1 className="font-heading text-[clamp(2.5rem,6vw,4.75rem)] leading-[0.95] tracking-[-0.045em]">
           Run LIME locally, then deploy a pinned release.
         </h1>
         <p className="mt-5 max-w-3xl text-lg leading-8 text-muted-foreground">

@@ -17,7 +17,7 @@ export const productDocs: ProductDoc[] = [
     screenshots: ["dashboard", "issues", "reports"],
     markdown: `# LIME Documentation
 
-LIME is a self-hosted accessibility scanner for teams that need evidence, not just scores. It runs axe-core in Chromium, captures screenshots, groups issues, tracks review-required checks, and exports reports for humans, spreadsheets, and LLM review.
+LIME is a self-hosted accessibility scanner for teams that need reviewable results. It runs axe-core in Chromium, captures screenshots, groups failures and needs-review checks, and exports PDF, CSV, and LLM-ready reports.
 
 ## What you can do here
 
@@ -25,11 +25,42 @@ LIME is a self-hosted accessibility scanner for teams that need evidence, not ju
 - Understand same-scan failed-page retry for partial scans.
 - Export PDF, CSV, and LLM reports without blocking large issue pages.
 - Configure server-wide reporting and performance settings.
-- Contribute to the backend, frontend, docs site, and release workflows.
+- Find contributor docs for the backend, dashboard, docs site, and release process.
 
 ## Docs structure
 
 User docs explain the product workflow from first scan to report export. Developer docs explain the codebase, contribution process, architecture, and release pipeline. API docs document the HTTP surface exposed by Shopkeeper and the dashboard proxy routes.
+`,
+  },
+  {
+    slug: ["user"],
+    title: "User Docs",
+    description: "Operate LIME from first scan through triage, exports, partial retry, and settings.",
+    category: "User Docs",
+    screenshots: ["dashboard", "scan-detail", "issues", "reports"],
+    sourceFiles: ["docs-site/content/product-docs.ts"],
+    markdown: `# User Docs
+
+Use these docs when you are running audits, reviewing scan evidence, or exporting reports for remediation work. The pages are ordered like the product workflow: create a scan, monitor it, review issues, retry partial failures, export reports, and tune server settings.
+
+## Recommended path
+
+1. Start with [Create Your First Scan](/docs/user/first-scan/) to understand sitemap and single-page scans.
+2. Use [Dashboard And Scan List](/docs/user/dashboard/) to read status, score, coverage, and scan actions.
+3. Open [Scan Detail And Partial Retry](/docs/user/scan-detail/) when a scan is running, partial, or ready for failed-page retry.
+4. Review [Issues And Screenshots](/docs/user/issues/) to triage failures and needs-review items.
+5. Use [Export Reports](/docs/user/reports/) when you need PDF, CSV, or LLM-ready output.
+6. Adjust [Settings](/docs/user/settings/) for report limits, feature toggles, and performance defaults.
+7. Read [MCP For AI Tools](/docs/user/mcp/) when preparing to connect external AI clients to LIME.
+
+## What matters operationally
+
+- Treat score and coverage together. A partial scan score is not final until failed pages are retried or accepted.
+- Use same-scan failed-page retry before starting a full rescan.
+- Expand issue groups only when you need occurrence detail; large reports load progressively.
+- Use small CSV or LLM exports when full occurrence data would produce files too large for normal tools.
+- Keep screenshots and source references in reports so findings remain actionable.
+- Treat MCP as a read-only integration surface for AI tools, not as a replacement for the dashboard workflow.
 `,
   },
   {
@@ -50,7 +81,7 @@ Use **New Scan** when you want LIME to audit a sitemap, sitemap index, or one sp
 1. Make sure the target URL is public or reachable from the server running Shopkeeper.
 2. Use a sitemap URL when you want broad site coverage.
 3. Use a page URL when you want to verify one page or reproduce one issue quickly.
-4. Add a label or tag when you need to identify the environment, client, release, or docs demo later.
+4. Add a label or tag when you need to identify the environment, project, or release later.
 
 ## Create the scan
 
@@ -136,9 +167,9 @@ The scan detail page is the source of truth for one scan ID. It shows lifecycle,
 
 ## Same-scan failed-page retry
 
-When a completed scan is partial, LIME can retry only the failed pages inside the existing scan. This avoids paying for a brand-new full scan and keeps the same scan ID, report, score history, completed URL rows, and issue grouping.
+When a completed scan is partial, LIME can retry only the failed pages inside the existing scan. This avoids running a full scan from the start and keeps the same scan ID, report, score history, completed URL rows, and issue grouping.
 
-![Partial scan retry area](/screenshots/partial-retry.png "Partial scans show an in-place retry area at the top of the scan detail page.")
+![Partial scan retry area](/screenshots/partial-retry.png?v=retry-card "Partial scans show an in-place retry area at the top of the scan detail page.")
 
 ## Retry failed pages
 
@@ -151,7 +182,7 @@ When a completed scan is partial, LIME can retry only the failed pages inside th
 
 ## Full rescan versus retry
 
-Use **Retry failed pages** when the scan is partial and you want the current report to become more complete. Use **Full rescan** only when you intentionally want a brand-new scan record for a fresh comparison.
+Use **Retry failed pages** when the scan is partial and you want the current report to become more complete. Use **Full rescan** only when you intentionally want a new scan record for comparison.
 `,
   },
   {
@@ -202,13 +233,13 @@ Needs-review items are included in the UI and reports. These are axe incomplete 
     sourceFiles: ["lime/src/components/issue-report-download-button.tsx", "lime/src/lib/issues-report-data.ts"],
     markdown: `# Export Reports
 
-LIME supports scan-level and issue-level exports. Use scan-level reports for stakeholder review and use issue-level reports when one rule needs focused remediation.
+LIME supports scan-level and issue-level exports. Use scan-level reports for audit review and use issue-level reports when one rule needs focused remediation.
 
 ![Report download controls](/screenshots/reports.png "The issue page exposes PDF, CSV, and LLM report downloads, including full and small CSV choices.")
 
 ## Choose a format
 
-- **PDF** is for human review. It includes issue summaries, affected URLs, screenshots, and bounded occurrence detail.
+- **PDF** is for audit review. It includes issue summaries, affected URLs, screenshots, and bounded occurrence detail.
 - **Small CSV** includes every issue but limits the number of occurrences per issue. Use this when spreadsheet size matters.
 - **Full CSV** includes every listed occurrence and can become very large on big scans.
 - **LLM text** is a compact structured export for AI-assisted review and remediation planning.
@@ -263,7 +294,279 @@ The settings page controls server-wide reporting, performance, and integration p
 
 ## Integration settings
 
-Integration settings are reserved for external interfaces such as MCP. MCP is part of the post-v1 roadmap and is documented separately from the v1 product workflow.
+Integration settings include the read-only MCP controls used to connect external AI tools. MCP setup is documented in [MCP For AI Tools](/docs/user/mcp/).
+`,
+  },
+  {
+    slug: ["user", "mcp"],
+    title: "MCP For AI Tools",
+    description: "Connect external AI clients to LIME through the read-only MCP interface.",
+    category: "User Docs",
+    sourceFiles: ["docs/mcp.md", "docs-site/content/product-docs.ts"],
+    markdown: `# MCP For AI Tools
+
+LIME includes a read-only MCP endpoint for external AI tools. It lets an AI client inspect scans, score summaries, issue groups, paginated occurrences, report availability, and relevant settings from an existing LIME instance.
+
+MCP is read-only. AI tools can analyze LIME data, but they cannot create scans, retry scans, delete scans, change settings, or mark false positives.
+
+## Current status
+
+MCP is available when it is enabled in **Settings > Integrations** and an MCP key has been generated.
+
+Current behavior:
+
+- LIME exposes \`POST /mcp\` on the Shopkeeper/API service.
+- LIME returns JSON responses for MCP initialization, tool listing, and tool calls.
+- \`GET /mcp\` streaming is not enabled.
+- MCP session state, OAuth, scoped keys, and write tools are not implemented.
+- Origin validation currently allows requests with no \`Origin\` header and localhost origins. Server-to-server clients and local bridges normally work because they omit \`Origin\`.
+
+## What you will need
+
+1. A LIME instance that includes MCP support.
+2. Access to **Settings** in the LIME dashboard.
+3. MCP enabled under **Settings > Integrations**.
+4. A generated MCP key.
+5. An AI tool that supports remote Streamable HTTP MCP servers, or a local HTTP-to-stdio bridge.
+
+## Endpoint
+
+Production endpoint:
+
+\`\`\`text
+https://<your-lime-host>/mcp
+\`\`\`
+
+Local development endpoint:
+
+\`\`\`text
+http://localhost:8080/mcp
+\`\`\`
+
+Use the Shopkeeper/API host, not the docs-site host. For example, do not point AI clients at \`https://sumanbasuli.github.io/lime/\` or a static docs domain.
+
+## Generate a key
+
+1. Open **Settings**.
+2. Open **Integrations**.
+3. Enable **MCP server**.
+4. Select **Generate MCP key**.
+5. Copy the key immediately. LIME only shows the raw key once.
+6. Store the key in your AI tool or local environment.
+
+Use environment variables when your AI tool supports them:
+
+\`\`\`bash
+export LIME_MCP_URL="https://lime.example.com/mcp"
+export LIME_MCP_KEY="lime_mcp_xxxxxxxxxxxxxxxxx"
+\`\`\`
+
+## Generic AI client config
+
+Many AI tools use a JSON config with an \`mcpServers\` object. Use this shape when the tool supports remote HTTP MCP servers:
+
+\`\`\`json
+{
+  "mcpServers": {
+    "lime": {
+      "type": "http",
+      "url": "https://lime.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer \${LIME_MCP_KEY}"
+      }
+    }
+  }
+}
+\`\`\`
+
+Some clients use \`transport: "streamable-http"\` instead of \`type: "http"\`:
+
+\`\`\`json
+{
+  "mcpServers": {
+    "lime": {
+      "transport": "streamable-http",
+      "url": "https://lime.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer \${LIME_MCP_KEY}"
+      }
+    }
+  }
+}
+\`\`\`
+
+Use the field names your AI tool documents. The required parts are the \`/mcp\` URL and the bearer authorization header.
+
+## Local bridge config
+
+Use this pattern when an AI tool only supports local \`stdio\` MCP server entries:
+
+\`\`\`json
+{
+  "mcpServers": {
+    "lime": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "\${LIME_MCP_URL}",
+        "--header",
+        "Authorization: Bearer \${LIME_MCP_KEY}"
+      ],
+      "env": {
+        "LIME_MCP_URL": "https://lime.example.com/mcp",
+        "LIME_MCP_KEY": "lime_mcp_xxxxxxxxxxxxxxxxx"
+      }
+    }
+  }
+}
+\`\`\`
+
+The bridge package is an example pattern, not a LIME dependency. Use your organization's preferred bridge if it supports Streamable HTTP and custom request headers.
+
+## Smoke test
+
+After enabling MCP and configuring the key, verify that missing credentials are rejected on a \`POST\` request:
+
+\`\`\`bash
+curl -i -X POST "$LIME_MCP_URL" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  --data '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "ping"
+  }'
+\`\`\`
+
+Then test an initialized request:
+
+\`\`\`bash
+curl -i "$LIME_MCP_URL" \\
+  -H "Authorization: Bearer $LIME_MCP_KEY" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  --data '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2025-11-25",
+      "capabilities": {},
+      "clientInfo": {
+        "name": "lime-smoke-test",
+        "version": "0.1.0"
+      }
+    }
+  }'
+\`\`\`
+
+Expected result: HTTP 200 with a JSON MCP initialize response. A missing or invalid key should return HTTP 401.
+
+## TypeScript client example
+
+Use this when you are testing an integration outside an AI client UI:
+
+\`\`\`bash
+npm install @modelcontextprotocol/sdk
+\`\`\`
+
+\`\`\`ts
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+
+const url = process.env.LIME_MCP_URL;
+const key = process.env.LIME_MCP_KEY;
+
+if (!url || !key) {
+  throw new Error("Set LIME_MCP_URL and LIME_MCP_KEY.");
+}
+
+const transport = new StreamableHTTPClientTransport(new URL(url), {
+  requestInit: {
+    headers: {
+      Authorization: \`Bearer \${key}\`,
+    },
+  },
+});
+
+const client = new Client({
+  name: "lime-integration-check",
+  version: "0.1.0",
+});
+
+await client.connect(transport);
+
+const tools = await client.listTools();
+console.log(JSON.stringify(tools, null, 2));
+
+await client.close();
+\`\`\`
+
+Run it:
+
+\`\`\`bash
+LIME_MCP_URL="https://lime.example.com/mcp" \\
+LIME_MCP_KEY="lime_mcp_xxxxxxxxxxxxxxxxx" \\
+npx tsx lime-mcp-client.ts
+\`\`\`
+
+## Available read-only tools
+
+The MCP endpoint exposes these tools:
+
+- \`list_scans\`
+- \`get_scan\`
+- \`list_scan_issues\`
+- \`get_issue_detail\`
+- \`get_report_metadata\`
+- \`get_settings\`
+
+Use \`list_scan_issues\` first, then pass the returned \`kind\` and \`key\` into \`get_issue_detail\` when you need paginated occurrence details.
+
+## Example AI prompts
+
+\`\`\`text
+List the latest LIME scans and show me which ones are partial.
+\`\`\`
+
+\`\`\`text
+For scan 66386d89-8564-40bb-93b3-c4a6fe70fcd4, summarize the top failed accessibility issues by severity and occurrence count.
+\`\`\`
+
+\`\`\`text
+Show me the first 20 occurrences for the highest-impact issue, including affected URLs and selectors.
+\`\`\`
+
+`,
+  },
+  {
+    slug: ["developer"],
+    title: "Developer Docs",
+    description: "Contribute to LIME across Shopkeeper, the dashboard, reports, docs, and release workflows.",
+    category: "Developer Docs",
+    sourceFiles: ["docs-site/content/product-docs.ts", "CONTRIBUTING.md"],
+    markdown: `# Developer Docs
+
+Use these docs when you are changing code, reviewing architecture, extending APIs, or preparing release-facing work. LIME is split between the Go Shopkeeper backend, the Next.js dashboard, PostgreSQL persistence, generated reports, and this static docs site.
+
+## Recommended path
+
+1. Read [Contributing](/docs/developer/contributing/) before changing code or opening a PR.
+2. Read [Architecture](/docs/developer/architecture/) to understand Shopkeeper, Profiler, Juicer, Sweetner, UI, and PostgreSQL.
+3. Read [Docs Site](/docs/developer/docs-site/) before changing public docs, screenshots, or GitHub Pages behavior.
+4. Read [Performance](/docs/developer/performance/) before touching large-scan reads, reports, caching, or pagination.
+5. Read [API](/docs/developer/api/) for how the public API reference is maintained.
+6. Use the full [API Reference](/api/) when integrating with Shopkeeper endpoints.
+7. Read [MCP For AI Tools](/docs/user/mcp/) when preparing AI-tool connectivity for the MCP endpoint.
+
+## Engineering rules
+
+- Keep migrations forward-only and safe for existing self-hosted installs.
+- Preserve large-scan behavior: first render should stay bounded, and details should load progressively.
+- Prefer Postgres-first read models and indexes before adding new infrastructure.
+- Keep report output deterministic and bounded unless a format explicitly promises full occurrence detail.
+- Update docs and changelog entries for user-facing changes.
 `,
   },
   {
@@ -336,10 +639,12 @@ The Next dashboard renders scan pages, issue pages, settings, and reports. It re
     description: "Maintain the product/docs site, screenshot pipeline, and GitHub Pages build.",
     category: "Developer Docs",
     screenshots: ["dashboard", "expanded-issue"],
-    sourceFiles: ["docs-site/", "scripts/docs-refresh.sh", ".github/workflows/docs-pages.yml"],
+    sourceFiles: ["docs/docs-site.md", "docs-site/", "scripts/docs-refresh.sh", ".github/workflows/docs-pages.yml"],
     markdown: `# Docs Site
 
 The docs site lives in \`docs-site/\` and is a static Next export for GitHub Pages.
+
+The canonical technical handoff doc is [Docs Site](/docs/reference/docs-site/). Use this page for the quick developer overview, and use the reference doc for full details on static export behavior, content sources, search, screenshots, custom domains, and GitHub Pages.
 
 ## Commands
 
@@ -352,7 +657,7 @@ make docs        # isolated demo scans, screenshots, static build
 
 ## Screenshot policy
 
-\`make docs\` uses a separate Docker Compose project named \`lime-docs\`, separate PostgreSQL and screenshot volumes, non-default ports, and curated public demo targets. It must never discover or screenshot existing local scans.
+\`make docs\` uses a separate Docker Compose project named \`lime-docs\`, separate PostgreSQL and screenshot volumes, non-default ports, and curated public demo targets. It must never discover or screenshot existing local scans. The partial retry screenshot uses one intentional failed URL in the isolated docs database so the retry card is always visible.
 
 ## GitHub Pages
 

@@ -10,7 +10,9 @@ LIME is a self-hosted accessibility scanner powered by axe-core, Chromium, Postg
 * **[Deploy with Docker](deployment/vps-docker.md)**: Recommended Docker path using published GHCR images.
 * **[Deploy on Linux without Docker](deployment/vps-native.md)**: Native systemd install for operators who cannot run Docker.
 * **[Updating LIME](deployment/updates.md)**: Update commands per target, backups, rollback notes, and the sidebar update notice.
-* **[Product Roadmap](roadmap.md)**: `v1.0` optimization and public-release plan, plus the `v2.0` MCP direction.
+* **[Docs Site](docs-site.md)**: Static docs architecture, screenshot refresh pipeline, search, GitHub Pages, and handoff checklist.
+* **[Product Roadmap](roadmap.md)**: `v1.0` optimization and public-release plan, plus MCP hardening and future integration work.
+* **[MCP Integration](mcp.md)**: Current read-only MCP endpoint, AI client configuration, smoke tests, and security requirements.
 
 ## Architecture
 
@@ -24,7 +26,8 @@ LIME is a self-hosted accessibility scanner powered by axe-core, Chromium, Postg
 
 * **[Database Architecture](database.md)**: Details regarding the chosen database schema, technologies (PostgreSQL, Drizzle), and the Go backend DB strategy.
 * **[Performance And Caching Strategy](performance.md)**: PostgreSQL-first optimization plan for large scans and reports.
-* **[MCP Integration](mcp.md)**: Read-only MCP transport, authentication, and capability model.
+* **[Docs Site](docs-site.md)**: How the public docs site is built, searched, screenshotted, and deployed.
+* **[MCP Integration](mcp.md)**: Read-only MCP transport, authentication, client configuration, and capability model.
 
 Operational notes for scan lifecycle behavior are documented primarily in:
 - `docs/architecture/shopkeeper.md` for backend ownership, deletion/rescan rules, and restart recovery
@@ -42,13 +45,19 @@ Release and production build notes are documented primarily in:
 - `docs/setup.md` for `make build`, `make build-docker`, native local env expectations, and release runtime env requirements
 - `README.md` for the quick-start release workflow
 
+Docs-site notes are documented primarily in:
+- `docs/docs-site.md` for static export behavior, content sources, search, screenshot refresh, GitHub Pages, and handoff rules
+- `docs-site/content/product-docs.ts` for curated user/developer docs shown on the public site
+- `scripts/docs-refresh.sh` for isolated docs-demo scan and screenshot generation
+
 Performance and `v1.0` optimization notes are documented primarily in:
 - `docs/performance.md` for the PostgreSQL-first cache/read-model strategy
 - `docs/roadmap.md` for milestone sequencing and exit criteria
 
 MCP integration notes are documented primarily in:
-- `docs/mcp.md` for transport, authentication, and read-only capabilities
-- `docs/roadmap.md` for the `v2.0` milestone
+- `docs-site/content/product-docs.ts` for the user-facing `/docs/user/mcp/` AI-tool setup guide
+- `docs/mcp.md` for transport, authentication, AI client connection examples, and read-only capabilities
+- `docs/roadmap.md` for MCP hardening and future integration milestones
 
 Runtime proxy notes are documented primarily in:
 - `docs/architecture/ui.md` for the same-origin `/api/...` proxy behavior and screenshot delivery model

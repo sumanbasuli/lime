@@ -10,7 +10,7 @@ export const productScreenshots: ProductScreenshot[] = [
   {
     id: "dashboard",
     title: "Dashboard",
-    caption: "Recent docs-demo scans, coverage, scores, tags, and actions in one place.",
+    caption: "Recent scans, coverage, scores, tags, and actions in one place.",
     alt: "LIME dashboard with recent scans and scan controls.",
     src: "/screenshots/dashboard.png",
   },
@@ -31,7 +31,7 @@ export const productScreenshots: ProductScreenshot[] = [
   {
     id: "partial-retry",
     title: "Retry State",
-    caption: "This captures the scan detail retry area; partial scans show the in-place failed-page retry bento here.",
+    caption: "A partial scan shows the in-place retry action for failed pages.",
     alt: "LIME scan detail page where partial scans show the failed-page retry card.",
     src: "/screenshots/partial-retry.png",
   },

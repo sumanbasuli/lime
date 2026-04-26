@@ -16,6 +16,7 @@ function readArg(name, fallback) {
 
 const baseUrl = readArg("--base-url", process.env.LIME_DOCS_UI_URL ?? "http://localhost:13000").replace(/\/$/, "");
 const scanId = readArg("--scan-id", process.env.LIME_DOCS_SCAN_ID);
+const partialScanId = readArg("--partial-scan-id", process.env.LIME_DOCS_PARTIAL_SCAN_ID ?? scanId);
 const outputDir = path.resolve(readArg("--output", path.join(docsSiteRoot, "public", "screenshots")));
 
 if (!scanId) {
@@ -59,7 +60,16 @@ try {
   await capture(page, `${baseUrl}/`, "dashboard.png");
   await capture(page, `${baseUrl}/scans/new`, "new-scan.png");
   await capture(page, `${baseUrl}/scans/${scanId}`, "scan-detail.png");
-  await capture(page, `${baseUrl}/scans/${scanId}`, "partial-retry.png");
+  await capture(page, `${baseUrl}/scans/${partialScanId}`, "partial-retry.png", {
+    afterLoad: async (currentPage) => {
+      await currentPage
+        .getByText("Partial scan recovery")
+        .waitFor({ state: "visible", timeout: 15_000 });
+      await currentPage
+        .getByRole("button", { name: /retry failed pages/i })
+        .waitFor({ state: "visible", timeout: 10_000 });
+    },
+  });
   await capture(page, `${baseUrl}/scans/${scanId}/issues`, "issues.png");
 
   await capture(page, `${baseUrl}/scans/${scanId}/issues`, "expanded-issue.png", {

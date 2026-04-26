@@ -151,10 +151,10 @@
   }
 
   .docs-prose h1 {
-    margin-bottom: 1.5rem;
-    font-size: clamp(2.5rem, 6vw, 5rem);
-    line-height: 0.92;
-    letter-spacing: -0.05em;
+    margin-bottom: 1.25rem;
+    font-size: clamp(2rem, 4vw, 3.25rem);
+    line-height: 1.04;
+    letter-spacing: -0.04em;
   }
 
   .docs-prose h2 {
