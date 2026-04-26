@@ -26,7 +26,7 @@ SHOPKEEPER_LDFLAGS := -s -w \
        build-docker build-docker-ui build-docker-shopkeeper \
        publish-release-images \
        backup-db update update-release \
-       docs docs-run docs-dev docs-build docs-site-build \
+       docs docs-run docs-dev docs-build docs-site-build docs-check-source \
        clean
 
 # ---- Docker commands ----
@@ -150,7 +150,18 @@ docs-run: docs-build
 docs-dev:
 	npm --prefix docs-site run dev -- -p $(LIME_DOCS_PORT)
 
-docs-build docs-site-build:
+docs-check-source:
+	@untracked=$$(git ls-files --others --exclude-standard docs-site/app docs-site/components docs-site/content docs-site/lib docs-site/scripts | grep -E '\.(css|mjs|ts|tsx)$$' || true); \
+	ignored=$$(git ls-files --others --ignored --exclude-standard docs-site/app docs-site/components docs-site/content docs-site/lib docs-site/scripts | grep -E '\.(css|mjs|ts|tsx)$$' || true); \
+	if [ -n "$$untracked$$ignored" ]; then \
+		echo "Docs source files would be present locally but missing from GitHub Pages CI:" >&2; \
+		if [ -n "$$untracked" ]; then echo "$$untracked" >&2; fi; \
+		if [ -n "$$ignored" ]; then echo "$$ignored" >&2; fi; \
+		echo "Track these files or update .gitignore before building docs." >&2; \
+		exit 1; \
+	fi
+
+docs-build docs-site-build: docs-check-source
 	npm --prefix docs-site run build
 
 # ---- Backup + update ----

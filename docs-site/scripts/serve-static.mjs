@@ -9,8 +9,11 @@ const outDir = resolve(siteRoot, "out");
 
 const args = process.argv.slice(2);
 const portArgIndex = args.indexOf("--port");
+const hostArgIndex = args.indexOf("--host");
 const port =
   Number(portArgIndex >= 0 ? args[portArgIndex + 1] : process.env.PORT) || 3001;
+const host =
+  (hostArgIndex >= 0 ? args[hostArgIndex + 1] : process.env.HOST) || "127.0.0.1";
 
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -84,6 +87,6 @@ const server = createServer((request, response) => {
   createReadStream(filePath).pipe(response);
 });
 
-server.listen(port, () => {
-  console.log(`Serving docs-site/out at http://localhost:${port}`);
+server.listen(port, host, () => {
+  console.log(`Serving docs-site/out at http://${host}:${port}`);
 });

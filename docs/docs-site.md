@@ -22,7 +22,7 @@ make docs-run      # build and serve docs-site/out locally
 make docs          # refresh isolated demo screenshots, then build the static site
 ```
 
-Use `make docs` before release-facing docs changes when screenshots may be stale. Use `make docs-build` for fast validation when content or layout changed but screenshots did not.
+Use `make docs` before release-facing docs changes when screenshots may be stale. Use `make docs-build` for fast validation when content or layout changed but screenshots did not. Use `make docs-run` for GitHub Pages parity: it builds the static export first, then serves `docs-site/out` instead of running the Next development server.
 
 ## Local Development Shape
 
@@ -33,6 +33,7 @@ The docs site is a normal Next app with static export enabled in `docs-site/next
 - `LIME_DOCS_BASE_PATH` can add a project-site base path such as `/lime`.
 - `NEXT_PUBLIC_LIME_DOCS_URL` controls canonical metadata and public docs links.
 - `docs-site/scripts/prepare-assets.mjs` copies shared brand assets into `docs-site/public/brand/` before build.
+- `make docs-build` checks for untracked or ignored docs source files before building so local-only files cannot make `make docs-run` look correct while CI deploys a missing route.
 
 For the custom domain, keep `LIME_DOCS_BASE_PATH` empty and publish `docs-site/public/CNAME`. For a GitHub Pages project URL such as `https://sumanbasuli.github.io/lime/`, set `LIME_DOCS_BASE_PATH=/lime`.
 
@@ -210,7 +211,8 @@ Before handing off a docs-site change:
 1. Run `npm --prefix docs-site run lint`.
 2. Run `NEXT_PUBLIC_LIME_DOCS_URL=https://lime.heysuman.com/ npm --prefix docs-site run build`.
 3. Run `make docs` when screenshot content changed.
-4. Confirm `docs-site/out/index.html` exists after build.
-5. Confirm custom-domain builds do not include a stale `/lime` base path.
-6. Update `CHANGELOG.md` for release-facing docs changes.
-7. Do not push until the maintainer explicitly asks.
+4. Run `make docs-run` when debugging a GitHub Pages routing issue locally.
+5. Confirm `docs-site/out/index.html` exists after build.
+6. Confirm custom-domain builds do not include a stale `/lime` base path.
+7. Update `CHANGELOG.md` for release-facing docs changes.
+8. Do not push until the maintainer explicitly asks.
