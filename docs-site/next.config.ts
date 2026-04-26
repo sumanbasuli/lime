@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 
 const docsSiteRoot = dirname(fileURLToPath(import.meta.url));
 
-const basePath = process.env.LIME_DOCS_BASE_PATH?.trim() || "";
+const configuredBasePath = process.env.LIME_DOCS_BASE_PATH?.trim() || "";
+const basePath = configuredBasePath === "/" ? "" : configuredBasePath;
 
 const nextConfig: NextConfig = {
   output: "export",

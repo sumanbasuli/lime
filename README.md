@@ -12,7 +12,7 @@ Scan sitemaps, capture screenshots, review issues in a dashboard.
 [![GHCR - Shopkeeper](https://img.shields.io/badge/GHCR-shopkeeper-6f42c1?logo=github)](https://github.com/sumanbasuli/lime/pkgs/container/lime-shopkeeper)
 [![GHCR - UI](https://img.shields.io/badge/GHCR-ui-6f42c1?logo=github)](https://github.com/sumanbasuli/lime/pkgs/container/lime-ui)
 
-[Quick start](#quick-start) | [Deploy](#deploy) | [Docs](https://sumanbasuli.github.io/lime/) | [Roadmap](https://sumanbasuli.github.io/lime/roadmap/) | [Releases](https://github.com/sumanbasuli/lime/releases)
+[Quick start](#quick-start) | [Deploy](#deploy) | [Docs](https://lime.heysuman.com/) | [Roadmap](https://lime.heysuman.com/roadmap/) | [Releases](https://github.com/sumanbasuli/lime/releases)
 
 </div>
 
@@ -48,11 +48,11 @@ Shopkeeper pipeline:
 
 | Stage | What it does |
 |-------|--------------|
-| **[Profiler](https://sumanbasuli.github.io/lime/docs/architecture/profiler/)** | Expands sitemap and sitemap-index inputs into a validated, deduplicated URL set for the scan. |
-| **[Juicer](https://sumanbasuli.github.io/lime/docs/architecture/juicer/)** | Takes those URLs, drives Chromium workers, runs axe-core, captures screenshots, and records per-page audit outcomes. |
-| **[Sweetner](https://sumanbasuli.github.io/lime/docs/architecture/sweetner/)** | Takes Juicer audit output and writes normalized issues, occurrences, audits, and review-required records. |
+| **[Profiler](https://lime.heysuman.com/docs/architecture/profiler/)** | Expands sitemap and sitemap-index inputs into a validated, deduplicated URL set for the scan. |
+| **[Juicer](https://lime.heysuman.com/docs/architecture/juicer/)** | Takes those URLs, drives Chromium workers, runs axe-core, captures screenshots, and records per-page audit outcomes. |
+| **[Sweetner](https://lime.heysuman.com/docs/architecture/sweetner/)** | Takes Juicer audit output and writes normalized issues, occurrences, audits, and review-required records. |
 
-Full architecture docs: [sumanbasuli.github.io/lime/docs/architecture/shopkeeper](https://sumanbasuli.github.io/lime/docs/architecture/shopkeeper/).
+Full architecture docs: [lime.heysuman.com/docs/architecture/shopkeeper](https://lime.heysuman.com/docs/architecture/shopkeeper/).
 
 ## Quick start
 
@@ -76,9 +76,9 @@ LIME publishes versioned Docker images to GHCR from the main-branch release work
 
 | Target | One-liner | Guide |
 |--------|-----------|-------|
-| **Fly.io** | `./scripts/fly-deploy.sh v1.0.0` | [Fly.io guide](https://sumanbasuli.github.io/lime/docs/deployment/fly/) |
-| **Docker** | `docker compose -f docker-compose.release.yml up -d` | [Docker guide](https://sumanbasuli.github.io/lime/docs/deployment/vps-docker/) |
-| **Linux systemd** | `make build && sudo ./scripts/vps-install.sh` | [Linux guide](https://sumanbasuli.github.io/lime/docs/deployment/vps-native/) |
+| **Fly.io** | `./scripts/fly-deploy.sh v1.0.0` | [Fly.io guide](https://lime.heysuman.com/docs/deployment/fly/) |
+| **Docker** | `docker compose -f docker-compose.release.yml up -d` | [Docker guide](https://lime.heysuman.com/docs/deployment/vps-docker/) |
+| **Linux systemd** | `make build && sudo ./scripts/vps-install.sh` | [Linux guide](https://lime.heysuman.com/docs/deployment/vps-native/) |
 
 ### Deploy to Fly.io
 
@@ -97,7 +97,7 @@ export DATABASE_URL='postgresql://...'
 ./scripts/fly-deploy.sh v1.0.0
 ```
 
-Or attach Fly Managed Postgres to both apps first; the helper will reuse existing `DATABASE_URL` Fly secrets. Details: [Fly.io deployment docs](https://sumanbasuli.github.io/lime/docs/deployment/fly/).
+Or attach Fly Managed Postgres to both apps first; the helper will reuse existing `DATABASE_URL` Fly secrets. Details: [Fly.io deployment docs](https://lime.heysuman.com/docs/deployment/fly/).
 
 ### Updating
 
@@ -109,7 +109,7 @@ make update-release TAG=v0.2.0            # Docker (release bundle)
 sudo ./scripts/vps-update.sh v0.2.0       # Linux systemd
 ```
 
-Details and rollback: [update docs](https://sumanbasuli.github.io/lime/docs/deployment/updates/).
+Details and rollback: [update docs](https://lime.heysuman.com/docs/deployment/updates/).
 
 ## Configuration
 
@@ -126,7 +126,7 @@ Runtime configuration lives in `.env` (root) or deploy-specific env files.
 | `LIME_GITHUB_REPO` | optional | Override the update-check repo (default `sumanbasuli/lime`). |
 | `ACT_RULES_PATH` | optional | Override the bundled ACT catalog path. |
 
-See the [setup docs](https://sumanbasuli.github.io/lime/docs/setup/) for the full table.
+See the [setup docs](https://lime.heysuman.com/docs/setup/) for the full table.
 
 ## Development
 
@@ -160,7 +160,7 @@ make dev-ui              # NextJS with hot reload
 
 ## Docs
 
-Public docs are published at [sumanbasuli.github.io/lime](https://sumanbasuli.github.io/lime/). The repo-local Markdown in [docs/](docs/) remains the source content and contributor fallback.
+Public docs are published at [lime.heysuman.com](https://lime.heysuman.com/). The repo-local Markdown in [docs/](docs/) remains the source content and contributor fallback.
 
 `make docs` refreshes the docs site locally. It uses a separate `lime-docs` Docker Compose project, separate Postgres and screenshot volumes, non-default ports, and fresh single-page demo scans for `https://heysuman.com`, `https://www.fake-university.com/`, and `https://overlaysdontwork.com/` so it never screenshots current private/local scans.
 

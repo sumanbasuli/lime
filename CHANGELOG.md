@@ -7,7 +7,7 @@ section matching `VERSION` to populate GitHub Release notes.
 
 Hello OSS.
 
-- Added the static LIME product and documentation site under `docs-site/`, built for GitHub Pages at `https://sumanbasuli.github.io/lime/`.
+- Added the static LIME product and documentation site under `docs-site/`, built for GitHub Pages and the `https://lime.heysuman.com/` custom domain.
 - Added a polished shadcn-style docs experience with product pages, user guides, developer docs, API reference, screenshot gallery, and LIME dashboard branding.
 - Added the GitHub Pages workflow for static docs publishing, separate from the Docker/release workflow.
 - Added `make docs` to refresh real product screenshots from an isolated production `lime-docs` Docker Compose stack using fresh demo scans for `heysuman.com`, `fake-university.com`, and `overlaysdontwork.com`.

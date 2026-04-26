@@ -2,6 +2,11 @@ name: Docs Pages
 
 on:
   workflow_dispatch:
+    inputs:
+      base_path:
+        description: "Optional base path for project-site builds, for example /lime. Leave empty for the custom domain."
+        required: false
+        default: ""
   push:
     branches:
       - main
@@ -45,7 +50,8 @@ jobs:
         run: npm run build
         working-directory: docs-site
         env:
-          LIME_DOCS_BASE_PATH: /lime
+          LIME_DOCS_BASE_PATH: ${{ github.event.inputs.base_path || '' }}
+          NEXT_PUBLIC_LIME_DOCS_URL: https://lime.heysuman.com/
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
