@@ -3,6 +3,11 @@
 All notable changes to LIME are tracked here. The release workflow uses the
 section matching `VERSION` to populate GitHub Release notes.
 
+## [1.0.2] - 2026-04-26
+
+- Fixed the GitHub Pages screenshots gallery route by moving committed screenshot assets out of the `/screenshots/` route namespace.
+- Updated docs screenshot manifests, inline user-doc screenshots, and `make docs` capture output to use `/product-screenshots/`.
+
 ## [1.0.1] - 2026-04-26
 
 - Refined the public docs-site homepage, screenshots page, API page, and roadmap copy for clearer release-facing messaging.

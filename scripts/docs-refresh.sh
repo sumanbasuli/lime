@@ -9,7 +9,7 @@ API_BASE="http://localhost:${API_PORT}"
 UI_BASE="http://localhost:${UI_PORT}"
 DEFAULT_SCAN_TARGETS="https://heysuman.com,https://www.fake-university.com/,https://overlaysdontwork.com/"
 IFS=',' read -r -a SCAN_TARGETS <<< "${LIME_DOCS_SCAN_TARGETS:-${DEFAULT_SCAN_TARGETS}}"
-SCREENSHOT_DIR="${ROOT_DIR}/docs-site/public/screenshots"
+SCREENSHOT_DIR="${ROOT_DIR}/docs-site/public/product-screenshots"
 
 compose() {
   docker compose -p "${COMPOSE_PROJECT}" -f "${ROOT_DIR}/docker-compose.docs.yml" "$@"

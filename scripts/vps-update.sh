@@ -5,7 +5,7 @@
 #   sudo ./scripts/vps-update.sh <git-tag>
 #
 # Example:
-#   sudo ./scripts/vps-update.sh v1.0.1
+#   sudo ./scripts/vps-update.sh v1.0.2
 #
 # The script:
 #   1. backs up the Postgres database

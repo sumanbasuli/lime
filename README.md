@@ -72,11 +72,11 @@ Stop: `make stop-all`. Reset volumes: `make clean`.
 
 ## Deploy
 
-LIME publishes versioned Docker images to GHCR from the main-branch release workflow. Use the release tag you want to deploy, for example `v1.0.1`.
+LIME publishes versioned Docker images to GHCR from the main-branch release workflow. Use the release tag you want to deploy, for example `v1.0.2`.
 
 | Target | One-liner | Guide |
 |--------|-----------|-------|
-| **Fly.io** | `./scripts/fly-deploy.sh v1.0.1` | [Fly.io guide](https://lime.heysuman.com/docs/deployment/fly/) |
+| **Fly.io** | `./scripts/fly-deploy.sh v1.0.2` | [Fly.io guide](https://lime.heysuman.com/docs/deployment/fly/) |
 | **Docker** | `docker compose -f docker-compose.release.yml up -d` | [Docker guide](https://lime.heysuman.com/docs/deployment/vps-docker/) |
 | **Linux systemd** | `make build && sudo ./scripts/vps-install.sh` | [Linux guide](https://lime.heysuman.com/docs/deployment/vps-native/) |
 
@@ -94,7 +94,7 @@ Use either an external PostgreSQL URL:
 
 ```bash
 export DATABASE_URL='postgresql://...'
-./scripts/fly-deploy.sh v1.0.1
+./scripts/fly-deploy.sh v1.0.2
 ```
 
 Or attach Fly Managed Postgres to both apps first; the helper will reuse existing `DATABASE_URL` Fly secrets. Details: [Fly.io deployment docs](https://lime.heysuman.com/docs/deployment/fly/).
@@ -104,9 +104,9 @@ Or attach Fly Managed Postgres to both apps first; the helper will reuse existin
 Every deploy target ships an update command that backs up the database, pulls the new version, migrates, and rolling-restarts the services.
 
 ```bash
-./scripts/fly-update.sh v1.0.1            # Fly.io
-make update-release TAG=v1.0.1            # Docker (release bundle)
-sudo ./scripts/vps-update.sh v1.0.1       # Linux systemd
+./scripts/fly-update.sh v1.0.2            # Fly.io
+make update-release TAG=v1.0.2            # Docker (release bundle)
+sudo ./scripts/vps-update.sh v1.0.2       # Linux systemd
 ```
 
 Details and rollback: [update docs](https://lime.heysuman.com/docs/deployment/updates/).

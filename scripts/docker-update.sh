@@ -10,7 +10,7 @@
 #   4. recreate shopkeeper, wait for health, then recreate ui
 #
 # Usage (from repo root):
-#   ./scripts/docker-update.sh v1.0.1
+#   ./scripts/docker-update.sh v1.0.2
 #
 # Environment:
 #   COMPOSE_FILE  - compose file to use (default docker-compose.release.yml)

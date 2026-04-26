@@ -74,7 +74,7 @@ Use these docs when you are running audits, reviewing scan evidence, or exportin
 
 Use **New Scan** when you want LIME to audit a sitemap, sitemap index, or one specific page. A scan creates one durable scan record. Every URL, issue, screenshot, score, and export remains attached to that scan ID.
 
-![New scan form](/screenshots/new-scan.png "Start a scan from the New Scan page. The form captures the target URL, scan mode, and optional label.")
+![New scan form](/product-screenshots/new-scan.png "Start a scan from the New Scan page. The form captures the target URL, scan mode, and optional label.")
 
 ## Before you start
 
@@ -117,7 +117,7 @@ LIME verifies collected URLs against the entered host before scanning. Off-host 
 
 The dashboard is the operational view for all scans. Use it to find recent work, confirm whether a scan is still running, open issue details, and start follow-up actions.
 
-![Dashboard scan list](/screenshots/dashboard.png "The dashboard shows scan targets, status, labels, score summaries, and actions.")
+![Dashboard scan list](/product-screenshots/dashboard.png "The dashboard shows scan targets, status, labels, score summaries, and actions.")
 
 ## Read a scan row
 
@@ -155,7 +155,7 @@ The dashboard is the operational view for all scans. Use it to find recent work,
 
 The scan detail page is the source of truth for one scan ID. It shows lifecycle, score, coverage, severity breakdown, URL status, and scan-level actions.
 
-![Scan detail page](/screenshots/scan-detail.png "The scan detail page combines score, coverage, lifecycle, failed URL counts, and report entry points.")
+![Scan detail page](/product-screenshots/scan-detail.png "The scan detail page combines score, coverage, lifecycle, failed URL counts, and report entry points.")
 
 ## Review progress
 
@@ -169,7 +169,7 @@ The scan detail page is the source of truth for one scan ID. It shows lifecycle,
 
 When a completed scan is partial, LIME can retry only the failed pages inside the existing scan. This avoids running a full scan from the start and keeps the same scan ID, report, score history, completed URL rows, and issue grouping.
 
-![Partial scan retry area](/screenshots/partial-retry.png?v=retry-card "Partial scans show an in-place retry area at the top of the scan detail page.")
+![Partial scan retry area](/product-screenshots/partial-retry.png?v=retry-card "Partial scans show an in-place retry area at the top of the scan detail page.")
 
 ## Retry failed pages
 
@@ -196,7 +196,7 @@ Use **Retry failed pages** when the scan is partial and you want the current rep
 
 The issue page groups audit results by rule. It loads the issue list first and loads occurrence details only when you expand an issue, so large scans do not block the initial page load.
 
-![Issue details page](/screenshots/issues.png "The issues page lists failed and needs-review issue groups without loading every occurrence immediately.")
+![Issue details page](/product-screenshots/issues.png "The issues page lists failed and needs-review issue groups without loading every occurrence immediately.")
 
 ## Triage issue groups
 
@@ -208,7 +208,7 @@ The issue page groups audit results by rule. It loads the issue list first and l
 
 ## Expand an issue
 
-![Expanded issue details](/screenshots/expanded-issue.png "Expanded issue details include occurrence URLs, selector, HTML context, guidance, and screenshots.")
+![Expanded issue details](/product-screenshots/expanded-issue.png "Expanded issue details include occurrence URLs, selector, HTML context, guidance, and screenshots.")
 
 When you expand a card, LIME loads the details for that issue group. The expanded view includes affected URLs, CSS selectors, HTML snippets, screenshot evidence, ACT guidance where available, and occurrence paging.
 
@@ -235,7 +235,7 @@ Needs-review items are included in the UI and reports. These are axe incomplete 
 
 LIME supports scan-level and issue-level exports. Use scan-level reports for audit review and use issue-level reports when one rule needs focused remediation.
 
-![Report download controls](/screenshots/reports.png "The issue page exposes PDF, CSV, and LLM report downloads, including full and small CSV choices.")
+![Report download controls](/product-screenshots/reports.png "The issue page exposes PDF, CSV, and LLM report downloads, including full and small CSV choices.")
 
 ## Choose a format
 
@@ -274,7 +274,7 @@ Server settings cap full PDF and issue-specific PDF occurrence detail so reports
 
 The settings page controls server-wide reporting, performance, and integration preferences. These settings apply to every user of the deployed instance.
 
-![Settings page](/screenshots/settings.png "Settings are grouped into reporting, performance, and integration sections.")
+![Settings page](/product-screenshots/settings.png "Settings are grouped into reporting, performance, and integration sections.")
 
 ## Reporting settings
 

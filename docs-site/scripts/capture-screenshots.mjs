@@ -17,7 +17,7 @@ function readArg(name, fallback) {
 const baseUrl = readArg("--base-url", process.env.LIME_DOCS_UI_URL ?? "http://localhost:13000").replace(/\/$/, "");
 const scanId = readArg("--scan-id", process.env.LIME_DOCS_SCAN_ID);
 const partialScanId = readArg("--partial-scan-id", process.env.LIME_DOCS_PARTIAL_SCAN_ID ?? scanId);
-const outputDir = path.resolve(readArg("--output", path.join(docsSiteRoot, "public", "screenshots")));
+const outputDir = path.resolve(readArg("--output", path.join(docsSiteRoot, "public", "product-screenshots")));
 
 if (!scanId) {
   console.error("Missing --scan-id. The docs screenshot runner must target the isolated docs-demo scan explicitly.");

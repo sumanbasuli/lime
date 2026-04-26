@@ -9,7 +9,7 @@ The docs site combines four content sources:
 1. Product pages in `docs-site/app`, such as the homepage, get-started page, screenshots page, roadmap page, and API reference page.
 2. Curated user and developer docs in `docs-site/content/product-docs.ts`.
 3. Repository Markdown docs from `docs/`, rendered under `/docs/reference/...`.
-4. Committed product screenshots in `docs-site/public/screenshots/`.
+4. Committed product screenshots in `docs-site/public/product-screenshots/`.
 
 The public docs build is a static export. CI builds the site and uploads `docs-site/out` to GitHub Pages. CI does not run scans or regenerate screenshots because external scan results are slower and less deterministic.
 
@@ -152,7 +152,7 @@ The screenshot capture fails if the partial-retry page does not show `Partial sc
 
 ## Screenshot Files
 
-Screenshots are committed under `docs-site/public/screenshots/` so CI can build without running live scans.
+Screenshots are committed under `docs-site/public/product-screenshots/` so CI can build without running live scans.
 
 Current screenshot IDs are defined in `docs-site/content/screenshots.ts`:
 
