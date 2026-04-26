@@ -3,6 +3,12 @@
 All notable changes to LIME are tracked here. The release workflow uses the
 section matching `VERSION` to populate GitHub Release notes.
 
+## [1.0.3] - 2026-04-26
+
+- Improved mobile layout behavior across the public docs site, including homepage cards, API reference cards, docs pages, screenshot gallery, search, and the mobile navigation overlay.
+- Removed accidentally tracked temporary scan-repair JSONL exports from the repository.
+- Added root ignore rules for temporary files and local logs.
+
 ## [1.0.2] - 2026-04-26
 
 - Fixed the GitHub Pages screenshots gallery route by moving committed screenshot assets out of the `/screenshots/` route namespace.

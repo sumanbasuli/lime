@@ -95,7 +95,7 @@ flyctl certs check -a lime-ui lime.example.com
 ## Updates
 
 ```bash
-./scripts/fly-update.sh v1.0.2
+./scripts/fly-update.sh v1.0.3
 ```
 
 Rolling update behaviour:

@@ -82,7 +82,7 @@ Expose only the UI port publicly. Sample nginx config at [`deploy/vps/nginx.conf
 ## Updating to a newer version
 
 ```bash
-sudo ./scripts/vps-update.sh v1.0.2
+sudo ./scripts/vps-update.sh v1.0.3
 ```
 
 The script:
