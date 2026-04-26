@@ -5,7 +5,7 @@
 #   ./scripts/fly-update.sh <version-tag> [shopkeeper-app] [ui-app]
 #
 # Example:
-#   ./scripts/fly-update.sh v0.2.0
+#   ./scripts/fly-update.sh v1.0.1
 #
 # Behaviour:
 #   - Deploys Shopkeeper first so DB migrations run before the UI restarts.

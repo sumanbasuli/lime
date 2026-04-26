@@ -3,6 +3,14 @@
 All notable changes to LIME are tracked here. The release workflow uses the
 section matching `VERSION` to populate GitHub Release notes.
 
+## [1.0.1] - 2026-04-26
+
+- Refined the public docs-site homepage, screenshots page, API page, and roadmap copy for clearer release-facing messaging.
+- Added shadcn-style docs navigation refinements, search, source references, and screenshot presentation improvements.
+- Added contributor documentation for adding user-facing docs and requesting exact screenshots through `make docs`.
+- Updated MCP user and reference docs to describe the current read-only `/mcp` implementation, available tools, bearer-key setup, smoke tests, and current limitations.
+- Refreshed docs-demo screenshots, including the partial-scan retry state.
+
 ## [1.0.0] - 2026-04-25
 
 Hello OSS.

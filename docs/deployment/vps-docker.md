@@ -65,13 +65,13 @@ The dev `docker-compose.yml` bundles its own PostgreSQL. Only use it if you do n
 Use the bundled helper. It backs up the database, pulls the new images, migrates, and rolls Shopkeeper then UI with a health-check wait in between.
 
 ```bash
-./scripts/docker-update.sh v0.2.0
+./scripts/docker-update.sh v1.0.1
 ```
 
 From a repository checkout you can also run:
 
 ```bash
-make update-release TAG=v0.2.0
+make update-release TAG=v1.0.1
 ```
 
 The script writes a gzipped dump to `dist/backups/`. Keep at least the most recent file until you confirm the new version works.
