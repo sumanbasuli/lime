@@ -65,11 +65,11 @@ export default function HomePage() {
 
   return (
     <SiteShell>
-    <main className="mx-auto w-full max-w-7xl px-4 py-8 md:px-8 md:py-12">
+    <main className="mx-auto w-full max-w-7xl px-3 py-6 sm:px-4 md:px-8 md:py-12">
       <section className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
         <Card className="overflow-hidden border-black/10 bg-[#FFED00] py-0 text-black">
-          <CardContent className="relative min-h-[500px] p-7 md:p-10">
-            <h1 className="max-w-3xl font-heading text-[clamp(2.75rem,7vw,5.35rem)] leading-[0.92] tracking-[-0.05em]">
+          <CardContent className="relative min-h-[430px] p-5 sm:p-7 md:min-h-[500px] md:p-10">
+            <h1 className="max-w-3xl font-heading text-[clamp(2.35rem,14vw,5.35rem)] leading-[0.92] tracking-[-0.05em]">
               Accessibility audits with evidence.
             </h1>
             <p className="mt-5 max-w-2xl text-base leading-7 text-black/72 md:text-lg">
@@ -78,12 +78,12 @@ export default function HomePage() {
               runs, and exports that support remediation work.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Button variant="default" size="lg" asChild>
+              <Button variant="default" size="lg" className="w-full justify-center sm:w-auto" asChild>
                 <a href={withBasePath("/docs/user/first-scan/")}>
                   Start with user docs <ArrowRightIcon className="size-4" />
                 </a>
               </Button>
-              <Button variant="outline" size="lg" className="border-black/20 bg-white/70" asChild>
+              <Button variant="outline" size="lg" className="w-full justify-center border-black/20 bg-white/70 sm:w-auto" asChild>
                 <a href={siteConfig.releasesUrl}>Download latest release</a>
               </Button>
             </div>
@@ -92,11 +92,11 @@ export default function HomePage() {
 
         <div className="grid gap-4">
           <Card className="overflow-hidden border-black/10 bg-white py-0">
-            <CardContent className="flex min-h-[360px] items-center justify-center p-8 md:min-h-[410px]">
+            <CardContent className="flex min-h-[250px] items-center justify-center p-6 sm:min-h-[320px] md:min-h-[410px] md:p-8">
               <img
                 src={assetPath("/brand/lime.svg")}
                 alt="LIME"
-                className="h-auto w-full max-w-[21rem]"
+                className="h-auto w-full max-w-[17rem] sm:max-w-[21rem]"
               />
             </CardContent>
           </Card>
@@ -143,14 +143,14 @@ export default function HomePage() {
       <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
         <Card className="bg-black text-[#fffbe6]">
           <CardHeader>
-            <CardTitle className="text-3xl">Start from a local install.</CardTitle>
+            <CardTitle className="text-2xl sm:text-3xl">Start from a local install.</CardTitle>
             <CardDescription className="text-[#fffbe6]/70">
               Use Docker Compose to evaluate LIME, then move to Docker images
               or Fly.io when you are ready to run it for a team.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <pre className="overflow-x-auto rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-7">
+            <pre className="overflow-x-auto rounded-2xl border border-white/10 bg-white/5 p-4 text-xs leading-6 sm:text-sm sm:leading-7">
 {`git clone https://github.com/sumanbasuli/lime.git
 cd lime
 cp .env.example .env
@@ -160,26 +160,26 @@ make start-all`}
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle className="text-3xl">Documentation sets</CardTitle>
+            <CardTitle className="text-2xl sm:text-3xl">Documentation sets</CardTitle>
             <CardDescription>
               User docs explain how to operate the tool. Developer docs explain
               how to contribute, extend, deploy, and integrate with it.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-3">
-            <Button variant="outline" className="h-auto justify-start p-4" asChild>
+            <Button variant="outline" className="h-auto justify-start p-4 text-left" asChild>
               <a href={withBasePath("/docs/user/first-scan/")}>
                 <BookOpenIcon className="size-5" />
                 User docs
               </a>
             </Button>
-            <Button variant="outline" className="h-auto justify-start p-4" asChild>
+            <Button variant="outline" className="h-auto justify-start p-4 text-left" asChild>
               <a href={withBasePath("/docs/developer/contributing/")}>
                 <Code2Icon className="size-5" />
                 Developer docs
               </a>
             </Button>
-            <Button variant="outline" className="h-auto justify-start p-4" asChild>
+            <Button variant="outline" className="h-auto justify-start p-4 text-left" asChild>
               <a href={withBasePath("/screenshots/")}>
                 <CameraIcon className="size-5" />
                 Screenshots

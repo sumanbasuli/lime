@@ -161,18 +161,18 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
   const dialog =
     open && typeof document !== "undefined" ? (
       <div
-        className="fixed inset-0 z-[100] flex items-start justify-center bg-black/45 p-3 pt-20 backdrop-blur-md md:p-6 md:pt-24"
+        className="fixed inset-0 z-[100] flex items-start justify-center bg-black/45 p-2 pt-16 backdrop-blur-md sm:p-3 sm:pt-20 md:p-6 md:pt-24"
         onClick={closeSearch}
       >
         <div
           role="dialog"
           aria-modal="true"
           aria-label="Search docs"
-          className="w-full max-w-2xl overflow-hidden rounded-3xl border bg-background shadow-2xl"
+          className="w-full max-w-2xl overflow-hidden rounded-2xl border bg-background shadow-2xl sm:rounded-3xl"
           onClick={(event) => event.stopPropagation()}
           onKeyDown={handleDialogKeyDown}
         >
-          <div className="flex items-center gap-3 border-b px-4 py-3">
+          <div className="flex items-center gap-2 border-b px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
             <SearchIcon className="size-5 text-muted-foreground" />
             <Input
               ref={inputRef}
@@ -195,14 +195,14 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
             </Button>
           </div>
 
-          <div className="max-h-[60vh] overflow-y-auto p-2">
+          <div className="max-h-[65dvh] overflow-y-auto p-2 md:max-h-[60vh]">
             {results.length ? (
               <div className="space-y-1">
                 {results.map((result, index) => (
                   <a
                     key={result.href}
                     href={withBasePath(result.href)}
-                    className={`block rounded-2xl border p-4 no-underline transition-colors ${
+                    className={`block rounded-2xl border p-3 no-underline transition-colors sm:p-4 ${
                       index === Math.min(activeIndex, Math.max(results.length - 1, 0))
                         ? "border-black bg-[#FFED00]/40 text-foreground"
                         : "border-transparent hover:border-border hover:bg-muted/60"
@@ -215,8 +215,8 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
                         <FileTextIcon className="size-4" />
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2">
-                          <span className="truncate font-heading text-lg font-bold leading-6">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="min-w-0 break-words font-heading text-base font-bold leading-6 sm:text-lg">
                             {result.title}
                           </span>
                           <span className="shrink-0 rounded-full border bg-background px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
@@ -241,7 +241,7 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
             )}
           </div>
 
-          <div className="flex items-center justify-between border-t bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+          <div className="flex items-center justify-between border-t bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground sm:px-4 sm:text-xs">
             <span>Use ↑ ↓ to move</span>
             <span className="inline-flex items-center gap-1">
               <CornerDownLeftIcon className="size-3" />

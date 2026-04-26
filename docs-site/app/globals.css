@@ -148,11 +148,12 @@
     max-width: none;
     font-size: 1rem;
     line-height: 1.5rem;
+    overflow-wrap: anywhere;
   }
 
   .docs-prose h1 {
-    margin-bottom: 1.25rem;
-    font-size: clamp(2rem, 4vw, 3.25rem);
+    margin-bottom: 1rem;
+    font-size: clamp(2rem, 12vw, 3.25rem);
     line-height: 1.04;
     letter-spacing: -0.04em;
   }
@@ -160,16 +161,16 @@
   .docs-prose h2 {
     margin-top: 2.5rem;
     margin-bottom: 0.75rem;
-    font-size: 2rem;
-    line-height: 2.25rem;
+    font-size: clamp(1.5rem, 7vw, 2rem);
+    line-height: 1.15;
     letter-spacing: -0.025em;
   }
 
   .docs-prose h3 {
     margin-top: 2rem;
     margin-bottom: 0.5rem;
-    font-size: 1.5rem;
-    line-height: 2rem;
+    font-size: clamp(1.25rem, 6vw, 1.5rem);
+    line-height: 1.2;
     letter-spacing: -0.025em;
   }
 
@@ -199,7 +200,7 @@
   }
 
   .docs-prose figure {
-    @apply my-8 overflow-hidden rounded-3xl border bg-muted shadow-sm;
+    @apply my-6 overflow-hidden rounded-2xl border bg-muted shadow-sm sm:my-8 sm:rounded-3xl;
   }
 
   .docs-prose figure img {
@@ -207,7 +208,7 @@
   }
 
   .docs-prose figure figcaption {
-    @apply border-t bg-background px-5 py-3 text-sm text-muted-foreground;
+    @apply border-t bg-background px-4 py-3 text-sm text-muted-foreground sm:px-5;
   }
 
   .docs-prose code {
@@ -215,15 +216,35 @@
   }
 
   .docs-prose pre {
-    @apply my-5 overflow-x-auto rounded-2xl border bg-black p-4 text-[#fffbe6];
+    @apply my-5 overflow-x-auto rounded-2xl border bg-black p-3 text-sm text-[#fffbe6] sm:p-4;
+    overflow-wrap: normal;
   }
 
   .docs-prose pre code {
     @apply bg-transparent p-0 text-[#fffbe6];
+    overflow-wrap: normal;
   }
 
   .docs-prose table {
-    @apply my-4 w-full border-collapse overflow-hidden rounded-xl text-sm;
+    @apply my-4 block w-full overflow-x-auto rounded-xl text-sm;
+    border-collapse: collapse;
+    border-spacing: 0;
+  }
+
+  .docs-prose thead {
+    display: table;
+    min-width: 42rem;
+    width: 100%;
+  }
+
+  .docs-prose tbody {
+    display: table;
+    min-width: 42rem;
+    width: 100%;
+  }
+
+  .docs-prose tr {
+    display: table-row;
   }
 
   .docs-prose th,

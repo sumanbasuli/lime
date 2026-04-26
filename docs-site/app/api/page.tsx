@@ -57,12 +57,12 @@ export default function ApiReferencePage() {
 
   return (
     <SiteShell>
-    <main className="mx-auto w-full max-w-[96rem] px-3 py-8 md:px-6">
+    <main className="mx-auto w-full max-w-[96rem] px-3 py-6 md:px-6 md:py-8">
       <section className="mb-8">
         <h1 className="font-heading text-[clamp(2rem,4vw,3.5rem)] leading-[1.02] tracking-[-0.035em]">
           API reference for scans, issues, reports, and settings.
         </h1>
-        <p className="mt-5 max-w-3xl text-lg leading-8 text-muted-foreground">
+        <p className="mt-5 max-w-3xl text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
           Use these examples against Shopkeeper on port <code>8080</code> or
           through the dashboard proxy where applicable. Endpoints are grouped
           by method so reads, lifecycle actions, settings updates, and deletes
@@ -82,7 +82,7 @@ export default function ApiReferencePage() {
                 >
                   {group.method}
                 </span>
-                <h2 className="font-heading text-3xl tracking-tight">
+                <h2 className="font-heading text-2xl tracking-tight sm:text-3xl">
                   {group.method} endpoints
                 </h2>
               </div>
@@ -102,7 +102,7 @@ export default function ApiReferencePage() {
                       >
                         {endpoint.method}
                       </span>
-                      <code className="rounded-lg bg-muted px-2 py-1 font-mono text-sm">
+                      <code className="min-w-0 break-all rounded-lg bg-muted px-2 py-1 font-mono text-xs sm:text-sm">
                         {endpoint.path}
                       </code>
                       <span className="rounded-full border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">
@@ -126,17 +126,17 @@ export default function ApiReferencePage() {
                     {endpoint.body ? (
                       <div>
                         <div className="font-semibold">Body</div>
-                        <code className="mt-1 block rounded-lg bg-muted p-3 text-sm">
+                        <code className="mt-1 block overflow-x-auto rounded-lg bg-muted p-3 text-xs sm:text-sm">
                           {endpoint.body}
                         </code>
                       </div>
                     ) : null}
-                    <div className="rounded-2xl border bg-black p-4 text-[#fffbe6]">
+                    <div className="rounded-2xl border bg-black p-3 text-[#fffbe6] sm:p-4">
                       <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#fffbe6]/60">
                         <TerminalIcon className="size-4" />
                         Example
                       </div>
-                      <pre className="overflow-x-auto text-sm leading-6">
+                      <pre className="overflow-x-auto text-xs leading-6 sm:text-sm">
                         {curlForEndpoint(endpoint.path, endpoint.method, endpoint.body)}
                       </pre>
                     </div>

@@ -14,12 +14,12 @@ export default function RoadmapPage() {
 
   return (
     <SiteShell>
-    <main className="mx-auto w-full max-w-6xl px-4 py-8 md:px-8">
+    <main className="mx-auto w-full max-w-6xl px-3 py-6 sm:px-4 md:px-8 md:py-8">
       <section className="mb-8">
-        <h1 className="font-heading text-[clamp(2.5rem,6vw,4.75rem)] leading-[0.95] tracking-[-0.045em]">
+        <h1 className="font-heading text-[clamp(2.25rem,12vw,4.75rem)] leading-[0.95] tracking-[-0.045em]">
           V1 hardening first. MCP keeps improving.
         </h1>
-        <p className="mt-5 max-w-3xl text-lg leading-8 text-muted-foreground">
+        <p className="mt-5 max-w-3xl text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
           V1 focuses on open-source release readiness, predictable deployment,
           performance, caching, and large-report usability. The existing MCP
           endpoint stays read-only while compatibility, origin controls, and
@@ -36,7 +36,7 @@ export default function RoadmapPage() {
       </section>
       {roadmap ? (
         <Card>
-          <CardContent className="p-6 md:p-10">
+          <CardContent className="p-4 sm:p-6 md:p-10">
             <div
               className="docs-prose"
               dangerouslySetInnerHTML={{ __html: roadmap.html }}

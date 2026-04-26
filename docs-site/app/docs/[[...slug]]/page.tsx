@@ -62,8 +62,8 @@ export default async function DocsPage({ params }: DocsPageProps) {
   const headings = getPageHeadings(page.html);
 
   return (
-    <main className="mx-auto grid w-full max-w-[88rem] gap-10 px-4 py-8 md:px-8 md:py-10 xl:grid-cols-[minmax(0,1fr)_340px] 2xl:grid-cols-[minmax(0,1fr)_380px]">
-      <article className="min-w-0 px-1 md:px-2 xl:pr-4">
+    <main className="mx-auto grid w-full max-w-[88rem] gap-8 px-3 py-6 sm:px-4 md:px-8 md:py-10 xl:grid-cols-[minmax(0,1fr)_340px] xl:gap-10 2xl:grid-cols-[minmax(0,1fr)_380px]">
+      <article className="min-w-0 md:px-2 xl:pr-4">
         <div
           className="docs-prose"
           dangerouslySetInnerHTML={{ __html: page.html }}
