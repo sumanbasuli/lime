@@ -141,16 +141,18 @@ export default function HomePage() {
       </section>
 
       <section className="mt-4 grid gap-4 xl:grid-cols-[0.9fr_1.1fr]">
-        <Card className="bg-black text-[#fffbe6]">
-          <CardHeader>
-            <CardTitle className="text-2xl sm:text-3xl">Start from a local install.</CardTitle>
+        <Card className="min-w-0 overflow-hidden bg-black text-[#fffbe6]">
+          <CardHeader className="px-4 sm:px-6">
+            <CardTitle className="break-words text-xl leading-tight sm:text-3xl">
+              Start from a local install.
+            </CardTitle>
             <CardDescription className="text-[#fffbe6]/70">
               Use Docker Compose to evaluate LIME, then move to Docker images
               or Fly.io when you are ready to run it for a team.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <pre className="overflow-x-auto rounded-2xl border border-white/10 bg-white/5 p-4 text-xs leading-6 sm:text-sm sm:leading-7">
+          <CardContent className="min-w-0 px-4 sm:px-6">
+            <pre className="max-w-full overflow-x-auto rounded-2xl border border-white/10 bg-white/5 p-3 text-xs leading-6 sm:p-4 sm:text-sm sm:leading-7">
 {`git clone https://github.com/sumanbasuli/lime.git
 cd lime
 cp .env.example .env
@@ -158,30 +160,32 @@ make start-all`}
             </pre>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl sm:text-3xl">Documentation sets</CardTitle>
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader className="px-4 sm:px-6">
+            <CardTitle className="break-words text-xl leading-tight sm:text-3xl">
+              Documentation sets
+            </CardTitle>
             <CardDescription>
               User docs explain how to operate the tool. Developer docs explain
               how to contribute, extend, deploy, and integrate with it.
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-3">
-            <Button variant="outline" className="h-auto justify-start p-4 text-left" asChild>
+          <CardContent className="grid min-w-0 gap-3 px-4 sm:px-6 md:grid-cols-3">
+            <Button variant="outline" className="h-auto min-w-0 justify-start whitespace-normal p-4 text-left" asChild>
               <a href={withBasePath("/docs/user/first-scan/")}>
-                <BookOpenIcon className="size-5" />
+                <BookOpenIcon className="size-5 shrink-0" />
                 User docs
               </a>
             </Button>
-            <Button variant="outline" className="h-auto justify-start p-4 text-left" asChild>
+            <Button variant="outline" className="h-auto min-w-0 justify-start whitespace-normal p-4 text-left" asChild>
               <a href={withBasePath("/docs/developer/contributing/")}>
-                <Code2Icon className="size-5" />
+                <Code2Icon className="size-5 shrink-0" />
                 Developer docs
               </a>
             </Button>
-            <Button variant="outline" className="h-auto justify-start p-4 text-left" asChild>
+            <Button variant="outline" className="h-auto min-w-0 justify-start whitespace-normal p-4 text-left" asChild>
               <a href={withBasePath("/screenshots/")}>
-                <CameraIcon className="size-5" />
+                <CameraIcon className="size-5 shrink-0" />
                 Screenshots
               </a>
             </Button>

@@ -92,9 +92,9 @@ export default function ApiReferencePage() {
             </div>
             <div className="grid gap-4">
               {group.endpoints.map((endpoint) => (
-                <Card key={`${endpoint.method}-${endpoint.path}`}>
-                  <CardHeader>
-                    <div className="flex flex-wrap items-center gap-2">
+                <Card key={`${endpoint.method}-${endpoint.path}`} className="min-w-0 overflow-hidden">
+                  <CardHeader className="min-w-0 px-4 sm:px-6">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <span
                         className={`rounded-full border px-2.5 py-1 font-mono text-xs font-bold ${
                           methodTone[endpoint.method] ?? "bg-muted"
@@ -102,41 +102,41 @@ export default function ApiReferencePage() {
                       >
                         {endpoint.method}
                       </span>
-                      <code className="min-w-0 break-all rounded-lg bg-muted px-2 py-1 font-mono text-xs sm:text-sm">
+                      <code className="max-w-full min-w-0 overflow-x-auto whitespace-nowrap rounded-lg bg-muted px-2 py-1 font-mono text-xs sm:text-sm">
                         {endpoint.path}
                       </code>
-                      <span className="rounded-full border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                      <span className="max-w-full rounded-full border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">
                         {endpoint.surface}
                       </span>
                     </div>
-                    <CardTitle>{endpoint.title}</CardTitle>
-                    <CardDescription>{endpoint.description}</CardDescription>
+                    <CardTitle className="break-words text-xl sm:text-2xl">{endpoint.title}</CardTitle>
+                    <CardDescription className="break-words">{endpoint.description}</CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid gap-3 text-sm md:grid-cols-2">
-                      <div>
+                  <CardContent className="min-w-0 space-y-4 px-4 sm:px-6">
+                    <div className="grid min-w-0 gap-3 text-sm md:grid-cols-2">
+                      <div className="min-w-0">
                         <div className="font-semibold">Auth</div>
-                        <p className="mt-1 text-muted-foreground">{endpoint.auth}</p>
+                        <p className="mt-1 break-words text-muted-foreground">{endpoint.auth}</p>
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <div className="font-semibold">Response</div>
-                        <p className="mt-1 text-muted-foreground">{endpoint.response}</p>
+                        <p className="mt-1 break-words text-muted-foreground">{endpoint.response}</p>
                       </div>
                     </div>
                     {endpoint.body ? (
-                      <div>
+                      <div className="min-w-0">
                         <div className="font-semibold">Body</div>
-                        <code className="mt-1 block overflow-x-auto rounded-lg bg-muted p-3 text-xs sm:text-sm">
+                        <code className="mt-1 block max-w-full overflow-x-auto rounded-lg bg-muted p-3 text-xs sm:text-sm">
                           {endpoint.body}
                         </code>
                       </div>
                     ) : null}
-                    <div className="rounded-2xl border bg-black p-3 text-[#fffbe6] sm:p-4">
+                    <div className="min-w-0 rounded-2xl border bg-black p-3 text-[#fffbe6] sm:p-4">
                       <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#fffbe6]/60">
                         <TerminalIcon className="size-4" />
                         Example
                       </div>
-                      <pre className="overflow-x-auto text-xs leading-6 sm:text-sm">
+                      <pre className="max-w-full overflow-x-auto whitespace-pre text-xs leading-6 sm:text-sm">
                         {curlForEndpoint(endpoint.path, endpoint.method, endpoint.body)}
                       </pre>
                     </div>
