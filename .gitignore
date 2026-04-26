@@ -7,6 +7,12 @@
 .DS_Store
 Thumbs.db
 
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+/tmp/
+
 # IDE
 .vscode/
 .idea/
