@@ -57,7 +57,7 @@ Important behavior:
 Uses shadcn/ui sidebar-08 layout with:
 - Dashboard → `/`
 - Scans → `/scans` (sub-items: All Scans, New Scan)
-- Settings → `#` (placeholder)
+- Settings → `/settings`
 - API Health / Docs (secondary nav)
 
 ## API Client

@@ -19,6 +19,8 @@ This bundle runs the published LIME containers without building from source.
 docker compose --env-file .env -f docker-compose.release.yml up -d
 ```
 
+If your server has the legacy standalone binary instead of the Compose plugin, use `docker-compose` with the same arguments.
+
 `DATABASE_URL` is the source of truth for both Shopkeeper and the UI. The UI also reads PostgreSQL directly for server-rendered pages, so it must be able to reach the same database.
 Browser traffic stays same-origin under the UI host, and the Next server proxies `/api/...` requests to `SHOPKEEPER_URL` at runtime.
 

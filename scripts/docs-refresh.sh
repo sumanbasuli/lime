@@ -11,8 +11,17 @@ DEFAULT_SCAN_TARGETS="https://heysuman.com,https://www.fake-university.com/,http
 IFS=',' read -r -a SCAN_TARGETS <<< "${LIME_DOCS_SCAN_TARGETS:-${DEFAULT_SCAN_TARGETS}}"
 SCREENSHOT_DIR="${ROOT_DIR}/docs-site/public/product-screenshots"
 
+if docker compose version >/dev/null 2>&1; then
+  DOCKER_COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+  DOCKER_COMPOSE=(docker-compose)
+else
+  echo "Docker Compose is required. Install the Docker Compose plugin or docker-compose." >&2
+  exit 1
+fi
+
 compose() {
-  docker compose -p "${COMPOSE_PROJECT}" -f "${ROOT_DIR}/docker-compose.docs.yml" "$@"
+  "${DOCKER_COMPOSE[@]}" -p "${COMPOSE_PROJECT}" -f "${ROOT_DIR}/docker-compose.docs.yml" "$@"
 }
 
 wait_for_url() {

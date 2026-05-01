@@ -32,6 +32,7 @@ const referenceItems = [
   { title: "Database", href: "/docs/reference/database", description: "PostgreSQL schema and migration notes." },
   { title: "Performance", href: "/docs/reference/performance", description: "Optimization and cache strategy." },
   { title: "Docker Deploy", href: "/docs/reference/deployment/docker", description: "Docker-based deployment guide." },
+  { title: "Debian Deploy", href: "/docs/reference/deployment/debian", description: "Native systemd install for Debian-family Linux." },
   { title: "Fly.io Deploy", href: "/docs/reference/deployment/fly", description: "Fly launch and deploy notes." },
   { title: "Updates", href: "/docs/reference/deployment/updates", description: "Release update and upgrade process." },
 ];

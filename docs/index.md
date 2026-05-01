@@ -7,8 +7,8 @@ LIME is a self-hosted accessibility scanner powered by axe-core, Chromium, Postg
 * **[Local Development Setup](setup.md)**: Run LIME locally with Docker or native processes, including environment variables and common commands.
 * **[Docker & Release Pipeline](deployment/docker.md)**: Local Docker workflow, production build targets, GHCR release publishing, and release bundle format.
 * **[Deploy to Fly.io](deployment/fly.md)**: Two-app Fly setup with private networking, managed/external Postgres, screenshot storage, and rolling updates.
-* **[Deploy with Docker](deployment/vps-docker.md)**: Recommended Docker path using published GHCR images.
-* **[Deploy on Linux without Docker](deployment/vps-native.md)**: Native systemd install for operators who cannot run Docker.
+* **[Deploy with Docker](deployment/docker.md)**: Docker workflows, production images, and release bundles.
+* **[Deploy on Debian without Docker](deployment/debian.md)**: Native systemd install for operators who cannot run Docker.
 * **[Updating LIME](deployment/updates.md)**: Update commands per target, backups, rollback notes, and the sidebar update notice.
 * **[Docs Site](docs-site.md)**: Static docs architecture, screenshot refresh pipeline, search, GitHub Pages, and handoff checklist.
 * **[Product Roadmap](roadmap.md)**: `v1.0` optimization and public-release plan, plus MCP hardening and future integration work.
@@ -42,6 +42,7 @@ ACT enrichment notes are documented primarily in:
 
 Release and production build notes are documented primarily in:
 - `docs/deployment/docker.md` for GHCR publishing, release bundles, and production Docker usage
+- `docs/deployment/debian.md` for native Debian-family systemd installs and updates
 - `docs/setup.md` for `make build`, `make build-docker`, native local env expectations, and release runtime env requirements
 - `README.md` for the quick-start release workflow
 

@@ -5,6 +5,8 @@ LIME now has three distinct Docker surfaces:
 - `docker-compose.dev.yml` as the local development override for UI hot reload
 - `docker-compose.release.yml` for published runtime images
 
+The Makefile auto-detects either the Docker Compose plugin (`docker compose`) or the legacy standalone binary (`docker-compose`). Set `DOCKER_COMPOSE=docker-compose` explicitly if your server has only the legacy command and auto-detection cannot see it.
+
 The runtime model is intentionally split:
 - the UI still reads PostgreSQL directly for server-rendered pages
 - Shopkeeper still owns scan actions and API writes
@@ -123,18 +125,20 @@ The Next route handler proxies those `/api/...` requests to `SHOPKEEPER_URL` at 
 - the images do not need rebuilding when deployment URLs change
 - direct Shopkeeper exposure on `LIME_API_PORT` remains optional for debugging or separate service access
 
-## Non-Docker Production
+## Debian Systemd Production
 
 `make build` produces:
 - `dist/shopkeeper/` with the compiled binary and migrations
 - `dist/ui/` with the Next standalone output
 - the release bundle archive
 
-For non-Docker deployments, operators must still provide runtime env for:
-- `DATABASE_URL`
-- `SHOPKEEPER_URL`
+For native Debian-family systemd deployments, use:
 
-Because the UI still reads PostgreSQL directly for server-rendered pages, both processes must be able to reach the same database.
+```bash
+make debian-install
+```
+
+The installer validates Debian-family Linux before writing to `/opt/lime`, `/etc/lime`, or `/etc/systemd/system`. See [Debian deployment](debian.md) for the full flow.
 
 ## Docker Hygiene
 

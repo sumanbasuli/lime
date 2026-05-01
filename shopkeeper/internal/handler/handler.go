@@ -16,10 +16,9 @@ import (
 	"github.com/sumanbasuli/lime/shopkeeper/internal/actrules"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/screenshots"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
-
-const screenshotBaseDir = "/app/screenshots"
 
 type ScanRepository interface {
 	CreateScan(ctx context.Context, sitemapURL, scanType string, tag *string, scanViewport viewport.Settings) (*models.Scan, error)
@@ -688,7 +687,7 @@ func isPausableScanStatus(status string) bool {
 }
 
 func screenshotDir(scanID string) string {
-	return filepath.Join(screenshotBaseDir, scanID)
+	return screenshots.ScanDir(scanID)
 }
 
 func detectFileContentType(path string) (string, error) {

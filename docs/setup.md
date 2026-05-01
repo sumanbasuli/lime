@@ -30,6 +30,8 @@ All environment configuration is managed through `.env` files:
 - **`lime/.env.local`**: Optional NextJS-native override file if you run `npm run dev` manually inside `lime/` instead of using `make dev-ui`.
 - **`deploy/release/.env.example`**: Template used by the release bundle for running published images against an external PostgreSQL database.
 
+Make targets auto-detect the Docker Compose plugin (`docker compose`) and fall back to the legacy standalone binary (`docker-compose`). If your server needs an explicit command, run targets with `DOCKER_COMPOSE=docker-compose`.
+
 ## Running the Stack
 
 ### Full Stack (Docker)

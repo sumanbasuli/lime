@@ -7,6 +7,17 @@ VERSION := $(shell cat VERSION)
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DIST_DIR := dist
 BACKUP_DIR := $(DIST_DIR)/backups
+HOST_KERNEL := $(shell uname -s 2>/dev/null || echo unknown)
+ifeq ($(HOST_KERNEL),Darwin)
+HOST_OS := macos
+else ifeq ($(HOST_KERNEL),Linux)
+HOST_OS := linux
+else
+HOST_OS := unknown
+endif
+LIME_INSTALL_ROOT ?= /opt/lime
+LIME_CONFIG_ROOT ?= /etc/lime
+LIME_SYSTEMD_DIR ?= /etc/systemd/system
 UI_IMAGE ?= lime-ui
 SHOPKEEPER_IMAGE ?= lime-shopkeeper
 LIME_API_PORT ?= 8080
@@ -14,6 +25,7 @@ LIME_UI_PORT ?= 3000
 LIME_DOCS_PORT ?= 3001
 LIME_IMAGE_TAG ?= v$(VERSION)
 DOCKER_BUILD_FLAGS ?= --pull
+DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf 'docker-compose'; else printf 'docker compose'; fi)
 SHOPKEEPER_LDFLAGS := -s -w \
   -X github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo.Version=$(VERSION) \
   -X github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo.Commit=$(GIT_COMMIT)
@@ -25,60 +37,75 @@ SHOPKEEPER_LDFLAGS := -s -w \
        build build-ui build-shopkeeper build-release-bundle \
        build-docker build-docker-ui build-docker-shopkeeper \
        publish-release-images \
-       backup-db update update-release \
+       backup-db update update-release debian-install debian-update require-linux host-info \
        docs docs-run docs-dev docs-build docs-site-build docs-check-source \
        clean
+
+# ---- Host detection ----
+
+host-info:
+	@echo "Host OS:       $(HOST_OS) ($(HOST_KERNEL))"
+	@echo "Docker Compose: $(DOCKER_COMPOSE)"
+	@echo "Install root:  $(LIME_INSTALL_ROOT)"
+	@echo "Config root:   $(LIME_CONFIG_ROOT)"
+
+require-linux:
+	@if [ "$(HOST_OS)" != "linux" ]; then \
+		echo "This target is Debian/Linux-only. Detected $(HOST_OS) ($(HOST_KERNEL))."; \
+		echo "On macOS, use 'make start-all' for Docker or 'make start-dev' for hot reload."; \
+		exit 1; \
+	fi
 
 # ---- Docker commands ----
 
 start-db:
-	docker compose up -d db
+	$(DOCKER_COMPOSE) up -d db
 	@echo "PostgreSQL is starting..."
-	@docker compose exec db sh -c 'until pg_isready -U "$${POSTGRES_USER:-lime}" -d "$${POSTGRES_DB:-lime_db}"; do sleep 1; done'
+	@$(DOCKER_COMPOSE) exec db sh -c 'until pg_isready -U "$${POSTGRES_USER:-lime}" -d "$${POSTGRES_DB:-lime_db}"; do sleep 1; done'
 	@echo "PostgreSQL is ready."
 
 migrate-all: start-db
-	docker compose run --rm --build --no-deps shopkeeper ./shopkeeper --migrate
+	$(DOCKER_COMPOSE) run --rm --build --no-deps shopkeeper ./shopkeeper --migrate
 	@echo "Database migrations completed."
 
 start-shopkeeper: start-db
-	docker compose up -d --build shopkeeper
+	$(DOCKER_COMPOSE) up -d --build shopkeeper
 	@echo "Shopkeeper is starting on port $(LIME_API_PORT)..."
 
 start-ui: start-db
-	docker compose up -d --build --force-recreate ui
+	$(DOCKER_COMPOSE) up -d --build --force-recreate ui
 	@echo "UI is starting on port $(LIME_UI_PORT)..."
 
 start-dev: start-db
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build shopkeeper
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build --force-recreate ui
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml up -d --build shopkeeper
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml up -d --build --force-recreate ui
 	@echo "Development services starting with NextJS hot reload..."
 	@echo "  DB:         bundled local PostgreSQL on localhost:5432"
 	@echo "  Shopkeeper: http://localhost:$(LIME_API_PORT)"
 	@echo "  UI:         http://localhost:$(LIME_UI_PORT)"
 
 start-all: start-db
-	docker compose up -d --build shopkeeper
-	docker compose up -d --build --force-recreate ui
+	$(DOCKER_COMPOSE) up -d --build shopkeeper
+	$(DOCKER_COMPOSE) up -d --build --force-recreate ui
 	@echo "Production services starting from built images..."
 	@echo "  DB:         bundled local PostgreSQL on localhost:5432"
 	@echo "  Shopkeeper: http://localhost:$(LIME_API_PORT)"
 	@echo "  UI:         http://localhost:$(LIME_UI_PORT)"
 
 stop-all:
-	docker compose down
+	$(DOCKER_COMPOSE) down
 	@echo "All services stopped."
 
 # ---- Logs ----
 
 logs-db:
-	docker compose logs -f db
+	$(DOCKER_COMPOSE) logs -f db
 
 logs-shopkeeper:
-	docker compose logs -f shopkeeper
+	$(DOCKER_COMPOSE) logs -f shopkeeper
 
 logs-ui:
-	docker compose logs -f ui
+	$(DOCKER_COMPOSE) logs -f ui
 
 # ---- Development (outside Docker) ----
 
@@ -171,7 +198,7 @@ backup-db:
 	@ts=$$(date +%Y%m%d-%H%M%S); \
 	backup_file=$(BACKUP_DIR)/lime-manual-$$ts.sql.gz; \
 	echo "Dumping bundled db service to $$backup_file"; \
-	docker compose exec -T db pg_dump -U $${POSTGRES_USER:-lime} $${POSTGRES_DB:-lime_db} | gzip -9 > $$backup_file; \
+	$(DOCKER_COMPOSE) exec -T db pg_dump -U $${POSTGRES_USER:-lime} $${POSTGRES_DB:-lime_db} | gzip -9 > $$backup_file; \
 	echo "Backup written to $$backup_file"
 
 # `make update TAG=v0.2.0` — rolling update for a local dev Docker stack.
@@ -186,11 +213,11 @@ update:
 	@echo "==> Rebuilding images"
 	$(MAKE) build-docker
 	@echo "==> Applying migrations"
-	docker compose run --rm --no-deps shopkeeper ./shopkeeper --migrate
+	$(DOCKER_COMPOSE) run --rm --no-deps shopkeeper ./shopkeeper --migrate
 	@echo "==> Rolling Shopkeeper"
-	docker compose up -d --no-deps shopkeeper
+	$(DOCKER_COMPOSE) up -d --no-deps shopkeeper
 	@echo "==> Rolling UI"
-	docker compose up -d --no-deps ui
+	$(DOCKER_COMPOSE) up -d --no-deps ui
 	@echo "Update to $(TAG) complete."
 
 # `make update-release TAG=v0.2.0` — rolling update for a release-bundle
@@ -199,9 +226,27 @@ update-release:
 	@if [ -z "$(TAG)" ]; then echo "usage: make update-release TAG=<version>" >&2; exit 1; fi
 	./scripts/docker-update.sh $(TAG)
 
+# `make debian-install` — build and install the native systemd deployment on Debian-family Linux.
+debian-install:
+	@$(MAKE) require-linux
+	$(MAKE) build
+	sudo LIME_INSTALL_ROOT="$(LIME_INSTALL_ROOT)" \
+		LIME_CONFIG_ROOT="$(LIME_CONFIG_ROOT)" \
+		LIME_SYSTEMD_DIR="$(LIME_SYSTEMD_DIR)" \
+		./scripts/debian-install.sh
+
+# `make debian-update TAG=vX.Y.Z` — update a native Debian-family systemd deployment.
+debian-update:
+	@if [ -z "$(TAG)" ]; then echo "usage: make debian-update TAG=<version>" >&2; exit 1; fi
+	@$(MAKE) require-linux
+	sudo LIME_INSTALL_ROOT="$(LIME_INSTALL_ROOT)" \
+		LIME_CONFIG_ROOT="$(LIME_CONFIG_ROOT)" \
+		LIME_SYSTEMD_DIR="$(LIME_SYSTEMD_DIR)" \
+		./scripts/debian-update.sh $(TAG)
+
 # ---- Cleanup ----
 
 clean:
-	docker compose down -v
+	$(DOCKER_COMPOSE) down -v
 	rm -rf $(DIST_DIR)
 	@echo "All services stopped and volumes removed."

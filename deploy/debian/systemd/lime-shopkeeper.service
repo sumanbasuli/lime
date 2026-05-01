@@ -14,7 +14,8 @@ EnvironmentFile=/etc/lime/shopkeeper.env
 ExecStart=/opt/lime/shopkeeper/shopkeeper
 Restart=on-failure
 RestartSec=5
-# Chromium needs room for /dev/shm. If /dev/shm is tiny, Chromium uses disk fallback.
+# Chromium uses /tmp for profile data and writes screenshots to SHOPKEEPER_SCREENSHOT_DIR.
+ReadWritePaths=/opt/lime/shopkeeper/screenshots
 PrivateTmp=yes
 ProtectSystem=full
 ProtectHome=yes

@@ -885,7 +885,13 @@ function shouldShowRuleDescription(
 }
 
 function elementScreenshotUrl(path: string): string {
-  const parts = path.replace(/^\/app\/screenshots\//, "").split("/");
+  const marker = "/screenshots/";
+  const normalized = path.startsWith("/app/screenshots/")
+    ? path.replace(/^\/app\/screenshots\//, "")
+    : path.includes(marker)
+      ? path.slice(path.lastIndexOf(marker) + marker.length)
+      : path;
+  const parts = normalized.split("/").filter(Boolean);
   if (parts.length >= 2) {
     return `/api/screenshots/${parts[0]}/${parts[1]}`;
   }

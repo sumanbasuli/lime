@@ -25,4 +25,4 @@ go.work
 tmp/
 
 # Screenshots
-screenshots/
+/screenshots/

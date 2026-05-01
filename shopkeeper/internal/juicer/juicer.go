@@ -21,6 +21,7 @@ import (
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/screenshots"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
 
@@ -33,9 +34,6 @@ const (
 
 	// DelayBetweenRequests is the politeness delay between requests.
 	DelayBetweenRequests = 500 * time.Millisecond
-
-	// ScreenshotDir is the base directory for screenshots.
-	ScreenshotDir = "/app/screenshots"
 
 	pageSettleTimeout            = 5 * time.Second
 	postLoadSettleDelay          = 350 * time.Millisecond
@@ -163,7 +161,7 @@ func ScanPages(ctx context.Context, allocCtx context.Context, pages []PageInput,
 	}
 
 	// Create screenshot directory for this scan
-	screenshotDir := filepath.Join(ScreenshotDir, scanID)
+	screenshotDir := screenshots.ScanDir(scanID)
 	if err := os.MkdirAll(screenshotDir, 0755); err != nil {
 		log.Printf("Juicer: warning: could not create screenshot directory %s: %v", screenshotDir, err)
 	}
@@ -343,8 +341,8 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	// (FullScreenshot changes the viewport/device metrics and can break subsequent element screenshots)
 	// Use CDP Page.CaptureScreenshot with clip for reliable element capture
 	nodeIdx := 0
-	nodeIdx = captureViolationNodeScreenshots(tabCtx, result.Violations, screenshotDir, page, nodeIdx)
-	nodeIdx = captureViolationNodeScreenshots(tabCtx, result.Incomplete, screenshotDir, page, nodeIdx)
+	nodeIdx = captureViolationNodeScreenshots(tabCtx, result.Violations, scanID, screenshotDir, page, nodeIdx)
+	nodeIdx = captureViolationNodeScreenshots(tabCtx, result.Incomplete, scanID, screenshotDir, page, nodeIdx)
 
 	// Take a full-page screenshot (last, since it alters viewport metrics)
 	screenshot, err = captureFullPage(tabCtx)
@@ -356,11 +354,12 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 
 		log.Printf("Juicer: warning: failed to take screenshot of %s: %v", page.URL, err)
 	} else if len(screenshot) > 0 {
-		screenshotPath := filepath.Join(screenshotDir, page.URLID+".png")
+		filename := page.URLID + ".png"
+		screenshotPath := filepath.Join(screenshotDir, filename)
 		if err := os.WriteFile(screenshotPath, screenshot, 0644); err != nil {
 			log.Printf("Juicer: warning: failed to save screenshot for %s: %v", page.URL, err)
 		} else {
-			result.ScreenshotPath = screenshotPath
+			result.ScreenshotPath = screenshots.StoredPath(scanID, filename)
 		}
 	}
 
@@ -385,7 +384,7 @@ func shouldTreatAsCanceled(ctx context.Context, err error) bool {
 		strings.Contains(err.Error(), "context canceled")
 }
 
-func captureViolationNodeScreenshots(ctx context.Context, violations []Violation, screenshotDir string, page PageInput, startIndex int) int {
+func captureViolationNodeScreenshots(ctx context.Context, violations []Violation, scanID, screenshotDir string, page PageInput, startIndex int) int {
 	nodeIdx := startIndex
 
 	for vi := range violations {
@@ -416,11 +415,12 @@ func captureViolationNodeScreenshots(ctx context.Context, violations []Violation
 			}
 
 			if len(elemScreenshot) >= elementScreenshotMinByteSize {
-				elemPath := filepath.Join(screenshotDir, fmt.Sprintf("%s_focus_%d.png", page.URLID, nodeIdx))
+				filename := fmt.Sprintf("%s_focus_%d.png", page.URLID, nodeIdx)
+				elemPath := filepath.Join(screenshotDir, filename)
 				if err := os.WriteFile(elemPath, elemScreenshot, 0644); err != nil {
 					log.Printf("Juicer: warning: failed to save element screenshot: %v", err)
 				} else {
-					node.ElementScreenshotPath = elemPath
+					node.ElementScreenshotPath = screenshots.StoredPath(scanID, filename)
 
 					if len(previewScreenshot) >= elementScreenshotMinByteSize {
 						if err := os.WriteFile(focusedPreviewPath(elemPath), previewScreenshot, 0644); err != nil {

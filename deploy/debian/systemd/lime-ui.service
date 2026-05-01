@@ -11,7 +11,7 @@ WorkingDirectory=/opt/lime/ui
 # EnvironmentFile must define DATABASE_URL, SHOPKEEPER_URL, PORT=3000,
 # and optionally LIME_VERSION, LIME_UPDATE_CHECK, LIME_GITHUB_REPO.
 EnvironmentFile=/etc/lime/ui.env
-ExecStart=/usr/bin/node /opt/lime/ui/server.js
+ExecStart=/usr/bin/env node /opt/lime/ui/server.js
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production

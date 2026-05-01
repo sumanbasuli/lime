@@ -34,7 +34,7 @@ Built to be cheap to run on a small server, straightforward to push to Fly.io, a
 - **Partial scan retry** - retry failed pages inside the same scan without creating a second scan.
 - **Scan recovery** - non-terminal scans resume after Shopkeeper restarts.
 - **Update notice** - opt-in sidebar banner when a new GitHub release is available.
-- **Three deploy targets** - Fly.io, Docker, and Linux systemd.
+- **Three deploy targets** - Fly.io, Docker, and Debian systemd.
 
 ## Architecture
 
@@ -48,11 +48,11 @@ Shopkeeper pipeline:
 
 | Stage | What it does |
 |-------|--------------|
-| **[Profiler](https://lime.heysuman.com/docs/architecture/profiler/)** | Expands sitemap and sitemap-index inputs into a validated, deduplicated URL set for the scan. |
-| **[Juicer](https://lime.heysuman.com/docs/architecture/juicer/)** | Takes those URLs, drives Chromium workers, runs axe-core, captures screenshots, and records per-page audit outcomes. |
-| **[Sweetner](https://lime.heysuman.com/docs/architecture/sweetner/)** | Takes Juicer audit output and writes normalized issues, occurrences, audits, and review-required records. |
+| **[Profiler](https://lime.heysuman.com/docs/reference/architecture/profiler/)** | Expands sitemap and sitemap-index inputs into a validated, deduplicated URL set for the scan. |
+| **[Juicer](https://lime.heysuman.com/docs/reference/architecture/juicer/)** | Takes those URLs, drives Chromium workers, runs axe-core, captures screenshots, and records per-page audit outcomes. |
+| **[Sweetner](https://lime.heysuman.com/docs/reference/architecture/sweetner/)** | Takes Juicer audit output and writes normalized issues, occurrences, audits, and review-required records. |
 
-Full architecture docs: [lime.heysuman.com/docs/architecture/shopkeeper](https://lime.heysuman.com/docs/architecture/shopkeeper/).
+Full architecture docs: [lime.heysuman.com/docs/reference/architecture/shopkeeper](https://lime.heysuman.com/docs/reference/architecture/shopkeeper/).
 
 ## Quick start
 
@@ -72,13 +72,13 @@ Stop: `make stop-all`. Reset volumes: `make clean`.
 
 ## Deploy
 
-LIME publishes versioned Docker images to GHCR from the main-branch release workflow. Use the release tag you want to deploy, for example `v1.0.3`.
+LIME publishes versioned Docker images to GHCR from the main-branch release workflow. Use the release tag you want to deploy, for example `v1.0.4`.
 
 | Target | One-liner | Guide |
 |--------|-----------|-------|
-| **Fly.io** | `./scripts/fly-deploy.sh v1.0.3` | [Fly.io guide](https://lime.heysuman.com/docs/deployment/fly/) |
-| **Docker** | `docker compose -f docker-compose.release.yml up -d` | [Docker guide](https://lime.heysuman.com/docs/deployment/vps-docker/) |
-| **Linux systemd** | `make build && sudo ./scripts/vps-install.sh` | [Linux guide](https://lime.heysuman.com/docs/deployment/vps-native/) |
+| **Fly.io** | `./scripts/fly-deploy.sh v1.0.4` | [Fly.io guide](https://lime.heysuman.com/docs/reference/deployment/fly/) |
+| **Docker** | `docker compose -f docker-compose.release.yml up -d` | [Docker guide](https://lime.heysuman.com/docs/reference/deployment/docker/) |
+| **Debian systemd** | `make debian-install` | [Debian guide](https://lime.heysuman.com/docs/reference/deployment/debian/) |
 
 ### Deploy to Fly.io
 
@@ -94,22 +94,22 @@ Use either an external PostgreSQL URL:
 
 ```bash
 export DATABASE_URL='postgresql://...'
-./scripts/fly-deploy.sh v1.0.3
+./scripts/fly-deploy.sh v1.0.4
 ```
 
-Or attach Fly Managed Postgres to both apps first; the helper will reuse existing `DATABASE_URL` Fly secrets. Details: [Fly.io deployment docs](https://lime.heysuman.com/docs/deployment/fly/).
+Or attach Fly Managed Postgres to both apps first; the helper will reuse existing `DATABASE_URL` Fly secrets. Details: [Fly.io deployment docs](https://lime.heysuman.com/docs/reference/deployment/fly/).
 
 ### Updating
 
 Every deploy target ships an update command that backs up the database, pulls the new version, migrates, and rolling-restarts the services.
 
 ```bash
-./scripts/fly-update.sh v1.0.3            # Fly.io
-make update-release TAG=v1.0.3            # Docker (release bundle)
-sudo ./scripts/vps-update.sh v1.0.3       # Linux systemd
+./scripts/fly-update.sh v1.0.4            # Fly.io
+make update-release TAG=v1.0.4            # Docker (release bundle)
+sudo ./scripts/debian-update.sh v1.0.4    # Debian systemd
 ```
 
-Details and rollback: [update docs](https://lime.heysuman.com/docs/deployment/updates/).
+Details and rollback: [update docs](https://lime.heysuman.com/docs/reference/deployment/updates/).
 
 ## Configuration
 
@@ -126,7 +126,7 @@ Runtime configuration lives in `.env` (root) or deploy-specific env files.
 | `LIME_GITHUB_REPO` | optional | Override the update-check repo (default `sumanbasuli/lime`). |
 | `ACT_RULES_PATH` | optional | Override the bundled ACT catalog path. |
 
-See the [setup docs](https://lime.heysuman.com/docs/setup/) for the full table.
+See the [setup docs](https://lime.heysuman.com/docs/reference/setup/) for the full table.
 
 ## Development
 
@@ -144,6 +144,8 @@ make dev-ui              # NextJS with hot reload
 | `make migrate-all` | Apply DB migrations |
 | `make build` | Build Go + Next + release bundle into `dist/` |
 | `make build-docker` | Build versioned Docker images locally |
+| `make debian-install` | Build and install the native Debian systemd deployment |
+| `make debian-update TAG=vX.Y.Z` | Update the native Debian systemd deployment |
 | `make docs` | Refresh the static docs site with isolated heysuman.com demo screenshots |
 | `make docs-run` | Build and serve the static docs site locally |
 | `make docs-dev` | Run the docs site with NextJS hot reload |

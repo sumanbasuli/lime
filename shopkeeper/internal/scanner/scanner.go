@@ -5,13 +5,13 @@ import (
 	"errors"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/juicer"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/profiler"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/screenshots"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/sweetner"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
@@ -76,7 +76,7 @@ func (s *Scanner) RecoverInterruptedScans() error {
 			continue
 		}
 
-		if err := os.RemoveAll(filepath.Join(juicer.ScreenshotDir, scan.ID)); err != nil {
+		if err := os.RemoveAll(screenshots.ScanDir(scan.ID)); err != nil {
 			log.Printf("Scanner: warning: failed to remove screenshots for recovered scan %s: %v", scan.ID, err)
 		}
 
@@ -260,7 +260,6 @@ func (s *Scanner) RunScan(scan models.Scan) {
 		s.failScan(persistCtx, scan.ID)
 		return
 	}
-
 	// Update URL statuses based on results
 	for _, result := range rawResults {
 		status := "completed"

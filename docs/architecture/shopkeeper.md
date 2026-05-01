@@ -116,7 +116,7 @@ The async execution is backend-owned. Browser navigation only affects UI polling
 - Rescans create a brand new `scans` row and re-run the pipeline with the original target URL, scan type, tag, and viewport.
 - Failed-page retries keep the same `scans` row. They are limited to completed partial scans with at least one completed page and at least one failed page.
 - Deletes are limited to terminal scans (`completed` or `failed`) so an active background job is never orphaned.
-- Database cleanup relies on `ON DELETE CASCADE`, and Shopkeeper removes the scan's screenshot directory from `/app/screenshots/{scanId}` after a successful delete.
+- Database cleanup relies on `ON DELETE CASCADE`, and Shopkeeper removes the scan's screenshot directory after a successful delete. Docker/Fly use `/app/screenshots/{scanId}`; native installs can override the physical root with `SHOPKEEPER_SCREENSHOT_DIR`.
 - On startup, Shopkeeper re-queues any scan left in `pending`, `profiling`, `scanning`, or `processing`. Partial URLs/issues/screenshots are cleared first so the recovered run starts cleanly with the same scan ID and viewport.
 
 ### Recovery Model

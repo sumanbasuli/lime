@@ -3,6 +3,12 @@
 All notable changes to LIME are tracked here. The release workflow uses the
 section matching `VERSION` to populate GitHub Release notes.
 
+## [Unreleased]
+
+## [1.0.4] - 2026-05-01
+
+- Fixed Debian/Linux deployment portability by auto-detecting `docker compose` versus `docker-compose`, adding OS-aware Make targets, making native screenshot storage configurable, and hardening the systemd install path.
+
 ## [1.0.3] - 2026-04-26
 
 - Improved mobile layout behavior across the public docs site, including homepage cards, API reference cards, docs pages, screenshot gallery, search, and the mobile navigation overlay.

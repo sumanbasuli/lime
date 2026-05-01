@@ -19,7 +19,7 @@ func ScanPages(ctx, allocCtx context.Context, pages []PageInput, scanID string, 
 ## Responsibilities
 
 * **Axe-Core Execution**: Injects axe-core 4.10.2 into each page via `chromedp.Evaluate()` and runs a Lighthouse-aligned accessibility configuration: `elementRef: true`, `runOnly` on `wcag2a`/`wcag2aa`, `resultTypes` including `violations` and `inapplicable`, curated rule overrides, and `noHtml: true` with custom node serialization.
-* **Screenshot Capturing**: Takes full-page PNG screenshots and per-element screenshots saved under `/app/screenshots/{scanID}/`.
+* **Screenshot Capturing**: Takes full-page PNG screenshots and per-element screenshots saved under the Shopkeeper screenshot directory. Docker/Fly use `/app/screenshots/{scanID}/`; native installs set `SHOPKEEPER_SCREENSHOT_DIR` while stored DB paths remain `/app/screenshots/...` for stable UI/report URLs.
 * **Concurrency Management**: Worker pool using a buffered channel semaphore of size 5.
 * **Politeness**: 500ms delay between requests via `time.Sleep`.
 * **Progress Reporting**: Calls `onProgress(scannedCount)` after each page, enabling real-time scan progress in the UI.

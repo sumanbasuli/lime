@@ -32,6 +32,15 @@ BACKUP_DIR="${ROOT_DIR}/dist/backups"
 
 cd "${ROOT_DIR}"
 
+if docker compose version >/dev/null 2>&1; then
+  DOCKER_COMPOSE=(docker compose)
+elif command -v docker-compose >/dev/null 2>&1; then
+  DOCKER_COMPOSE=(docker-compose)
+else
+  echo "Docker Compose is required. Install the Docker Compose plugin or docker-compose." >&2
+  exit 1
+fi
+
 if [[ ! -f "${COMPOSE_FILE}" ]]; then
   echo "Compose file not found: ${COMPOSE_FILE}" >&2
   exit 1
@@ -43,7 +52,7 @@ if [[ ! -f "${ENV_FILE}" ]]; then
 fi
 
 compose() {
-  docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
+  "${DOCKER_COMPOSE[@]}" --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" "$@"
 }
 
 echo "==> Reading current image tag"

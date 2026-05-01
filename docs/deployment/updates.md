@@ -14,7 +14,7 @@ Every deploy target has a matching update script. They all follow the same shape
 | Fly.io | `./scripts/fly-update.sh <tag>` | none automatic; use `flyctl mpg backup create <cluster-id>` or your provider's tooling before running |
 | Docker (release bundle) | `./scripts/docker-update.sh <tag>` or `make update-release TAG=<tag>` | `dist/backups/lime-pre-<tag>-<timestamp>.sql.gz` |
 | Docker (from source) | `make update TAG=<tag>` | same as above |
-| VPS (systemd) | `sudo ./scripts/vps-update.sh <tag>` | `/var/backups/lime/lime-pre-<tag>-<timestamp>.sql.gz` |
+| Debian systemd | `sudo ./scripts/debian-update.sh <tag>` or `make debian-update TAG=<tag>` | `/var/backups/lime/lime-pre-<tag>-<timestamp>.sql.gz` |
 
 ## Update notice in the sidebar
 
@@ -41,7 +41,7 @@ The scripts share the same contract:
 - The UI is updated second.
 - Health checks gate the transition on Docker and Fly.
 
-Even with rolling restarts, a single-machine deployment will flicker for a few seconds while Shopkeeper restarts. For true zero downtime, run at least two machines per app (Fly scale, Docker Compose replicas, or two VPS hosts behind a load balancer).
+Even with rolling restarts, a single-machine deployment will flicker for a few seconds while Shopkeeper restarts. For true zero downtime, run at least two machines per app (Fly scale, Docker Compose replicas, or two Debian hosts behind a load balancer).
 
 ## Migrations
 
