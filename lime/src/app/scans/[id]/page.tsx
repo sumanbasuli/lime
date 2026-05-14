@@ -249,6 +249,10 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
   ).length;
   const activeIssueCount = scanIssues.length - excludedIssueCount;
   const activeIssues = scanIssues.filter((issue) => !issue.isFalsePositive);
+  const hasIssueDetails =
+    activeIssueCount > 0 ||
+    excludedIssueCount > 0 ||
+    scoreSummary.needsReviewCount > 0;
 
   const severityCounts = activeIssues.reduce(
     (acc, issue) => {
@@ -491,7 +495,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
             </p>
           </div>
 
-          {scanIssues.length > 0 && <IssueDetailsButton scanId={scan.id} />}
+          {hasIssueDetails && <IssueDetailsButton scanId={scan.id} />}
         </div>
 
         {!scoreSummary.hasAuditData ? (

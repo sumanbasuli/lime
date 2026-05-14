@@ -5,6 +5,10 @@ section matching `VERSION` to populate GitHub Release notes.
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-05-14
+
+- Fixed needs-review-only scans so the scan detail page links to issue details when review-required audit checks exist without failed issue groups.
+
 ## [1.0.4] - 2026-05-01
 
 - Fixed Debian/Linux deployment portability by auto-detecting `docker compose` versus `docker-compose`, adding OS-aware Make targets, making native screenshot storage configurable, and hardening the systemd install path.
