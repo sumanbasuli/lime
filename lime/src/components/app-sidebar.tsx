@@ -50,7 +50,7 @@ const data = {
     },
     {
       title: "Documentation",
-      url: "https://lime.heysuman.com/",
+      url: "https://lime.heysuman.com/docs/",
       icon: <MaterialSymbol name="menu_book" size={18} />,
     },
   ],

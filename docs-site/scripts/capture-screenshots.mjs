@@ -85,6 +85,36 @@ async function clickIfVisible(page, locator, timeout = 5_000) {
   }
 }
 
+async function waitForImageReady(locator, timeout = 15_000) {
+  await locator.waitFor({ state: "visible", timeout });
+  await locator.evaluate(
+    (image, timeoutMs) =>
+      new Promise((resolve, reject) => {
+        const htmlImage = /** @type {HTMLImageElement} */ (image);
+        if (htmlImage.complete && htmlImage.naturalWidth > 0) {
+          resolve(undefined);
+          return;
+        }
+
+        const timer = setTimeout(
+          () => reject(new Error(`Image did not load: ${htmlImage.currentSrc || htmlImage.src}`)),
+          timeoutMs
+        );
+        const finish = () => {
+          clearTimeout(timer);
+          if (htmlImage.naturalWidth > 0) {
+            resolve(undefined);
+          } else {
+            reject(new Error(`Image failed to load: ${htmlImage.currentSrc || htmlImage.src}`));
+          }
+        };
+        htmlImage.addEventListener("load", finish, { once: true });
+        htmlImage.addEventListener("error", finish, { once: true });
+      }),
+    timeout
+  );
+}
+
 await mkdir(outputDir, { recursive: true });
 
 const browser = await chromium.launch();
@@ -138,6 +168,16 @@ try {
         .getByText("Affected elements")
         .waitFor({ state: "visible", timeout: 15_000 })
         .catch(() => currentPage.waitForTimeout(4_000));
+
+      const thumbnail = currentPage.locator('img[alt^="Screenshot of "]').first();
+      await waitForImageReady(thumbnail);
+      await thumbnail.locator("..").click();
+
+      const lightbox = currentPage.getByRole("dialog");
+      await lightbox.waitFor({ state: "visible", timeout: 10_000 });
+      await waitForImageReady(lightbox.locator("img"));
+      await lightbox.getByRole("button", { name: /close/i }).click();
+      await lightbox.waitFor({ state: "hidden", timeout: 10_000 });
     },
   });
 

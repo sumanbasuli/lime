@@ -42,15 +42,6 @@ async function waitForServer(url) {
   throw new Error("Timed out waiting for static docs at " + url);
 }
 
-if (!explicitBaseUrl) {
-  staticServer = spawn(
-    process.execPath,
-    [path.join(scriptDir, "serve-static.mjs"), "--port", String(verificationPort)],
-    { stdio: "ignore" }
-  );
-  await waitForServer(baseUrl);
-}
-
 async function auditRoute(browser, route, viewport, mobile = false) {
   const page = await browser.newPage({ viewport, isMobile: mobile });
   const browserErrors = [];
@@ -91,8 +82,18 @@ async function auditRoute(browser, route, viewport, mobile = false) {
   }
 }
 
-const browser = await chromium.launch({ headless: true });
+let browser;
 try {
+  if (!explicitBaseUrl) {
+    staticServer = spawn(
+      process.execPath,
+      [path.join(scriptDir, "serve-static.mjs"), "--port", String(verificationPort)],
+      { stdio: "ignore" }
+    );
+    await waitForServer(baseUrl);
+  }
+
+  browser = await chromium.launch({ headless: true });
   for (const route of routes) {
     await auditRoute(browser, route, { width: 1440, height: 1000 });
   }
@@ -123,7 +124,7 @@ try {
   await interactionPage.getByRole("button", { name: /close navigation/i }).click();
   await interactionPage.close();
 } finally {
-  await browser.close();
+  await browser?.close();
   staticServer?.kill("SIGTERM");
 }
 

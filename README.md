@@ -12,7 +12,7 @@ Scan sitemaps, capture screenshots, review issues in a dashboard.
 [![GHCR - Shopkeeper](https://img.shields.io/badge/GHCR-shopkeeper-6f42c1?logo=github)](https://github.com/sumanbasuli/lime/pkgs/container/lime-shopkeeper)
 [![GHCR - UI](https://img.shields.io/badge/GHCR-ui-6f42c1?logo=github)](https://github.com/sumanbasuli/lime/pkgs/container/lime-ui)
 
-[Quick start](#quick-start) | [Deploy](#deploy) | [Docs](https://lime.heysuman.com/) | [Roadmap](https://lime.heysuman.com/roadmap/) | [Releases](https://github.com/sumanbasuli/lime/releases)
+[Quick start](#quick-start) | [Deploy](#deploy) | [Docs](https://lime.heysuman.com/docs/) | [Roadmap](https://lime.heysuman.com/roadmap/) | [Releases](https://github.com/sumanbasuli/lime/releases)
 
 </div>
 
@@ -162,7 +162,7 @@ make dev-ui              # NextJS with hot reload
 
 ## Docs
 
-Public docs are published at [lime.heysuman.com](https://lime.heysuman.com/). The repo-local Markdown in [docs/](docs/) remains the source content and contributor fallback.
+Public docs are published at [lime.heysuman.com/docs](https://lime.heysuman.com/docs/). The repo-local Markdown in [docs/](docs/) remains the source content and contributor fallback.
 
 `make docs` refreshes the docs site locally. It uses a separate `lime-docs` Docker Compose project, separate Postgres and screenshot volumes, non-default ports, and fresh single-page demo scans for `https://heysuman.com`, `https://www.fake-university.com/`, and `https://overlaysdontwork.com/` so it never screenshots current private/local scans.
 
