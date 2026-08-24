@@ -45,6 +45,7 @@ export interface IssueOccurrence {
 interface IssueSummaryBase {
   key: string;
   title: string;
+  description?: string | null;
   helpUrl: string | null;
   occurrenceCount: number;
   weight: number;
@@ -434,10 +435,18 @@ export async function loadIssueSummariesPage(
   items: IssueSummaryItem[];
   counts: IssueListCounts;
 }> {
-  const { items, counts } =
-    (await loadCachedIssueSummaries(scanId)) ?? (await loadIssueSummaries(scanId));
+  const [{ items, counts }, axeRuleCatalog] = await Promise.all([
+    loadCachedIssueSummaries(scanId).then((cached) => cached ?? loadIssueSummaries(scanId)),
+    getAxeRuleCatalog(),
+  ]);
   return {
-    items: items.slice(offset, offset + limit),
+    items: items.slice(offset, offset + limit).map((item) => {
+      const ruleId = item.kind === "failed" ? item.violationType : item.ruleId;
+      return {
+        ...item,
+        description: axeRuleCatalog[ruleId]?.description?.trim() || null,
+      };
+    }),
     counts,
   };
 }

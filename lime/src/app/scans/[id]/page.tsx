@@ -7,17 +7,19 @@ import { AccessibilityScoreGauge } from "@/components/accessibility-score-gauge"
 import { AuditResultsDataTable } from "@/components/audit-results-data-table";
 import { PartialScanRetryBento } from "@/components/partial-scan-retry-bento";
 import { ScanActions } from "@/components/scan-actions";
+import { IssueReportDownloadButton } from "@/components/issue-report-download-button";
 import { Button } from "@/components/ui/button";
+import { MaterialSymbol } from "@/components/material-symbol";
 import {
   StatusBadge,
   ScanTypeBadge,
   TagBadge,
 } from "@/components/status-badge";
 import { ScanProgress } from "@/components/scan-progress";
-import { ArrowRightIcon, ChevronRightIcon } from "lucide-react";
 import { measureServerAction } from "@/lib/performance-logging";
 import { formatViewportLabel } from "@/lib/viewport-presets";
 import { getScanAuditReports } from "@/lib/scan-score-data";
+import { getReportSettings } from "@/lib/report-settings";
 import {
   getAccessibilityScoreBand,
   type ScanScoreSummary,
@@ -35,6 +37,15 @@ function formatTimestamp(value: string | Date | null | undefined): string {
   }
 
   return new Date(value).toLocaleString();
+}
+
+function formatTarget(value: string): { domain: string; url: string } {
+  try {
+    const parsed = new URL(value);
+    return { domain: parsed.hostname.replace(/^www\./, ""), url: value };
+  } catch {
+    return { domain: value, url: value };
+  }
 }
 
 const severityCardStyles: Record<
@@ -120,44 +131,6 @@ function getScoreSummaryCopy(summary: ScanScoreSummary, status: string): string 
   return "No scored accessibility audits were available for this scan.";
 }
 
-function getSeveritySummaryCopy(
-  activeIssueCount: number,
-  excludedIssueCount: number,
-  isActive: boolean,
-  isPartialScan: boolean
-): string {
-  if (activeIssueCount > 0 && excludedIssueCount > 0) {
-    const base = `${activeIssueCount} active issue groups. ${excludedIssueCount} false positive${excludedIssueCount === 1 ? "" : "s"} excluded from scoring.`;
-    return isPartialScan
-      ? `${base} These counts reflect completed pages only.`
-      : base;
-  }
-
-  if (activeIssueCount > 0) {
-    const base = `${activeIssueCount} active issue group${activeIssueCount === 1 ? "" : "s"} ready for review.`;
-    return isPartialScan
-      ? `${base} These counts reflect completed pages only.`
-      : base;
-  }
-
-  if (excludedIssueCount > 0) {
-    const base = `No active issue groups. ${excludedIssueCount} false positive${excludedIssueCount === 1 ? "" : "s"} kept for reference only.`;
-    return isPartialScan
-      ? `${base} These counts reflect completed pages only.`
-      : base;
-  }
-
-  if (isActive) {
-    return "Issue groups will appear here as the scan completes more pages.";
-  }
-
-  if (isPartialScan) {
-    return "No grouped failed checks were found in the completed pages for this partial scan.";
-  }
-
-  return "No grouped failed checks were found.";
-}
-
 function getAuditResultsCopy(summary: ScanScoreSummary, status: string): string {
   if (summary.isPartialScan) {
     return `Checks below are based on ${summary.completedUrlCount} of ${summary.totalUrlCount} completed pages. ${summary.failedUrlCount} page${summary.failedUrlCount === 1 ? "" : "s"} failed to scan, so the score reflects completed pages only until those failed pages are retried.`;
@@ -177,14 +150,14 @@ function getAuditResultsCopy(summary: ScanScoreSummary, status: string): string 
 function IssueDetailsButton({ scanId }: { scanId: string }) {
   return (
     <Button
-      variant="outline"
-      size="lg"
+      variant="default"
+      size="default"
       nativeButton={false}
-      className="rounded-full border-black/10 bg-white text-[#0A0A0A] hover:bg-black hover:text-[#FFED00]"
+      className="rounded-full bg-black px-[18px] text-[13px] text-white hover:bg-[#FFED00] hover:text-black"
       render={<Link href={`/scans/${scanId}/issues`} />}
     >
       View issue details
-      <ArrowRightIcon className="h-4 w-4" />
+      <MaterialSymbol name="arrow_forward" size={16} />
     </Button>
   );
 }
@@ -202,7 +175,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
     notFound();
   }
 
-  const [scanIssues, auditReports] = await measureServerAction(
+  const [scanIssues, auditReports, reportSettings] = await measureServerAction(
     `scan detail issue and audit summaries ${id}`,
     () =>
       Promise.all([
@@ -227,6 +200,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
             updatedAt: scan.updatedAt,
           },
         ]),
+        getReportSettings(),
       ])
   );
   const auditReport = auditReports[scan.id];
@@ -253,6 +227,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
     activeIssueCount > 0 ||
     excludedIssueCount > 0 ||
     scoreSummary.needsReviewCount > 0;
+  const target = formatTarget(scan.sitemapUrl);
 
   const severityCounts = activeIssues.reduce(
     (acc, issue) => {
@@ -264,7 +239,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto w-full max-w-[1180px] space-y-5">
       {isActive && (
         <ScanProgress scanId={scan.id} status={scan.status ?? "pending"} />
       )}
@@ -275,26 +250,29 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
             <Link href="/scans" className="transition-colors hover:text-foreground">
               Scans
             </Link>
-            <ChevronRightIcon className="h-3.5 w-3.5" />
+            <MaterialSymbol name="chevron_right" size={15} />
             <span>Scan details</span>
           </div>
 
-          <h1 className="font-heading text-3xl font-bold leading-[0.95] sm:text-4xl">
-            Scan details
-          </h1>
+          <h1 className="font-heading text-[34px] font-semibold leading-[1.05] tracking-[-0.01em]">{target.domain}</h1>
           <p className="max-w-3xl break-all text-sm leading-5 text-muted-foreground">
-            {scan.sitemapUrl}
+            {target.url}
           </p>
           <div className="flex flex-wrap items-center gap-2">
-            <ScanTypeBadge scanType={scan.scanType ?? "sitemap"} />
+            <span className="inline-flex h-7 items-center rounded-full border border-black/12 bg-white px-3">
+              <ScanTypeBadge scanType={scan.scanType ?? "sitemap"} />
+            </span>
             {scan.tag && <TagBadge tag={scan.tag} />}
-            <span className="text-xs text-muted-foreground">
-              Screen size:{" "}
+            <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-black/12 bg-white px-3 text-xs text-black/70">
+              <MaterialSymbol name="desktop_windows" size={14} />
               {formatViewportLabel(
                 scan.viewportPreset,
                 scan.viewportWidth,
                 scan.viewportHeight
               )}
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Started {formatTimestamp(scan.createdAt)}
             </span>
           </div>
         </div>
@@ -311,6 +289,11 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
             isPartialScan={scoreSummary.isPartialScan}
             redirectOnDelete="/scans"
           />
+          <IssueReportDownloadButton
+            scanId={scan.id}
+            settings={reportSettings}
+            variant="menu"
+          />
         </div>
       </div>
 
@@ -322,13 +305,13 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
       )}
 
       {isActive && (
-        <section className="rounded-[28px] border border-black/10 bg-white p-4 shadow-[0_20px_45px_rgba(10,10,10,0.05)]">
+        <section className="lime-card rounded-[22px] p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="font-heading text-[28px] font-bold leading-none text-[#0A0A0A]">
-                Scan progress
+              <h2 className="font-heading text-[22px] font-semibold leading-none text-[#0A0A0A]">
+                Scan in progress
               </h2>
-              <p className="mt-2 text-sm leading-5 text-[#0A0A0A]/80">
+              <p className="mt-2 max-w-xl text-[13px] leading-5 text-[#0A0A0A]/60">
                 {scan.pauseRequested
                   ? "Pause requested. The scanner is finishing any in-flight work before it settles the scan."
                   : "Progress appears here while pages are still being profiled, scanned, or processed."}
@@ -359,12 +342,12 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
       )}
 
       <section className="space-y-4">
-        <div className="rounded-[28px] border border-black/10 bg-white p-4 shadow-[0_20px_45px_rgba(10,10,10,0.06)]">
+        <div className="lime-card rounded-[22px] p-6">
           <div>
-            <h2 className="font-heading text-[28px] font-bold leading-none text-[#0A0A0A]">
+            <h2 className="font-heading text-[22px] font-semibold leading-none text-[#0A0A0A]">
               Accessibility score
             </h2>
-            <p className="mt-2 max-w-2xl text-sm leading-5 text-[#0A0A0A]/80">
+            <p className="mt-2 max-w-2xl text-[13px] leading-5 text-[#0A0A0A]/60">
               {getScoreSummaryCopy(scoreSummary, scan.status ?? "pending")}
             </p>
           </div>
@@ -431,17 +414,17 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
           </div>
         </div>
 
-        <div className="rounded-[28px] border border-black/10 bg-white p-4 shadow-[0_20px_45px_rgba(10,10,10,0.06)]">
-          <div>
+        <div className="lime-card rounded-[22px] p-6">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h2 className="font-heading text-[28px] font-bold leading-none text-[#0A0A0A]">
+              <h2 className="font-heading text-[22px] font-semibold leading-none text-[#0A0A0A]">
                 Severity breakdown
               </h2>
-              <p className="mt-2 max-w-xl text-sm leading-5 text-[#0A0A0A]/80">
-                Active issue groups first, with false positives excluded from the
-                score but still available below for reference.
+              <p className="mt-2 max-w-xl text-[13px] leading-5 text-[#0A0A0A]/60">
+                Active issue groups, false positives excluded from scoring.
               </p>
             </div>
+            {hasIssueDetails ? <IssueDetailsButton scanId={scan.id} /> : null}
           </div>
 
           <div className="mt-4 grid auto-rows-fr gap-2 md:grid-cols-4">
@@ -452,7 +435,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
                 return (
                   <div
                     key={severity}
-                    className="rounded-2xl border border-black/10 bg-white p-2.5"
+                    className="rounded-2xl border border-black/10 bg-white p-3.5"
                   >
                     <div
                       className={`inline-flex rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] ${config.accentClassName}`}
@@ -473,29 +456,20 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
             )}
           </div>
 
-          <div className="mt-3 rounded-2xl border border-black/10 bg-[#FAFAFA] px-3.5 py-3 text-sm text-[#0A0A0A]/80">
-            {getSeveritySummaryCopy(
-              activeIssueCount,
-              excludedIssueCount,
-              isActive,
-              scoreSummary.isPartialScan
-            )}
-          </div>
         </div>
       </section>
 
-      <section className="rounded-[28px] border border-black/10 bg-white p-4 shadow-[0_20px_45px_rgba(10,10,10,0.05)]">
+      <section className="lime-card rounded-[22px] p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h2 className="font-heading text-[28px] font-bold leading-none text-[#0A0A0A]">
+            <h2 className="font-heading text-[22px] font-semibold leading-none text-[#0A0A0A]">
               Audit results
             </h2>
-            <p className="mt-2 max-w-3xl text-sm leading-5 text-[#0A0A0A]/80">
+            <p className="mt-2 max-w-3xl text-[13px] leading-5 text-[#0A0A0A]/60">
               {getAuditResultsCopy(scoreSummary, scan.status ?? "pending")}
             </p>
           </div>
 
-          {hasIssueDetails && <IssueDetailsButton scanId={scan.id} />}
         </div>
 
         {!scoreSummary.hasAuditData ? (

@@ -1,8 +1,7 @@
 "use client";
 
-import { useDeferredValue, useState } from "react";
+import { useState } from "react";
 import { AuditStatusBadge } from "@/components/status-badge";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -11,7 +10,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { ScanAuditResult } from "@/lib/scan-scoring";
+import type { AggregatedAuditStatus, ScanAuditResult } from "@/lib/scan-scoring";
+
+type AuditFilter = "all" | Exclude<AggregatedAuditStatus, "not_applicable">;
+
+const auditFilters: { key: AuditFilter; label: string }[] = [
+  { key: "all", label: "All checks" },
+  { key: "failed", label: "Failed" },
+  { key: "needs_review", label: "Needs review" },
+  { key: "passed", label: "Passed" },
+  { key: "excluded", label: "Excluded" },
+];
 
 function formatAuditCoverage(pageCounts: ScanAuditResult["pageCounts"]): string {
   const parts: string[] = [];
@@ -37,36 +46,31 @@ export function AuditResultsDataTable({
 }: {
   audits: ScanAuditResult[];
 }) {
-  const [query, setQuery] = useState("");
-  const deferredQuery = useDeferredValue(query.trim().toLowerCase());
-
-  const filteredAudits = deferredQuery
-    ? audits.filter((audit) => {
-        const haystack = [
-          audit.title,
-          audit.ruleId,
-          audit.description ?? "",
-          audit.status.replaceAll("_", " "),
-        ]
-          .join(" ")
-          .toLowerCase();
-
-        return haystack.includes(deferredQuery);
-      })
-    : audits;
+  const [filter, setFilter] = useState<AuditFilter>("all");
+  const filteredAudits =
+    filter === "all" ? audits : audits.filter((audit) => audit.status === filter);
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-nowrap sm:items-center sm:justify-between">
-        <Input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search checks, rule ids, or statuses"
-          className="h-9 max-w-md border-black/10 bg-white"
-        />
-        <p className="shrink-0 text-sm text-[#0A0A0A]/75">
-          {filteredAudits.length} of {audits.length} checks
-        </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {auditFilters.map((item) => {
+          const isActive = filter === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              aria-pressed={isActive}
+              onClick={() => setFilter(item.key)}
+              className={`inline-flex h-9 items-center rounded-full border px-4 text-xs font-semibold transition-colors ${
+                isActive
+                  ? "border-black bg-black text-[#FFED00]"
+                  : "border-black/10 bg-white text-black/60 hover:border-black/25 hover:text-black"
+              }`}
+            >
+              {item.label}
+            </button>
+          );
+        })}
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-black/10">
@@ -125,6 +129,7 @@ export function AuditResultsDataTable({
                           {audit.title}
                         </p>
                       )}
+                      <p className="font-mono text-[10px] text-black/35">{audit.ruleId}</p>
                     </div>
                   </TableCell>
                   <TableCell className="whitespace-nowrap py-3 align-top">

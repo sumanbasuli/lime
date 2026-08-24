@@ -8,7 +8,7 @@ import {
   type MouseEvent,
 } from "react";
 import { useRouter } from "next/navigation";
-import { CheckIcon, Loader2Icon } from "lucide-react";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
@@ -115,10 +115,12 @@ export function IssueFalsePositiveButton({
         onClick={handleClick}
       >
         {isPending ? (
-          <Loader2Icon className="animate-spin" />
+          <MaterialSymbol name="progress_activity" size={15} className="animate-spin" />
         ) : showSuccess ? (
-          <CheckIcon />
-        ) : null}
+          <MaterialSymbol name="check" size={15} />
+        ) : (
+          <MaterialSymbol name="flag" size={15} />
+        )}
         {localIsFalsePositive
           ? "Unmark false positive"
           : "Mark false positive"}

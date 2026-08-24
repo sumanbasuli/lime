@@ -2,13 +2,7 @@
 
 import { startTransition, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Loader2Icon,
-  PauseIcon,
-  PlayIcon,
-  RefreshCwIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { Button } from "@/components/ui/button";
 import {
   deleteScan,
@@ -137,11 +131,12 @@ export function ScanActions({
             size={size}
             disabled={isBusy || isPauseRequested}
             onClick={handlePause}
+            className="rounded-full border-black/12 bg-white px-4 hover:bg-black hover:text-[#FFED00]"
           >
             {pendingAction === "pause" || isPauseRequested ? (
-              <Loader2Icon className="animate-spin" />
+              <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
             ) : (
-              <PauseIcon />
+              <MaterialSymbol name="pause" size={16} />
             )}
             {isPauseRequested ? "Pausing..." : "Pause"}
           </Button>
@@ -153,11 +148,12 @@ export function ScanActions({
               size={size}
               disabled={isBusy}
               onClick={handleResume}
+              className="rounded-full border-black/12 bg-white px-4 hover:bg-black hover:text-[#FFED00]"
             >
               {pendingAction === "resume" ? (
-                <Loader2Icon className="animate-spin" />
+                <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
               ) : (
-                <PlayIcon />
+                <MaterialSymbol name="play_arrow" size={16} />
               )}
               Resume
             </Button>
@@ -167,11 +163,12 @@ export function ScanActions({
               size={size}
               disabled={isBusy}
               onClick={handleDelete}
+              className="rounded-full border-[#8F2D31]/25 bg-white px-4 text-[#8F2D31] hover:bg-[#8F2D31] hover:text-white"
             >
               {pendingAction === "delete" ? (
-                <Loader2Icon className="animate-spin" />
+                <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
               ) : (
-                <Trash2Icon />
+                <MaterialSymbol name="delete" size={16} />
               )}
               Delete
             </Button>
@@ -184,11 +181,12 @@ export function ScanActions({
               size={size}
               disabled={isBusy}
               onClick={handleRescan}
+              className="rounded-full border-black/12 bg-white px-4 hover:bg-black hover:text-[#FFED00]"
             >
               {pendingAction === "rescan" ? (
-                <Loader2Icon className="animate-spin" />
+                <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
               ) : (
-                <RefreshCwIcon />
+                <MaterialSymbol name="refresh" size={16} />
               )}
               {isPartialScan ? "Full rescan" : "Rescan"}
             </Button>
@@ -198,11 +196,12 @@ export function ScanActions({
               size={size}
               disabled={isBusy}
               onClick={handleDelete}
+              className="rounded-full border-[#8F2D31]/25 bg-white px-4 text-[#8F2D31] hover:bg-[#8F2D31] hover:text-white"
             >
               {pendingAction === "delete" ? (
-                <Loader2Icon className="animate-spin" />
+                <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
               ) : (
-                <Trash2Icon />
+                <MaterialSymbol name="delete" size={16} />
               )}
               Delete
             </Button>

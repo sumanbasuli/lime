@@ -1,13 +1,17 @@
 "use client";
 
-import { useState } from "react";
-import { KeyRoundIcon, Loader2Icon } from "lucide-react";
+import { useEffect, useState } from "react";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   DEFAULT_SYSTEM_SETTINGS,
   type SystemSettings,
 } from "@/lib/report-settings-config";
+import {
+  readUpdateNoticeEnabled,
+  writeUpdateNoticeEnabled,
+} from "@/lib/update-notice-preference";
 
 interface DashboardSettingsFormProps {
   initialSettings: SystemSettings;
@@ -205,6 +209,11 @@ export function DashboardSettingsForm({
   const [generatedMcpKey, setGeneratedMcpKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [updateNoticeEnabled, setUpdateNoticeEnabled] = useState(true);
+
+  useEffect(() => {
+    setUpdateNoticeEnabled(readUpdateNoticeEnabled());
+  }, []);
 
   const handleNumberChange = (
     key: ReportSettingsNumericKey,
@@ -232,6 +241,8 @@ export function DashboardSettingsForm({
 
   const handleReset = () => {
     setSettings(DEFAULT_SYSTEM_SETTINGS);
+    setUpdateNoticeEnabled(true);
+    writeUpdateNoticeEnabled(true);
     setGeneratedMcpKey(null);
     setError(null);
     setSuccess(null);
@@ -319,16 +330,16 @@ export function DashboardSettingsForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      <section className="space-y-3">
+    <form onSubmit={handleSubmit} className="space-y-7">
+      <section className="space-y-3" aria-labelledby="reporting-settings-title">
         <div>
-          <h3 className="font-heading text-xl font-bold">Reporting</h3>
+          <h2 id="reporting-settings-title" className="lime-section-title">Reporting</h2>
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           {numericFields.map((field) => (
             <label
               key={field.key}
-              className="rounded-xl border border-black/10 bg-white p-4"
+              className="lime-card rounded-2xl p-4"
             >
               <div className="space-y-1.5">
                 <div className="text-sm font-medium text-foreground">
@@ -347,17 +358,17 @@ export function DashboardSettingsForm({
                 onChange={(event) =>
                   handleNumberChange(field.key, event.target.value)
                 }
-                className="mt-3 h-10"
+                className="mt-3 h-10 w-32 rounded-xl bg-[#FBFAF6] font-mono shadow-none focus:bg-white"
               />
             </label>
           ))}
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-3">
+        <div className="lime-card divide-y divide-black/[0.07] overflow-hidden rounded-2xl">
           {toggleFields.map((field) => (
             <label
               key={field.key}
-              className="flex gap-3 rounded-xl border border-black/10 bg-white p-4"
+              className="flex items-center gap-3 px-5 py-4"
             >
               <input
                 type="checkbox"
@@ -366,7 +377,7 @@ export function DashboardSettingsForm({
                 onChange={(event) =>
                   handleToggleChange(field.key, event.target.checked)
                 }
-                className="mt-0.5 h-4 w-4 shrink-0 accent-black"
+                className="peer sr-only"
               />
               <span className="space-y-1">
                 <span className="block text-sm font-medium text-foreground">
@@ -376,20 +387,44 @@ export function DashboardSettingsForm({
                   {field.description}
                 </span>
               </span>
+              <span aria-hidden="true" className="relative ml-auto h-6 w-11 shrink-0 rounded-full bg-black/10 transition-colors after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow-sm after:transition-all peer-checked:bg-black peer-checked:after:translate-x-5 peer-checked:after:bg-[#FFED00]" />
             </label>
           ))}
+          <label className="flex items-center gap-3 px-5 py-4">
+            <input
+              type="checkbox"
+              checked={updateNoticeEnabled}
+              disabled={saving}
+              onChange={(event) => {
+                setUpdateNoticeEnabled(event.target.checked);
+                writeUpdateNoticeEnabled(event.target.checked);
+                setError(null);
+                setSuccess(null);
+              }}
+              className="peer sr-only"
+            />
+            <span className="space-y-1">
+              <span className="block text-sm font-medium text-foreground">
+                Update notice
+              </span>
+              <span className="block text-xs leading-5 text-muted-foreground">
+                Show a sidebar card when a newer LIME release is available on GitHub.
+              </span>
+            </span>
+            <span aria-hidden="true" className="relative ml-auto h-6 w-11 shrink-0 rounded-full bg-black/10 transition-colors after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow-sm after:transition-all peer-checked:bg-black peer-checked:after:translate-x-5 peer-checked:after:bg-[#FFED00]" />
+          </label>
         </div>
       </section>
 
-      <section className="space-y-3">
+      <section className="space-y-3" aria-labelledby="performance-settings-title">
         <div>
-          <h3 className="font-heading text-xl font-bold">Performance</h3>
+          <h2 id="performance-settings-title" className="lime-section-title">Performance</h2>
         </div>
         <div className="grid gap-4 lg:grid-cols-3">
           {performanceFields.map((field) => (
             <label
               key={field.key}
-              className="rounded-xl border border-black/10 bg-white p-4"
+              className="lime-card rounded-2xl p-4"
             >
               <div className="space-y-1.5">
                 <div className="text-sm font-medium text-foreground">
@@ -408,23 +443,23 @@ export function DashboardSettingsForm({
                 onChange={(event) =>
                   handleNumberChange(field.key, event.target.value)
                 }
-                className="mt-3 h-10"
+                className="mt-3 h-10 w-32 rounded-xl bg-[#FBFAF6] font-mono shadow-none focus:bg-white"
               />
             </label>
           ))}
         </div>
       </section>
 
-      <section className="space-y-3">
+      <section className="space-y-3" aria-labelledby="integration-settings-title">
         <div>
-          <h3 className="font-heading text-xl font-bold">Integrations</h3>
+          <h2 id="integration-settings-title" className="lime-section-title">Integrations</h2>
         </div>
 
         <div className="grid gap-3 lg:grid-cols-2">
           {integrationToggles.map((field) => (
             <label
               key={field.key}
-              className="flex gap-3 rounded-xl border border-black/10 bg-white p-4"
+              className="lime-card flex items-start gap-3 rounded-2xl p-4"
             >
               <input
                 type="checkbox"
@@ -433,7 +468,7 @@ export function DashboardSettingsForm({
                 onChange={(event) =>
                   handleToggleChange(field.key, event.target.checked)
                 }
-                className="mt-0.5 h-4 w-4 shrink-0 accent-black"
+                className="peer sr-only"
               />
               <span className="space-y-1">
                 <span className="block text-sm font-medium text-foreground">
@@ -443,10 +478,11 @@ export function DashboardSettingsForm({
                   {field.description}
                 </span>
               </span>
+              <span aria-hidden="true" className="relative ml-auto h-6 w-11 shrink-0 rounded-full bg-black/10 transition-colors after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow-sm after:transition-all peer-checked:bg-black peer-checked:after:translate-x-5 peer-checked:after:bg-[#FFED00]" />
             </label>
           ))}
 
-          <div className="rounded-xl border border-black/10 bg-white p-4">
+          <div className="lime-card rounded-2xl p-4">
             <div className="space-y-1.5">
               <div className="text-sm font-medium text-foreground">
                 MCP key
@@ -462,16 +498,16 @@ export function DashboardSettingsForm({
               variant="outline"
               disabled={saving || generatingKey}
               onClick={() => void handleGenerateMcpKey()}
-              className="mt-3"
+              className="mt-3 rounded-full border-black/14 bg-white hover:bg-black hover:text-[#FFED00]"
             >
               {generatingKey ? (
                 <>
-                  <Loader2Icon className="h-4 w-4 animate-spin" />
+                  <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
                   Generating...
                 </>
               ) : (
                 <>
-                  <KeyRoundIcon className="h-4 w-4" />
+                  <MaterialSymbol name="key" size={16} />
                   Generate MCP key
                 </>
               )}
@@ -480,7 +516,7 @@ export function DashboardSettingsForm({
         </div>
 
         {generatedMcpKey ? (
-          <div className="rounded-xl border border-[#0E5A4A]/20 bg-[#E7FFF6] p-4">
+          <div className="rounded-2xl border border-[#0E5A4A]/20 bg-[#E7FFF6] p-4">
             <p className="text-sm font-medium text-[#0F172A]">
               New MCP key
             </p>
@@ -492,14 +528,17 @@ export function DashboardSettingsForm({
       </section>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={saving || generatingKey}>
+        <Button type="submit" disabled={saving || generatingKey} className="rounded-full bg-black px-[22px] text-white hover:bg-[#FFED00] hover:text-black">
           {saving ? (
             <>
-              <Loader2Icon className="h-4 w-4 animate-spin" />
+              <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
               Saving…
             </>
           ) : (
-            "Save settings"
+            <>
+              <MaterialSymbol name="save" size={16} />
+              Save settings
+            </>
           )}
         </Button>
         <Button
@@ -507,6 +546,7 @@ export function DashboardSettingsForm({
           variant="outline"
           disabled={saving}
           onClick={handleReset}
+          className="rounded-full border-black/14 bg-white px-5 hover:bg-black/5"
         >
           Reset to defaults
         </Button>
@@ -517,7 +557,7 @@ export function DashboardSettingsForm({
 
       <div className="min-h-5">
         {error ? (
-          <p className="text-sm text-destructive">{error}</p>
+          <p role="alert" className="text-sm text-destructive">{error}</p>
         ) : success ? (
           <p className="text-sm text-[#0E5A4A]">{success}</p>
         ) : null}

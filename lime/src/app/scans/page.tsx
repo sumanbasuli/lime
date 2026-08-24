@@ -3,7 +3,6 @@ import { db } from "@/db";
 import { scans } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { ActiveScansRefresh } from "@/components/active-scans-refresh";
-import { ScanActions } from "@/components/scan-actions";
 import {
   StatusBadge,
   ScanScoreBadge,
@@ -21,7 +20,19 @@ function formatDate(value: string | Date | null | undefined): string {
     return "—";
   }
 
-  return new Date(value).toLocaleDateString();
+  return new Date(value).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function formatTarget(value: string): { domain: string; url: string } {
+  try {
+    const parsed = new URL(value);
+    return { domain: parsed.hostname.replace(/^www\./, ""), url: value };
+  } catch {
+    return { domain: value, url: value };
+  }
 }
 
 function formatScanCoverage(
@@ -29,14 +40,14 @@ function formatScanCoverage(
   summary: ScanScoreSummary
 ): string {
   if (summary.isPartialScan) {
-    return `${summary.completedUrlCount} completed, ${summary.failedUrlCount} failed`;
+    return `${summary.completedUrlCount} done, ${summary.failedUrlCount} failed`;
   }
 
   if (
     summary.totalUrlCount > 0 &&
     (scan.status === "completed" || scan.status === "paused" || scan.status === "failed")
   ) {
-    return `${summary.completedUrlCount}/${summary.totalUrlCount} completed`;
+    return `${summary.completedUrlCount}/${summary.totalUrlCount} pages`;
   }
 
   return `${scan.scannedUrls ?? 0}/${scan.totalUrls ?? 0} pages`;
@@ -45,12 +56,13 @@ function formatScanCoverage(
 export default async function ScansPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tag?: string }>;
+  searchParams: Promise<{ tag?: string; q?: string }>;
 }) {
   const params = await searchParams;
   const tagFilter = params.tag;
+  const queryFilter = params.q?.trim().toLowerCase() ?? "";
 
-  const [allScans, allScansForTags] = await measureServerAction(
+  const [scansForTag, allScansForTags] = await measureServerAction(
     "scans list data",
     () =>
       Promise.all([
@@ -64,6 +76,13 @@ export default async function ScansPage({
         db.select({ tag: scans.tag }).from(scans).orderBy(scans.tag),
       ])
   );
+  const allScans = queryFilter
+    ? scansForTag.filter((scan) =>
+        [scan.sitemapUrl, scan.tag, scan.status, scan.scanType].some((value) =>
+          value?.toLowerCase().includes(queryFilter)
+        )
+      )
+    : scansForTag;
   const scoreSummaries = await measureServerAction(
     "scans score summaries",
     () =>
@@ -90,34 +109,40 @@ export default async function ScansPage({
         .filter((tag): tag is string => tag !== null)
     ),
   ];
+  const scansHref = (tag?: string) => {
+    const nextParams = new URLSearchParams();
+    if (tag) nextParams.set("tag", tag);
+    if (queryFilter) nextParams.set("q", params.q?.trim() ?? "");
+    const queryString = nextParams.toString();
+    return queryString ? `/scans?${queryString}` : "/scans";
+  };
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto min-w-0 w-full max-w-[1180px] space-y-5">
       <ActiveScansRefresh enabled={hasActiveScans} />
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="font-heading text-3xl font-bold leading-[0.95] sm:text-4xl">
-          {tagFilter ? `Scans tagged "${tagFilter}"` : "All scans"}
-        </h1>
-        <Link
-          href="/scans/new"
-          className="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-        >
-          New scan
-        </Link>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="lime-page-title">
+            {queryFilter
+              ? `Results for “${params.q?.trim()}”`
+              : tagFilter
+                ? `Scans tagged “${tagFilter}”`
+                : "All scans"}
+          </h1>
+        </div>
+        <p className="text-xs text-muted-foreground sm:pb-1">
+          {allScans.length} of {scansForTag.length} {scansForTag.length === 1 ? "scan" : "scans"}
+        </p>
       </div>
 
-      {uniqueTags.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-medium text-muted-foreground">
-            Filter by tag
-          </span>
+      <div className="flex flex-wrap items-center gap-2">
           <Link
-            href="/scans"
-            className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+            href={scansHref()}
+            className={`inline-flex items-center rounded-full border px-4 py-2 text-xs font-semibold transition-colors ${
               !tagFilter
-                ? "bg-primary text-primary-foreground"
-                : "bg-background hover:bg-muted"
+                ? "border-black bg-black text-[#FFED00]"
+                : "border-black/10 bg-white hover:border-black/25"
             }`}
           >
             All
@@ -125,44 +150,38 @@ export default async function ScansPage({
           {uniqueTags.map((tag) => (
             <Link
               key={tag}
-              href={`/scans?tag=${encodeURIComponent(tag)}`}
-              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+              href={scansHref(tag)}
+              className={`inline-flex items-center rounded-full border px-4 py-2 text-xs font-semibold transition-colors ${
                 tagFilter === tag
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-background hover:bg-muted"
+                  ? "border-black bg-black text-[#FFED00]"
+                  : "border-black/10 bg-white hover:border-black/25"
               }`}
             >
               {tag}
             </Link>
           ))}
-        </div>
-      )}
+      </div>
 
-      <section className="rounded-xl border bg-card p-4">
+      <section className="lime-card min-w-0 max-w-full overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="lime-data-table w-full min-w-[960px] text-sm">
             <thead>
-              <tr className="border-b text-left text-muted-foreground">
-                <th className="pb-3 pr-4 text-[11px] font-medium">
-                  Target URL
-                </th>
-                <th className="pb-3 pr-4 text-[11px] font-medium">Type</th>
-                <th className="pb-3 pr-4 text-[11px] font-medium">Tag</th>
-                <th className="pb-3 pr-4 text-[11px] font-medium">Status</th>
-                <th className="pb-3 pr-4 text-[11px] font-medium">Score</th>
-                <th className="pb-3 pr-4 text-[11px] font-medium">Progress</th>
-                <th className="pb-3 text-[11px] font-medium">Started</th>
-                <th className="pb-3 pl-4 text-right text-[11px] font-medium">
-                  Actions
-                </th>
+              <tr className="text-left">
+                <th>Target</th>
+                <th>Type</th>
+                <th>Tag</th>
+                <th>Status</th>
+                <th>Score</th>
+                <th>Coverage</th>
+                <th>Started</th>
               </tr>
             </thead>
             <tbody>
               {allScans.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={8}
-                    className="py-12 text-center text-muted-foreground"
+                    colSpan={7}
+                    className="py-14 text-center text-muted-foreground"
                   >
                     {tagFilter ? (
                       <>
@@ -186,21 +205,23 @@ export default async function ScansPage({
               ) : (
                 allScans.map((scan) => {
                   const scoreSummary = scoreSummaries[scan.id];
+                  const target = formatTarget(scan.sitemapUrl);
 
                   return (
-                  <tr key={scan.id} className="border-b last:border-0">
-                    <td className="max-w-xs py-3 pr-4 truncate">
+                  <tr key={scan.id}>
+                    <td className="max-w-[300px]">
                       <Link
                         href={`/scans/${scan.id}`}
-                        className="hover:underline"
+                        className="block hover:text-[#1E7A4E]"
                       >
-                        {scan.sitemapUrl}
+                        <span className="block truncate text-[13px] font-semibold">{target.domain}</span>
+                        <span className="mt-0.5 block truncate font-mono text-[10px] text-black/40">{target.url}</span>
                       </Link>
                     </td>
-                    <td className="py-3 pr-4">
+                    <td>
                       <ScanTypeBadge scanType={scan.scanType ?? "sitemap"} />
                     </td>
-                    <td className="py-3 pr-4">
+                    <td>
                       {scan.tag ? (
                         <Link href={`/scans?tag=${encodeURIComponent(scan.tag)}`}>
                           <TagBadge tag={scan.tag} />
@@ -209,32 +230,23 @@ export default async function ScansPage({
                         <span className="text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="py-3 pr-4">
+                    <td>
                       <StatusBadge
                         status={scan.status ?? "pending"}
                         summary={scoreSummary}
                       />
                     </td>
-                    <td className="py-3 pr-4">
+                    <td>
                       <ScanScoreBadge
                         status={scan.status ?? "pending"}
                         summary={scoreSummary}
                       />
                     </td>
-                    <td className="py-3 pr-4">
+                    <td className="whitespace-nowrap text-xs text-black/60">
                       {formatScanCoverage(scan, scoreSummary)}
                     </td>
-                    <td className="py-3 text-muted-foreground">
+                    <td className="whitespace-nowrap text-xs text-muted-foreground">
                       {formatDate(scan.createdAt)}
-                    </td>
-                    <td className="py-3 pl-4 text-right">
-                      <ScanActions
-                        scanId={scan.id}
-                        status={scan.status ?? "pending"}
-                        pauseRequested={scan.pauseRequested ?? false}
-                        isPartialScan={scoreSummary.isPartialScan}
-                        className="items-end"
-                      />
                     </td>
                   </tr>
                 )})

@@ -2,7 +2,7 @@
 
 import { startTransition, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2Icon, RotateCcwIcon } from "lucide-react";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { Button } from "@/components/ui/button";
 import { retryFailedPages } from "@/lib/api";
 
@@ -37,14 +37,14 @@ export function PartialScanRetryBento({
   };
 
   return (
-    <section className="overflow-hidden rounded-[28px] border border-black/10 bg-[#FFED00] p-5 text-[#0A0A0A] shadow-[0_22px_48px_rgba(10,10,10,0.08)]">
+    <section className="overflow-hidden rounded-[24px] border border-black/10 bg-[#FFED00] px-6 py-[22px] text-[#0A0A0A] shadow-[0_22px_48px_rgba(10,10,10,0.08)]">
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
         <div className="space-y-3">
           <div className="inline-flex rounded-full border border-black/15 bg-white px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em]">
             Partial scan recovery
           </div>
           <div className="space-y-2">
-            <h2 className="font-heading text-[30px] font-bold leading-none">
+            <h2 className="font-heading text-[26px] font-bold leading-[1.05]">
               Retry {failedUrlCount} failed{" "}
               {failedUrlCount === 1 ? "page" : "pages"} in this scan
             </h2>
@@ -65,9 +65,9 @@ export function PartialScanRetryBento({
             className="min-w-[220px] rounded-full bg-[#0A0A0A] text-[#FFED00] hover:bg-[#202020]"
           >
             {isRetrying ? (
-              <Loader2Icon className="animate-spin" />
+              <MaterialSymbol name="progress_activity" size={17} className="animate-spin" />
             ) : (
-              <RotateCcwIcon />
+              <MaterialSymbol name="replay" size={17} />
             )}
             Retry failed pages
           </Button>

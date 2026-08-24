@@ -1,12 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  ChevronDownIcon,
-  FileDownIcon,
-  FileTextIcon,
-  Loader2Icon,
-} from "lucide-react";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -20,6 +15,7 @@ interface IssueReportDownloadButtonProps {
   scanId: string;
   settings: ReportSettings;
   className?: string;
+  variant?: "suite" | "menu";
 }
 
 function getFilenameFromDisposition(header: string | null): string | null {
@@ -126,6 +122,7 @@ export function IssueReportDownloadButton({
   scanId,
   settings,
   className,
+  variant = "suite",
 }: IssueReportDownloadButtonProps) {
   const reportDownloads = buildReportDownloads(settings);
   const [downloadingFormat, setDownloadingFormat] =
@@ -207,6 +204,62 @@ export function IssueReportDownloadButton({
     );
   }
 
+  if (variant === "menu") {
+    const menuDownloads = ([
+      "llm",
+      "pdf",
+      "csv-small",
+      "csv-full",
+    ] as const).filter((key) => reportDownloads[key]);
+
+    return (
+      <div className={className}>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            disabled={isDownloading}
+            render={
+              <Button
+                type="button"
+                size="default"
+                className="rounded-full bg-black px-[15px] text-[12.5px] text-white hover:bg-[#FFED00] hover:text-black disabled:cursor-wait disabled:opacity-100"
+              />
+            }
+          >
+            {isDownloading ? (
+              <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
+            ) : (
+              <MaterialSymbol name="download" size={16} />
+            )}
+            {isDownloading
+              ? reportDownloads[downloadingFormat]?.loadingLabel
+              : "Download report"}
+            <MaterialSymbol name="expand_more" size={16} />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-72 rounded-xl p-1.5">
+            {menuDownloads.map((key) => (
+              <DropdownMenuItem
+                key={key}
+                disabled={isDownloading}
+                onClick={() => void handleDownload(key)}
+                className="rounded-lg"
+              >
+                <div className="flex flex-col items-start gap-0.5">
+                  <span className="font-medium">{reportDownloads[key]?.label}</span>
+                  {reportDownloads[key]?.description ? (
+                    <span className="text-xs text-muted-foreground">
+                      {reportDownloads[key]?.description}
+                    </span>
+                  ) : null}
+                </div>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {error ? <p role="alert" className="mt-1 text-right text-xs text-destructive">{error}</p> : null}
+      </div>
+    );
+  }
+
   return (
     <div className={className}>
       <div className="flex flex-wrap justify-start gap-2 sm:justify-end">
@@ -214,19 +267,19 @@ export function IssueReportDownloadButton({
           <Button
             type="button"
             variant="outline"
-            size="lg"
+            size="default"
             disabled={isDownloading}
             onClick={() => void handleDownload("llm")}
-            className="rounded-full border-black/10 bg-white text-[#0A0A0A] hover:bg-black hover:text-[#FFED00] disabled:cursor-wait disabled:opacity-100"
+            className="rounded-full border-black/10 bg-white px-[15px] text-[12.5px] text-[#0A0A0A] hover:bg-black hover:text-[#FFED00] disabled:cursor-wait disabled:opacity-100"
           >
             {isDownloadingLlm ? (
               <>
-                <Loader2Icon className="h-4 w-4 animate-spin" />
+                <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
                 {reportDownloads.llm.loadingLabel}
               </>
             ) : (
               <>
-                <FileTextIcon className="h-4 w-4" />
+                <MaterialSymbol name="description" size={16} />
                 {reportDownloads.llm.label}
               </>
             )}
@@ -236,19 +289,19 @@ export function IssueReportDownloadButton({
           <Button
             type="button"
             variant="outline"
-            size="lg"
+            size="default"
             disabled={isDownloading}
             onClick={() => void handleDownload("pdf")}
-            className="rounded-full border-black/10 bg-white text-[#0A0A0A] hover:bg-black hover:text-[#FFED00] disabled:cursor-wait disabled:opacity-100"
+            className="rounded-full border-black/10 bg-white px-[15px] text-[12.5px] text-[#0A0A0A] hover:bg-black hover:text-[#FFED00] disabled:cursor-wait disabled:opacity-100"
           >
             {downloadingFormat === "pdf" ? (
               <>
-                <Loader2Icon className="h-4 w-4 animate-spin" />
+                <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
                 {reportDownloads.pdf.loadingLabel}
               </>
             ) : (
               <>
-                <FileDownIcon className="h-4 w-4" />
+                <MaterialSymbol name="file_save" size={16} />
                 {reportDownloads.pdf.label}
               </>
             )}
@@ -262,21 +315,21 @@ export function IssueReportDownloadButton({
                 <Button
                   type="button"
                   variant="outline"
-                  size="lg"
-                  className="rounded-full border-black/10 bg-white text-[#0A0A0A] hover:bg-black hover:text-[#FFED00] disabled:cursor-wait disabled:opacity-100"
+                  size="default"
+                  className="rounded-full border-black/10 bg-white px-[15px] text-[12.5px] text-[#0A0A0A] hover:bg-black hover:text-[#FFED00] disabled:cursor-wait disabled:opacity-100"
                 />
               }
             >
               {isDownloadingCsv ? (
                 <>
-                  <Loader2Icon className="h-4 w-4 animate-spin" />
+                  <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
                   {csvLoadingLabel}
                 </>
               ) : (
                 <>
-                  <FileTextIcon className="h-4 w-4" />
+                  <MaterialSymbol name="table" size={16} />
                   Download CSV report
-                  <ChevronDownIcon className="h-4 w-4" />
+                  <MaterialSymbol name="expand_more" size={16} />
                 </>
               )}
             </DropdownMenuTrigger>

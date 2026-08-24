@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { DownloadIcon, Loader2Icon, XIcon } from "lucide-react";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -181,19 +181,19 @@ export function IssueCardReportDownloadButton({
               type="button"
               variant="outline"
               size="icon-sm"
-              className="rounded-full"
+              className="size-8 rounded-full border-black/15 bg-white text-black/65 hover:bg-black hover:text-[#FFED00]"
               disabled={isGeneratingPdf}
               aria-label={`Download reports for ${issueTitle}`}
             />
           }
         >
           {isGeneratingPdf ? (
-            <Loader2Icon className="h-4 w-4 animate-spin" />
+            <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
           ) : (
-            <DownloadIcon className="h-4 w-4" />
+            <MaterialSymbol name="download" size={16} />
           )}
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-72">
+        <DropdownMenuContent align="end" className="w-72 rounded-[14px]">
           {menuItems.map((item) => (
             <DropdownMenuItem
               key={item.label}
@@ -226,9 +226,9 @@ export function IssueCardReportDownloadButton({
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#FFED00] text-black">
                 {isGeneratingPdf ? (
-                  <Loader2Icon className="h-5 w-5 animate-spin" />
+                  <MaterialSymbol name="progress_activity" size={20} className="animate-spin" />
                 ) : (
-                  <DownloadIcon className="h-5 w-5" />
+                  <MaterialSymbol name="download" size={20} />
                 )}
               </div>
 
@@ -253,11 +253,11 @@ export function IssueCardReportDownloadButton({
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  className="shrink-0 rounded-full"
+                  className="size-8 shrink-0 rounded-full hover:bg-black/8"
                   onClick={() => setPdfError(null)}
                   aria-label="Dismiss PDF export status"
                 >
-                  <XIcon className="h-4 w-4" />
+                  <MaterialSymbol name="close" size={16} />
                 </Button>
               ) : null}
             </div>

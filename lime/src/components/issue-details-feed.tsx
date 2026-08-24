@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronRightIcon, ExternalLinkIcon, Loader2Icon } from "lucide-react";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { Badge } from "@/components/ui/badge";
 import {
   Collapsible,
@@ -287,7 +287,7 @@ function ACTRuleCard({
   );
 
   return (
-    <article className="rounded-lg border border-black/20 bg-[#FFED00] p-3 text-[#111111]">
+    <article className="rounded-[14px] border border-black/20 bg-[#FFED00] px-4 py-3.5 text-[#111111]">
       <div className="flex flex-wrap items-center gap-2">
         <Badge
           variant="outline"
@@ -308,7 +308,7 @@ function ACTRuleCard({
           className="inline-flex items-center gap-1 font-heading text-[15px] font-bold leading-tight text-[#111111] hover:underline"
         >
           {actRule.title}
-          <ExternalLinkIcon className="h-3 w-3" />
+          <MaterialSymbol name="open_in_new" size={13} />
         </a>
       </div>
 
@@ -365,7 +365,7 @@ function BaseRuleGuidanceCard({
   accessibilityRequirements: AccessibilityReference[];
 }) {
   return (
-    <article className="rounded-lg border border-black/20 bg-[#FFED00] p-3 text-[#111111]">
+    <article className="rounded-[14px] border border-black/20 bg-[#FFED00] px-4 py-3.5 text-[#111111]">
       <div className="flex flex-wrap items-center gap-2">
         <Badge
           variant="secondary"
@@ -381,7 +381,7 @@ function BaseRuleGuidanceCard({
             className="inline-flex items-center gap-1 font-heading text-[15px] font-bold leading-tight text-[#111111] hover:underline"
           >
             {description}
-            <ExternalLinkIcon className="h-3 w-3" />
+            <MaterialSymbol name="open_in_new" size={13} />
           </a>
         ) : (
           <h3 className="font-heading text-[15px] font-bold leading-tight text-[#111111]">
@@ -451,7 +451,7 @@ function AlternativeRuleBinder() {
     <div className="flex shrink-0 items-center justify-center px-1 lg:px-0">
       <div className="flex w-full items-center gap-3 lg:h-full lg:w-16 lg:flex-col lg:justify-center">
         <div className="h-px flex-1 bg-black/20 lg:h-10 lg:w-px lg:flex-none" />
-        <div className="flex h-14 w-14 items-center justify-center rounded-full border border-black/15 bg-white/85 text-[#111111] shadow-[0_12px_28px_rgba(17,17,17,0.12)] ring-4 ring-white/35 backdrop-blur-sm">
+        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-black/15 bg-white/85 text-[#111111] shadow-[0_12px_28px_rgba(17,17,17,0.12)] ring-4 ring-white/35 backdrop-blur-sm">
           <span className="font-heading text-sm font-bold leading-none">OR</span>
         </div>
         <div className="h-px flex-1 bg-black/20 lg:h-10 lg:w-px lg:flex-none" />
@@ -476,7 +476,7 @@ function IssueOccurrenceList({
         const pageCapture = occurrencePageCapture(occ);
 
         return (
-          <div key={occ.id} className="rounded-xl border bg-muted/30 p-3">
+          <div key={occ.id} className="rounded-[14px] border bg-[#FBFAF6] px-4 py-3.5">
             <p className="text-[11px] font-medium text-muted-foreground">URL</p>
             <a
               href={occ.pageUrl}
@@ -664,6 +664,11 @@ function IssueCard({
 
   const ruleLabel =
     summary.kind === "failed" ? summary.violationType : summary.ruleId;
+  const ruleDescription = detail
+    ? detail.kind === "failed"
+      ? detail.axeRuleDescription
+      : detail.ruleDescription
+    : summary.description ?? null;
   const exportActionsEnabled =
     reportSettings.pdfReportsEnabled ||
     reportSettings.csvReportsEnabled ||
@@ -685,24 +690,26 @@ function IssueCard({
         data-false-positive={
           summary.kind === "failed" && summary.isFalsePositive ? "true" : "false"
         }
-        className="overflow-hidden rounded-xl border bg-card"
+        className="overflow-hidden rounded-[20px] border border-black/12 bg-white shadow-[0_1px_2px_rgba(10,10,10,0.025)]"
       >
         <div className="relative">
           <CollapsibleTrigger
             aria-label={`Toggle details for ${summary.title}`}
-            className="issue-card-trigger peer absolute inset-0 rounded-xl transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="issue-card-trigger peer absolute inset-0 rounded-[20px] transition-colors hover:bg-black/[0.018] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           />
 
           <div
             className={cn(
-              "issue-card-header pointer-events-none relative z-10 flex items-start gap-3 p-4",
+              "issue-card-header pointer-events-none relative z-10 flex items-start gap-3 px-5 py-4",
               headerPaddingClass
             )}
           >
             <div className="issue-expander mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground transition-all duration-200">
-              <ChevronRightIcon
+              <MaterialSymbol
+                name="chevron_right"
+                size={18}
                 className={cn(
-                  "h-4 w-4 transition-transform duration-200",
+                  "transition-transform duration-200",
                   open && "rotate-90"
                 )}
               />
@@ -733,44 +740,31 @@ function IssueCard({
                   </>
                 )}
 
-                <span className="text-[11px] font-medium text-muted-foreground">
+                {summary.helpUrl ? (
+                  <a
+                    href={summary.helpUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="pointer-events-auto inline-flex max-w-full items-start gap-1 text-sm font-semibold leading-tight text-foreground hover:underline"
+                  >
+                    <span className="issue-card-heading truncate sm:whitespace-normal">{summary.title}</span>
+                    <MaterialSymbol name="open_in_new" size={13} className="mt-0.5 text-black/40" />
+                  </a>
+                ) : (
+                  <h2 className="issue-card-heading text-sm font-semibold leading-tight text-foreground">{summary.title}</h2>
+                )}
+              </div>
+
+              <div className="mt-1.5 flex flex-wrap items-center gap-3 font-mono text-[11px] text-muted-foreground">
+                <span>{ruleLabel}</span>
+                <span className="font-sans">
                   {formatOccurrenceLabel(detail?.occurrenceCount ?? summary.occurrenceCount)}
                 </span>
               </div>
 
-              {summary.helpUrl ? (
-                <a
-                  href={summary.helpUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="pointer-events-auto mt-2 inline-flex max-w-full items-start gap-1 font-heading text-[15px] font-bold leading-tight text-foreground hover:underline"
-                >
-                  <span className="issue-card-heading truncate sm:whitespace-normal">
-                    {summary.title}
-                  </span>
-                  <ExternalLinkIcon className="mt-0.5 h-3 w-3 shrink-0" />
-                </a>
-              ) : (
-                <h2 className="issue-card-heading mt-2 font-heading text-[15px] font-bold leading-tight text-foreground">
-                  {summary.title}
-                </h2>
-              )}
-
-              {detail &&
-                ((detail.kind === "failed" &&
-                  shouldShowRuleDescription(
-                    detail.title,
-                    detail.axeRuleDescription
-                  )) ||
-                  (detail.kind === "needs_review" &&
-                    shouldShowRuleDescription(
-                      detail.title,
-                      detail.ruleDescription
-                    ))) && (
+              {shouldShowRuleDescription(summary.title, ruleDescription) && (
                   <p className="mt-1 max-w-3xl text-sm leading-5 text-muted-foreground">
-                    {detail.kind === "failed"
-                      ? detail.axeRuleDescription
-                      : detail.ruleDescription}
+                    {ruleDescription}
                   </p>
                 )}
             </div>
@@ -807,9 +801,9 @@ function IssueCard({
               </div>
             </div>
           ) : detail ? (
-            <div className="space-y-4 border-t px-4 pb-4 pt-3">
+            <div className="space-y-4 border-t border-black/[0.07] px-5 pb-5 pt-4">
               {buildSuggestedChangesSummary(detail.suggestedFixes) && (
-                <section className="rounded-lg border border-[#0E5A4A]/20 bg-[#E7FFF6] p-4 text-[#0F172A]">
+                <section className="rounded-[14px] border border-[#0E5A4A]/20 bg-[#E7FFF6] p-4 text-[#0F172A]">
                   <h3 className="font-heading text-base font-bold text-[#0F172A]">
                     Suggested changes
                   </h3>
@@ -839,7 +833,7 @@ function IssueCard({
                       </div>
                     </div>
                   ) : (
-                    <div className="grid gap-3 lg:grid-cols-2">
+                    <div className={cn("grid gap-3", detail.actRules.length > 1 && "lg:grid-cols-2")}>
                       {detail.actRules.map((actRule) => (
                         <ACTRuleCard
                           key={actRule.actRuleId}
@@ -869,9 +863,10 @@ function IssueCard({
                     variant="outline"
                     disabled={loadingMoreOccurrences}
                     onClick={handleLoadMoreOccurrences}
+                    className="rounded-full border-black/14 bg-white px-[18px] hover:bg-black hover:text-[#FFED00]"
                   >
                     {loadingMoreOccurrences ? (
-                      <Loader2Icon className="animate-spin" />
+                      <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
                     ) : null}
                     Load more occurrences
                   </Button>
@@ -1005,8 +1000,9 @@ export function IssueDetailsFeed({
             variant="outline"
             disabled={isLoadingMore}
             onClick={() => void loadMore()}
+            className="rounded-full border-black/14 bg-white px-[18px] hover:bg-black hover:text-[#FFED00]"
           >
-            {isLoadingMore ? <Loader2Icon className="animate-spin" /> : null}
+            {isLoadingMore ? <MaterialSymbol name="progress_activity" size={16} className="animate-spin" /> : null}
             Load more issues
           </Button>
         </div>

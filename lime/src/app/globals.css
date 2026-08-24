@@ -2,7 +2,9 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource/fraunces/400.css";
+@import "@fontsource/fraunces/600.css";
 @import "@fontsource/fraunces/700.css";
+@import "@fontsource/material-symbols-outlined/400.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -52,38 +54,38 @@
 
 :root {
   --font-fraunces: "Fraunces";
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --background: #f4f3ee;
+  --foreground: #0a0a0a;
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: #0a0a0a;
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --primary: #0a0a0a;
+  --primary-foreground: #ffffff;
+  --secondary: #efeee9;
+  --secondary-foreground: #0a0a0a;
+  --muted: #efeee9;
+  --muted-foreground: rgb(10 10 10 / 0.58);
+  --accent: #efeee9;
+  --accent-foreground: #0a0a0a;
+  --destructive: #8f2d31;
+  --border: rgb(10 10 10 / 0.1);
+  --input: rgb(10 10 10 / 0.14);
+  --ring: #0a0a0a;
   --chart-1: oklch(0.809 0.105 251.813);
   --chart-2: oklch(0.623 0.214 259.815);
   --chart-3: oklch(0.546 0.245 262.881);
   --chart-4: oklch(0.488 0.243 264.376);
   --chart-5: oklch(0.424 0.199 265.638);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --radius: 0.75rem;
+  --sidebar: #fbfaf6;
+  --sidebar-foreground: #0a0a0a;
+  --sidebar-primary: #0a0a0a;
+  --sidebar-primary-foreground: #ffed00;
+  --sidebar-accent: rgb(10 10 10 / 0.055);
+  --sidebar-accent-foreground: #0a0a0a;
+  --sidebar-border: rgb(10 10 10 / 0.08);
+  --sidebar-ring: #0a0a0a;
 }
 
 .dark {
@@ -127,6 +129,8 @@
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
   }
   h1,
   h2,
@@ -135,11 +139,93 @@
   h5,
   h6 {
     font-family: var(--font-fraunces), ui-serif, Georgia, serif;
-    font-weight: 700;
+    font-weight: 600;
+  }
+
+  ::selection {
+    background: #ffed00;
+    color: #0a0a0a;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    border: 3px solid #f4f3ee;
+    border-radius: 999px;
+    background: rgb(10 10 10 / 0.16);
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
   }
 }
 
 @layer components {
+  .material-symbol {
+    display: inline-block;
+    flex: none;
+    overflow: hidden;
+    width: 1em;
+    font-family: "Material Symbols Outlined";
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: normal;
+    text-align: center;
+    text-transform: none;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    font-feature-settings: "liga";
+    -webkit-font-feature-settings: "liga";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .lime-page-title {
+    @apply font-heading text-[2.375rem] font-semibold leading-none tracking-[-0.015em];
+  }
+
+  .lime-section-title {
+    @apply font-heading text-2xl font-semibold leading-none;
+  }
+
+  .lime-eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.11em] text-muted-foreground;
+  }
+
+  .lime-card {
+    @apply rounded-2xl border border-black/10 bg-white shadow-[0_1px_2px_rgba(10,10,10,0.035)];
+  }
+
+  .lime-pill-button {
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-full border border-transparent bg-black px-[18px] text-[13px] font-semibold text-white transition-colors hover:bg-[#FFED00] hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-black focus-visible:ring-offset-2 focus-visible:ring-offset-[#F4F3EE];
+  }
+
+  .lime-data-table thead {
+    @apply bg-[#fbfaf6];
+  }
+
+  .lime-data-table th {
+    @apply px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.09em] text-black/45;
+  }
+
+  .lime-data-table td {
+    @apply px-4 py-3.5;
+  }
+
+  .lime-data-table tbody tr {
+    @apply border-b border-black/[0.065] transition-colors last:border-0 hover:bg-black/[0.018];
+  }
+
+  @media (max-width: 640px) {
+    .lime-page-title {
+      @apply text-[2rem];
+    }
+  }
+
   .code-snippet {
     background:
       linear-gradient(180deg, rgb(13 16 22 / 1) 0%, rgb(20 25 34 / 1) 100%);

@@ -19,7 +19,7 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar"
-import { ChevronRightIcon } from "lucide-react"
+import { MaterialSymbol } from "@/components/material-symbol"
 
 export function NavMain({
   items,
@@ -46,13 +46,17 @@ export function NavMain({
     return pathname === url || pathname.startsWith(`${url}/`)
   }
 
+  const activeUrl = items
+    .filter((item) => isCurrentPath(item.url))
+    .sort((first, second) => second.url.length - first.url.length)[0]?.url
+
   return (
     <SidebarGroup>
       <SidebarGroupLabel className="sr-only">Navigation</SidebarGroupLabel>
       <SidebarMenu>
         {items.map((item) => {
           const isItemActive =
-            isCurrentPath(item.url) ||
+            item.url === activeUrl ||
             item.items?.some((subItem) => isCurrentPath(subItem.url)) ||
             false
           const hasSubItems = Boolean(item.items?.length)
@@ -63,7 +67,13 @@ export function NavMain({
                 <SidebarMenuButton
                   tooltip={item.title}
                   isActive={isItemActive}
-                  render={<Link href={item.url} />}
+                  className="h-10 rounded-xl px-3 text-[13px] font-medium data-active:bg-black data-active:text-[#FFED00] data-active:hover:bg-black data-active:hover:text-[#FFED00] group-data-[collapsible=icon]:justify-center"
+                  render={
+                    <Link
+                      href={item.url}
+                      aria-current={isItemActive ? "page" : undefined}
+                    />
+                  }
                 >
                   {item.icon}
                   <span>{item.title}</span>
@@ -109,8 +119,7 @@ export function NavMain({
                       <SidebarMenuAction className="aria-expanded:rotate-90" />
                     }
                   >
-                    <ChevronRightIcon
-                    />
+                    <MaterialSymbol name="chevron_right" size={18} />
                     <span className="sr-only">Toggle</span>
                   </CollapsibleTrigger>
                   <CollapsibleContent>

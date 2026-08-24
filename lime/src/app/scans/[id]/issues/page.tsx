@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { count, eq } from "drizzle-orm";
-import { ChevronRightIcon } from "lucide-react";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { db } from "@/db";
 import { scans, urls } from "@/db/schema";
 import { IssueDetailsFeed } from "@/components/issue-details-feed";
@@ -17,6 +17,14 @@ export const dynamic = "force-dynamic";
 
 interface IssuesPageProps {
   params: Promise<{ id: string }>;
+}
+
+function formatDomain(value: string): string {
+  try {
+    return new URL(value).hostname.replace(/^www\./, "");
+  } catch {
+    return value;
+  }
 }
 
 export default async function IssuesPage({ params }: IssuesPageProps) {
@@ -48,9 +56,7 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
     );
 
   const {
-    activeIssueCount,
     excludedIssueCount,
-    needsReviewCount,
     totalIssueCardCount,
   } = initialIssuePage.counts;
   const coverage = urlCoverageRows.reduce(
@@ -85,41 +91,30 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
     !hasFullCoverage;
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto w-full max-w-[1180px] space-y-5">
       <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
         <Link href="/scans" className="transition-colors hover:text-foreground">
           Scans
         </Link>
-        <ChevronRightIcon className="h-3.5 w-3.5" />
+        <MaterialSymbol name="chevron_right" size={15} />
         <Link
           href={`/scans/${id}`}
           className="truncate transition-colors hover:text-foreground"
         >
-          {scan.sitemapUrl}
+          {formatDomain(scan.sitemapUrl)}
         </Link>
-        <ChevronRightIcon className="h-3.5 w-3.5" />
+        <MaterialSymbol name="chevron_right" size={15} />
         <span>Issues</span>
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-2">
-          <h1 className="font-heading text-3xl font-bold leading-[0.95] sm:text-4xl">
-            Issue details{" "}
-            <span className="font-sans text-sm font-medium text-muted-foreground">
-              ({totalIssueCardCount})
-            </span>
-          </h1>
+          <h1 className="font-heading text-[34px] font-semibold leading-[1.05] tracking-[-0.01em]">Issue details</h1>
           <p className="max-w-3xl text-sm leading-5 text-muted-foreground">
-            {activeIssueCount} failed {activeIssueCount === 1 ? "check" : "checks"}
-            {needsReviewCount > 0 &&
-              `, ${needsReviewCount} ${
-                needsReviewCount === 1 ? "check needs" : "checks need"
-              } review`}
-            {excludedIssueCount > 0 &&
-              `, ${excludedIssueCount} excluded from the score`}
-            {isPartialScan &&
-              `, based on ${coverage.completedUrlCount} of ${coverage.totalUrlCount} completed pages`}
-            . Passed and not applicable checks remain on the scan details page.
+            Showing {initialIssuePage.items.length} of {totalIssueCardCount} issue groups · grouped by rule,
+            ordered by severity
+            {excludedIssueCount > 0 ? ` · ${excludedIssueCount} excluded` : ""}
+            {isPartialScan ? ` · ${coverage.completedUrlCount} of ${coverage.totalUrlCount} pages completed` : ""}
           </p>
         </div>
 
@@ -127,7 +122,7 @@ export default async function IssuesPage({ params }: IssuesPageProps) {
       </div>
 
       {totalIssueCardCount === 0 ? (
-        <section className="rounded-xl border bg-card p-12 text-center text-muted-foreground">
+        <section className="lime-card p-12 text-center text-muted-foreground">
           No failed or review-required checks found for this scan.
         </section>
       ) : (

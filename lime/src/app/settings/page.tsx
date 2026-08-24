@@ -7,22 +7,16 @@ export default async function SettingsPage() {
   const settings = await getSystemSettings();
 
   return (
-    <div className="space-y-4">
-      <h1 className="font-heading text-3xl font-bold leading-[0.95] sm:text-4xl">
-        Settings
-      </h1>
+    <div className="mx-auto w-full max-w-[760px] space-y-5">
+      <div>
+        <h1 className="lime-page-title">Settings</h1>
+        <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">
+          Server-wide defaults for reports, caching, and integrations. Changes
+          apply to new requests immediately.
+        </p>
+      </div>
 
-      <section className="rounded-xl border bg-card p-4">
-        <div className="mb-4 space-y-1">
-          <h2 className="font-heading text-2xl font-bold">
-            Report And Export Settings
-          </h2>
-          <p className="max-w-3xl text-sm leading-5 text-muted-foreground">
-            Global report and export settings for this Lime server. Adjust the
-            PDF, CSV, and LLM generation limits here and turn individual export
-            formats on or off.
-          </p>
-        </div>
+      <section>
         <DashboardSettingsForm initialSettings={settings} />
       </section>
     </div>

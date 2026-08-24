@@ -1,7 +1,12 @@
 "use client";
 
 import * as React from "react";
-import { ArrowUpCircleIcon, XIcon } from "lucide-react";
+import { MaterialSymbol } from "@/components/material-symbol";
+import {
+  readUpdateNoticeEnabled,
+  UPDATE_NOTICE_ENABLED_STORAGE_KEY,
+  UPDATE_NOTICE_PREFERENCE_EVENT,
+} from "@/lib/update-notice-preference";
 
 type UpdateInfo = {
   enabled: boolean;
@@ -16,6 +21,31 @@ const DISMISS_STORAGE_KEY = "lime.updateNotice.dismissed";
 export function UpdateNotice() {
   const [info, setInfo] = React.useState<UpdateInfo | null>(null);
   const [dismissedFor, setDismissedFor] = React.useState<string | null>(null);
+  const [enabled, setEnabled] = React.useState(true);
+
+  React.useEffect(() => {
+    setEnabled(readUpdateNoticeEnabled());
+
+    const handlePreference = (event: Event) => {
+      if (event instanceof CustomEvent && typeof event.detail === "boolean") {
+        setEnabled(event.detail);
+        return;
+      }
+      setEnabled(readUpdateNoticeEnabled());
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === UPDATE_NOTICE_ENABLED_STORAGE_KEY) {
+        setEnabled(readUpdateNoticeEnabled());
+      }
+    };
+
+    window.addEventListener(UPDATE_NOTICE_PREFERENCE_EVENT, handlePreference);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener(UPDATE_NOTICE_PREFERENCE_EVENT, handlePreference);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
 
   React.useEffect(() => {
     setDismissedFor(
@@ -43,7 +73,7 @@ export function UpdateNotice() {
     return () => controller.abort();
   }, []);
 
-  if (!info?.enabled || !info.outdated || !info.latest) return null;
+  if (!enabled || !info?.enabled || !info.outdated || !info.latest) return null;
   if (dismissedFor === info.latest) return null;
 
   const dismiss = () => {
@@ -53,34 +83,32 @@ export function UpdateNotice() {
   };
 
   return (
-    <div className="mx-2 mb-2 rounded-md border border-amber-300/60 bg-amber-50 p-2 text-xs text-amber-900 shadow-sm dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100">
-      <div className="flex items-start gap-2">
-        <ArrowUpCircleIcon className="mt-0.5 h-4 w-4 shrink-0" />
-        <div className="min-w-0 flex-1">
-          <div className="font-medium leading-tight">Update available</div>
-          <div className="truncate opacity-80">
-            {info.current ?? "current"} → {info.latest}
+    <div className="relative mx-3 mb-3 rounded-2xl border border-black bg-[#FFED00] px-3.5 py-3 text-xs text-black group-data-[collapsible=icon]:hidden">
+      <div className="min-w-0 pr-5">
+          <div className="text-[11px] font-bold uppercase leading-tight tracking-[0.08em]">Update available</div>
+          <div className="mt-1.5 text-[13px] leading-[1.4] text-black/80">
+            LIME {info.latest} is available. You are running {info.current ?? "the current version"}.
           </div>
           {info.url ? (
             <a
               href={info.url}
               target="_blank"
               rel="noreferrer"
-              className="mt-1 inline-block font-medium underline underline-offset-2"
+            className="mt-2.5 inline-flex items-center gap-1 border-b-[1.5px] border-black pb-px text-[12.5px] font-semibold"
             >
-              Release notes
+              View release
+              <MaterialSymbol name="arrow_forward" size={14} />
             </a>
           ) : null}
-        </div>
+      </div>
         <button
           type="button"
           aria-label="Dismiss update notice"
-          className="rounded p-0.5 opacity-60 transition hover:bg-amber-100 hover:opacity-100 dark:hover:bg-amber-900/40"
+          className="absolute top-2.5 right-2.5 flex size-6 items-center justify-center rounded-lg opacity-50 transition hover:bg-black/10 hover:opacity-100"
           onClick={dismiss}
         >
-          <XIcon className="h-3.5 w-3.5" />
+          <MaterialSymbol name="close" size={15} />
         </button>
-      </div>
     </div>
   );
 }

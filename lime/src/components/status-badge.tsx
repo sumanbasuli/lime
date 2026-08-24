@@ -7,7 +7,7 @@ import type {
   ScanScoreSummary,
 } from "@/lib/scan-scoring";
 import { getAccessibilityScoreBand, getDisplayScanStatus } from "@/lib/scan-scoring";
-import { GlobeIcon, FileTextIcon, TagIcon } from "lucide-react";
+import { MaterialSymbol } from "@/components/material-symbol";
 
 const statusConfig: Record<
   string,
@@ -17,13 +17,13 @@ const statusConfig: Record<
     className?: string;
   }
 > = {
-  pending: { label: "Pending", variant: "secondary" },
-  profiling: { label: "Profiling", variant: "outline" },
-  scanning: { label: "Scanning", variant: "outline" },
-  processing: { label: "Processing", variant: "outline" },
-  paused: { label: "Paused", variant: "secondary" },
-  completed: { label: "Completed", variant: "default" },
-  failed: { label: "Failed", variant: "destructive" },
+  pending: { label: "Pending", variant: "secondary", className: "text-black/60" },
+  profiling: { label: "Profiling", variant: "outline", className: "border-black/25 bg-white" },
+  scanning: { label: "Scanning", variant: "outline", className: "border-black/25 bg-white" },
+  processing: { label: "Processing", variant: "outline", className: "border-black/25 bg-white" },
+  paused: { label: "Paused", variant: "secondary", className: "text-black/60" },
+  completed: { label: "Completed", variant: "default", className: "bg-black text-white" },
+  failed: { label: "Failed", variant: "outline", className: "border-[#8F2D31] bg-white text-[#8F2D31]" },
   partial: {
     label: "Partial scan",
     variant: "outline",
@@ -33,12 +33,12 @@ const statusConfig: Record<
 
 const severityConfig: Record<
   string,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
+  { label: string; className: string }
 > = {
-  critical: { label: "Critical", variant: "destructive" },
-  serious: { label: "Serious", variant: "destructive" },
-  moderate: { label: "Moderate", variant: "outline" },
-  minor: { label: "Minor", variant: "secondary" },
+  critical: { label: "Critical", className: "border-[#9E3035] bg-[#9E3035] text-white" },
+  serious: { label: "Serious", className: "border-black bg-black text-white" },
+  moderate: { label: "Moderate", className: "border-black bg-[#FFED00] text-black" },
+  minor: { label: "Minor", className: "border-black/18 bg-white text-black" },
 };
 
 export function StatusBadge({
@@ -55,11 +55,35 @@ export function StatusBadge({
     label: status,
     variant: "secondary" as const,
   };
+  const isActive = ["pending", "profiling", "scanning", "processing"].includes(
+    displayStatus
+  );
+  const dotClassName =
+    displayStatus === "failed"
+      ? "bg-[#8F2D31]"
+      : displayStatus === "paused"
+        ? "bg-black/35"
+        : displayStatus === "partial"
+          ? "bg-black"
+          : "bg-[#FFED00]";
+
   return (
     <Badge
       variant={config.variant}
-      className={cn(config.className, className)}
+      className={cn(
+        "gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold",
+        config.className,
+        className
+      )}
     >
+      <span
+        aria-hidden="true"
+        className={cn(
+          "h-1.5 w-1.5 rounded-full",
+          dotClassName,
+          isActive && "animate-pulse border border-black/30"
+        )}
+      />
       {config.label}
     </Badge>
   );
@@ -68,32 +92,38 @@ export function StatusBadge({
 export function SeverityBadge({ severity }: { severity: string }) {
   const config = severityConfig[severity] || {
     label: severity,
-    variant: "secondary" as const,
+    className: "border-black/15 bg-white text-black",
   };
-  return <Badge variant={config.variant}>{config.label}</Badge>;
+  return (
+    <Badge
+      variant="outline"
+      className={cn("rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em]", config.className)}
+    >
+      {config.label}
+    </Badge>
+  );
 }
 
 export function ScanTypeBadge({ scanType }: { scanType: string }) {
   if (scanType === "single") {
     return (
-      <Badge variant="outline" className="gap-1 text-xs font-normal">
-        <FileTextIcon className="h-3 w-3" />
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-black/60">
+        <MaterialSymbol name="description" size={15} />
         Page
-      </Badge>
+      </span>
     );
   }
   return (
-    <Badge variant="outline" className="gap-1 text-xs font-normal">
-      <GlobeIcon className="h-3 w-3" />
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-black/60">
+      <MaterialSymbol name="language" size={15} />
       Sitemap
-    </Badge>
+    </span>
   );
 }
 
 export function TagBadge({ tag }: { tag: string }) {
   return (
-    <Badge variant="secondary" className="gap-1 text-xs font-normal">
-      <TagIcon className="h-3 w-3" />
+    <Badge variant="secondary" className="rounded-full px-3 text-[11px] font-semibold text-black/65">
       {tag}
     </Badge>
   );
@@ -110,19 +140,6 @@ function scanScoreToneClass(score: number): string {
   }
 
   return "border-[#8F2D31] bg-white text-[#8F2D31]";
-}
-
-function scanScoreDotClass(score: number): string {
-  const band = getAccessibilityScoreBand(score);
-
-  if (band.tone === "green") {
-    return "bg-[#1E7A4E]";
-  }
-  if (band.tone === "yellow") {
-    return "bg-[#0A0A0A]";
-  }
-
-  return "bg-[#8F2D31]";
 }
 
 export function ScanScoreBadge({
@@ -144,9 +161,6 @@ export function ScanScoreBadge({
             className
           )}
       >
-        <span
-          className={cn("h-2 w-2 rounded-full", scanScoreDotClass(summary.score))}
-        />
         <span>
           {summary.score}
           <span className="ml-0.5 opacity-70">/100</span>
