@@ -1,16 +1,17 @@
 "use client";
 
-import { MenuIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { navigationGroups } from "@/content/navigation";
-import { assetPath, siteConfig, withBasePath } from "@/lib/site";
-import { Button } from "@/components/ui/button";
+import { MaterialSymbol } from "@/components/material-symbol";
+import { siteConfig, withBasePath } from "@/lib/site";
+import Image from "next/image";
 
 const primaryLinks = [
+  { title: "Product", href: "/" },
   { title: "Docs", href: "/docs/" },
-  { title: "Screenshots", href: "/screenshots/" },
   { title: "API", href: "/api/" },
+  { title: "Screenshots", href: "/screenshots/" },
   { title: "Roadmap", href: "/roadmap/" },
 ];
 
@@ -20,7 +21,7 @@ export function MobileNav() {
     open && typeof document !== "undefined"
       ? createPortal(
           <div
-            className="fixed inset-0 z-[120] bg-background text-foreground"
+            className="fixed inset-0 z-[120] bg-[#fdfcf8] text-black"
             role="dialog"
             aria-modal="true"
             aria-label="Mobile navigation"
@@ -32,22 +33,21 @@ export function MobileNav() {
                   className="flex items-center no-underline"
                   onClick={() => setOpen(false)}
                 >
-                  <img src={assetPath("/brand/lime.svg")} alt="LIME" className="h-9 w-auto" />
+                  <Image src={withBasePath("/brand/lime.svg")} alt="LIME" width={108} height={48} className="h-9 w-auto" />
                 </a>
-                <Button
+                <button
                   type="button"
-                  variant="ghost"
-                  size="icon-sm"
+                  className="grid size-10 place-items-center rounded-full border border-black/15 bg-white"
                   onClick={() => setOpen(false)}
                   aria-label="Close navigation"
                 >
-                  <XIcon className="size-4" />
-                </Button>
+                  <MaterialSymbol name="close" size={20} />
+                </button>
               </div>
               <nav className="flex-1 overflow-y-auto px-4 py-5">
                 <div className="space-y-7 pb-8">
                   <div>
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    <div className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-black/45">
                       Site
                     </div>
                     <div className="grid gap-1">
@@ -55,7 +55,7 @@ export function MobileNav() {
                         <a
                           key={item.href}
                           href={withBasePath(item.href)}
-                          className="block rounded-2xl px-4 py-3 text-lg font-semibold no-underline hover:bg-accent hover:text-accent-foreground"
+                          className="block rounded-xl px-4 py-3 text-lg font-semibold no-underline hover:bg-black/[0.045]"
                           onClick={() => setOpen(false)}
                         >
                           {item.title}
@@ -63,7 +63,7 @@ export function MobileNav() {
                       ))}
                       <a
                         href={siteConfig.releasesUrl}
-                        className="mt-2 block rounded-2xl border border-black/10 bg-[#FFED00] px-4 py-3 text-lg font-semibold text-black no-underline"
+                        className="mt-2 block rounded-xl bg-black px-4 py-3 text-lg font-semibold text-white no-underline"
                         onClick={() => setOpen(false)}
                       >
                         Download latest release
@@ -72,13 +72,13 @@ export function MobileNav() {
                   </div>
                   {navigationGroups.map((group) => (
                     <div key={group.title}>
-                      <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      <div className="mb-2 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-black/45">
                         {group.title}
                       </div>
                       <div className="grid gap-1">
                         <a
                           href={withBasePath(group.href)}
-                          className="block rounded-2xl px-4 py-3 text-base font-semibold no-underline hover:bg-accent hover:text-accent-foreground"
+                          className="block rounded-xl px-4 py-3 text-base font-semibold no-underline hover:bg-black/[0.045]"
                           onClick={() => setOpen(false)}
                         >
                           {group.title} overview
@@ -87,7 +87,7 @@ export function MobileNav() {
                           <a
                             key={item.href}
                             href={withBasePath(item.href)}
-                            className="block rounded-2xl px-4 py-2.5 text-sm text-muted-foreground no-underline hover:bg-accent hover:text-accent-foreground"
+                            className="block rounded-xl px-4 py-2.5 text-sm text-black/55 no-underline hover:bg-black/[0.045] hover:text-black"
                             onClick={() => setOpen(false)}
                           >
                             {item.title}
@@ -105,16 +105,15 @@ export function MobileNav() {
       : null;
 
   return (
-    <div className="md:hidden">
-      <Button
+    <div>
+      <button
         type="button"
-        variant="outline"
-        size="icon-sm"
+        className="grid size-10 place-items-center rounded-full border border-black/15 bg-white"
         aria-label="Open navigation"
         onClick={() => setOpen(true)}
       >
-        <MenuIcon className="size-4" />
-      </Button>
+        <MaterialSymbol name="menu" size={20} />
+      </button>
       {menu}
     </div>
   );

@@ -50,6 +50,7 @@ Docs-site notes are documented primarily in:
 - `docs/docs-site.md` for static export behavior, content sources, search, screenshot refresh, GitHub Pages, and handoff rules
 - `docs-site/content/product-docs.ts` for curated user/developer docs shown on the public site
 - `scripts/docs-refresh.sh` for isolated docs-demo scan and screenshot generation
+- `docs-site/scripts/validate-static-export.mjs` for post-build route, internal-link, asset, and screenshot validation
 
 Performance and `v1.0` optimization notes are documented primarily in:
 - `docs/performance.md` for the PostgreSQL-first cache/read-model strategy

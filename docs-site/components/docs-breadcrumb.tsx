@@ -8,8 +8,8 @@ import {
   BreadcrumbLink,
   BreadcrumbList,
   BreadcrumbPage,
-  BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { withBasePath } from "@/lib/site";
 
 function normalizePath(path: string) {
@@ -62,7 +62,7 @@ export function DocsBreadcrumb() {
         </BreadcrumbItem>
         {showGroup ? (
           <>
-            <BreadcrumbSeparator />
+            <MaterialSymbol name="chevron_right" size={15} className="text-black/30" />
             <BreadcrumbItem className="hidden min-w-0 sm:inline-flex">
               <span className="truncate text-muted-foreground">
                 {itemMatch.group}
@@ -72,7 +72,7 @@ export function DocsBreadcrumb() {
         ) : null}
         {pageTitle !== "Docs" ? (
           <>
-            <BreadcrumbSeparator />
+            <MaterialSymbol name="chevron_right" size={15} className="text-black/30" />
             <BreadcrumbItem className="min-w-0">
               <BreadcrumbPage className="truncate">{pageTitle}</BreadcrumbPage>
             </BreadcrumbItem>

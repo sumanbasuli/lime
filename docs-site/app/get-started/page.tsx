@@ -1,4 +1,4 @@
-import { ArrowRightIcon } from "lucide-react";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { SiteShell } from "@/components/site-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,12 +12,13 @@ export const metadata = {
 export default function GetStartedPage() {
   return (
     <SiteShell>
-    <main className="mx-auto w-full max-w-6xl px-3 py-6 sm:px-4 md:px-8 md:py-8">
-      <section className="mb-8">
-        <h1 className="font-heading text-[clamp(2.25rem,12vw,4.75rem)] leading-[0.95] tracking-[-0.045em]">
+    <main className="site-container py-12 sm:py-16">
+      <section className="mb-12">
+        <div className="section-kicker">Get started</div>
+        <h1 className="mt-5 max-w-5xl font-heading text-[clamp(2.75rem,6vw,4.4rem)] leading-[0.98] tracking-[-0.04em]">
           Run LIME locally, then deploy a pinned release.
         </h1>
-        <p className="mt-5 max-w-3xl text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
+        <p className="mt-5 max-w-3xl text-base leading-7 text-black/58 sm:text-lg sm:leading-8">
           Use Docker Compose for evaluation and development. Production
           operators should pin a release tag, keep PostgreSQL persistent, and
           follow the Docker or Fly.io deployment guide.
@@ -25,7 +26,7 @@ export default function GetStartedPage() {
       </section>
 
       <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-        <Card className="bg-[#FFED00] text-black">
+        <Card className="border-black bg-[#FFED00] text-black">
           <CardHeader>
             <CardTitle className="text-3xl sm:text-4xl">Local Docker</CardTitle>
             <CardDescription className="text-black/70">
@@ -41,7 +42,7 @@ make start-all`}
             </pre>
             <Button className="mt-5 w-full justify-center sm:w-auto" asChild>
               <a href={withBasePath("/docs/user/first-scan/")}>
-                Create first scan <ArrowRightIcon className="size-4" />
+                Create first scan <MaterialSymbol name="arrow_forward" size={18} />
               </a>
             </Button>
           </CardContent>

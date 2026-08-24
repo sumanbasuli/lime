@@ -1,19 +1,24 @@
 {
   "name": "lime-docs-site",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "scripts": {
+    "predev": "npm run prepare-assets",
     "dev": "next dev --webpack",
     "prepare-assets": "node scripts/prepare-assets.mjs",
     "prebuild": "npm run prepare-assets",
     "build": "next build --webpack",
+    "postbuild": "node scripts/validate-static-export.mjs",
     "serve": "node scripts/serve-static.mjs",
     "lint": "eslint",
-    "docs:screenshots": "node scripts/capture-screenshots.mjs"
+    "docs:screenshots": "node scripts/capture-screenshots.mjs",
+    "verify:browser": "node scripts/verify-browser.mjs",
+    "validate": "npm run lint && npm run build"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
     "@fontsource/fraunces": "^5.2.9",
+    "@fontsource/material-symbols-outlined": "5.3.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "geist": "^1.7.0",

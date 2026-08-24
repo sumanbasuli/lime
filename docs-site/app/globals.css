@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "@fontsource/fraunces/400.css";
+@import "@fontsource/fraunces/600.css";
 @import "@fontsource/fraunces/700.css";
+@import "@fontsource/material-symbols-outlined";
 
 @source "../app/**/*.{ts,tsx}";
 @source "../components/**/*.{ts,tsx}";
@@ -49,33 +51,38 @@
 
 :root {
   --font-fraunces: "Fraunces";
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --background: #fdfcf8;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #0a0a0a;
+  --primary-foreground: #ffffff;
+  --secondary: #f3f2ed;
+  --secondary-foreground: #0a0a0a;
+  --muted: #f3f2ed;
+  --muted-foreground: rgba(10, 10, 10, 0.6);
+  --accent: #f3f2ed;
+  --accent-foreground: #0a0a0a;
+  --destructive: #8f2d31;
+  --border: rgba(10, 10, 10, 0.11);
+  --input: rgba(10, 10, 10, 0.16);
+  --ring: #0a0a0a;
+  --radius: 0.75rem;
+  --sidebar: #fdfcf8;
+  --sidebar-foreground: #0a0a0a;
+  --sidebar-primary: #0a0a0a;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f3f2ed;
+  --sidebar-accent-foreground: #0a0a0a;
+  --sidebar-border: rgba(10, 10, 10, 0.1);
+  --sidebar-ring: #0a0a0a;
+  --lime-yellow: #ffed00;
+  --lime-paper: #fdfcf8;
+  --lime-section: #f6f5f0;
+  --lime-green: #1e7a4e;
+  --lime-red: #8f2d31;
 }
 
 @layer base {
@@ -83,9 +90,16 @@
     @apply border-border outline-ring/50;
   }
 
+  html {
+    scroll-behavior: smooth;
+    scroll-padding-top: 6rem;
+  }
+
   body {
-    @apply bg-sidebar text-foreground;
+    @apply bg-background text-foreground;
+    min-width: 320px;
     font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
 
   h1,
@@ -95,96 +109,112 @@
   h5,
   h6 {
     font-family: var(--font-fraunces), ui-serif, Georgia, serif;
-    font-weight: 700;
+    font-weight: 600;
   }
 
   a {
     @apply underline-offset-4;
   }
+
+  ::selection {
+    background: var(--lime-yellow);
+    color: #0a0a0a;
+  }
 }
 
-@layer utilities {
-  .text-step-0 {
-    font-size: 0.75rem;
-    line-height: 1rem;
+@layer components {
+  .material-symbol {
+    display: inline-block;
+    flex: none;
+    overflow: hidden;
+    width: 1em;
+    font-family: "Material Symbols Outlined";
+    font-style: normal;
+    font-weight: 400;
+    line-height: 1;
+    letter-spacing: normal;
+    text-align: center;
+    text-transform: none;
+    white-space: nowrap;
+    word-wrap: normal;
+    direction: ltr;
+    font-feature-settings: "liga";
+    -webkit-font-feature-settings: "liga";
+    -webkit-font-smoothing: antialiased;
   }
 
-  .text-step-1 {
-    font-size: 0.875rem;
-    line-height: 1.25rem;
+  .site-container {
+    @apply mx-auto w-full max-w-[1440px] px-5 sm:px-7 lg:px-12 xl:px-14;
   }
 
-  .text-step-2 {
-    font-size: 1rem;
-    line-height: 1.5rem;
+  .section-kicker {
+    @apply inline-flex items-center gap-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-black/50;
   }
 
-  .text-step-3 {
-    font-size: 1.25rem;
-    line-height: 1.75rem;
+  .section-kicker::before {
+    content: "";
+    width: 10px;
+    height: 10px;
+    border: 1.5px solid #0a0a0a;
+    background: var(--lime-yellow);
   }
 
-  .text-step-4 {
-    font-size: 1.5rem;
-    line-height: 2rem;
-  }
-
-  .text-step-5 {
-    font-size: 2rem;
-    line-height: 2.25rem;
-  }
-
-  .text-step-6 {
-    font-size: clamp(2.5rem, 6vw, 5rem);
-    line-height: 0.92;
-    letter-spacing: -0.05em;
-  }
-
-  .bento-grid {
-    @apply grid grid-cols-1 gap-4 md:grid-cols-6 xl:grid-cols-12;
+  .lime-mark {
+    box-shadow: inset 0 -0.18em 0 var(--lime-yellow);
   }
 
   .docs-prose {
     max-width: none;
-    font-size: 1rem;
-    line-height: 1.5rem;
     overflow-wrap: anywhere;
+    font-size: 0.96rem;
+    line-height: 1.75;
+  }
+
+  .docs-prose > :first-child {
+    margin-top: 0;
   }
 
   .docs-prose h1 {
-    margin-bottom: 1rem;
-    font-size: clamp(2rem, 12vw, 3.25rem);
-    line-height: 1.04;
+    margin-bottom: 0.75rem;
+    font-size: clamp(2.35rem, 7vw, 3.5rem);
+    line-height: 1.02;
     letter-spacing: -0.04em;
   }
 
   .docs-prose h2 {
-    margin-top: 2.5rem;
-    margin-bottom: 0.75rem;
-    font-size: clamp(1.5rem, 7vw, 2rem);
-    line-height: 1.15;
+    margin-top: 2.8rem;
+    margin-bottom: 0.85rem;
+    font-size: clamp(1.65rem, 4vw, 2rem);
+    line-height: 1.12;
     letter-spacing: -0.025em;
   }
 
   .docs-prose h3 {
-    margin-top: 2rem;
-    margin-bottom: 0.5rem;
-    font-size: clamp(1.25rem, 6vw, 1.5rem);
+    margin-top: 2.1rem;
+    margin-bottom: 0.55rem;
+    font-size: 1.35rem;
     line-height: 1.2;
-    letter-spacing: -0.025em;
+    letter-spacing: -0.02em;
   }
 
   .docs-prose h4 {
-    margin-top: 1.5rem;
+    margin-top: 1.6rem;
     margin-bottom: 0.5rem;
-    font-size: 1.25rem;
-    line-height: 1.75rem;
-    letter-spacing: -0.025em;
+    font-size: 1.1rem;
+    line-height: 1.4;
   }
 
   .docs-prose p,
   .docs-prose li {
-    @apply text-muted-foreground leading-7;
+    @apply text-black/65;
+  }
+
+  .docs-prose p {
+    margin-block: 0.85rem;
+  }
+
+  .docs-prose strong {
+    @apply font-semibold text-black;
   }
 
   .docs-prose ul {
@@ -192,15 +222,26 @@
   }
 
   .docs-prose ol {
-    @apply my-4 list-decimal space-y-2 pl-6;
+    @apply my-5 list-none space-y-2 pl-0;
+    counter-reset: lime-step;
+  }
+
+  .docs-prose ol > li {
+    @apply relative rounded-xl border border-black/10 bg-white py-3 pr-4 pl-14 text-sm leading-6;
+    counter-increment: lime-step;
+  }
+
+  .docs-prose ol > li::before {
+    content: counter(lime-step);
+    @apply absolute top-1/2 left-4 flex size-7 -translate-y-1/2 items-center justify-center rounded-full border border-black bg-[#FFED00] font-heading text-xs font-bold text-black;
   }
 
   .docs-prose a {
-    @apply font-medium text-foreground underline decoration-[#FFED00] decoration-2;
+    @apply font-medium text-black underline decoration-[#FFED00] decoration-[3px] underline-offset-3;
   }
 
   .docs-prose figure {
-    @apply my-6 overflow-hidden rounded-2xl border bg-muted shadow-sm sm:my-8 sm:rounded-3xl;
+    @apply my-7 overflow-hidden rounded-2xl border border-black/10 bg-[#f3f2ed] shadow-sm;
   }
 
   .docs-prose figure img {
@@ -208,15 +249,15 @@
   }
 
   .docs-prose figure figcaption {
-    @apply border-t bg-background px-4 py-3 text-sm text-muted-foreground sm:px-5;
+    @apply border-t border-black/10 bg-white px-4 py-3 text-sm text-black/55 sm:px-5;
   }
 
   .docs-prose code {
-    @apply rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-foreground;
+    @apply rounded-md bg-black/5 px-1.5 py-0.5 font-mono text-[0.85em] text-black;
   }
 
   .docs-prose pre {
-    @apply my-5 overflow-x-auto rounded-2xl border bg-black p-3 text-sm text-[#fffbe6] sm:p-4;
+    @apply my-6 overflow-x-auto rounded-2xl border border-white/10 bg-[#0a0a0a] p-4 font-mono text-sm leading-7 text-[#fffbe6] sm:p-5;
     overflow-wrap: normal;
   }
 
@@ -226,17 +267,12 @@
   }
 
   .docs-prose table {
-    @apply my-4 block w-full overflow-x-auto rounded-xl text-sm;
+    @apply my-6 block w-full overflow-x-auto rounded-xl border border-black/10 bg-white text-sm;
     border-collapse: collapse;
     border-spacing: 0;
   }
 
-  .docs-prose thead {
-    display: table;
-    min-width: 42rem;
-    width: 100%;
-  }
-
+  .docs-prose thead,
   .docs-prose tbody {
     display: table;
     min-width: 42rem;
@@ -249,10 +285,21 @@
 
   .docs-prose th,
   .docs-prose td {
-    @apply border p-3 text-left align-top;
+    @apply border border-black/10 p-3 text-left align-top;
   }
 
   .docs-prose th {
-    @apply bg-[#FFED00]/30 text-foreground;
+    @apply bg-[#FFED00]/25 text-black;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

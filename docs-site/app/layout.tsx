@@ -13,6 +13,15 @@ export const metadata: Metadata = {
   },
   description: siteConfig.description,
   metadataBase: new URL(siteConfig.docsUrl),
+  icons: {
+    icon: "/brand/lime.png",
+  },
+  openGraph: {
+    title: siteConfig.title,
+    description: siteConfig.description,
+    siteName: siteConfig.name,
+    type: "website",
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

@@ -1,4 +1,4 @@
-import { TerminalIcon } from "lucide-react";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { apiGroups } from "@/content/api";
 import { SiteShell } from "@/components/site-shell";
 import {
@@ -15,10 +15,10 @@ export const metadata = {
 };
 
 const methodTone: Record<string, string> = {
-  GET: "bg-emerald-100 text-emerald-900 border-emerald-200",
-  POST: "bg-blue-100 text-blue-900 border-blue-200",
-  PUT: "bg-amber-100 text-amber-900 border-amber-200",
-  DELETE: "bg-red-100 text-red-900 border-red-200",
+  GET: "bg-[#dff3e8] text-[#1E7A4E] border-[#1E7A4E]/25",
+  POST: "bg-[#e4edff] text-[#2554a3] border-[#2554a3]/20",
+  PUT: "bg-[#fff6c7] text-[#6d5e00] border-[#6d5e00]/20",
+  DELETE: "bg-[#f5e1e1] text-[#8F2D31] border-[#8F2D31]/20",
 };
 
 const methodDescriptions: Record<string, string> = {
@@ -56,13 +56,14 @@ export default function ApiReferencePage() {
     .filter((group) => group.endpoints.length > 0);
 
   return (
-    <SiteShell>
-    <main className="mx-auto w-full max-w-[96rem] px-3 py-6 md:px-6 md:py-8">
-      <section className="mb-8">
-        <h1 className="font-heading text-[clamp(2rem,4vw,3.5rem)] leading-[1.02] tracking-[-0.035em]">
-          API reference for scans, issues, reports, and settings.
+    <SiteShell active="api">
+    <main className="site-container py-12 sm:py-16">
+      <section className="mb-12 max-w-4xl">
+        <div className="section-kicker">Developer reference</div>
+        <h1 className="mt-5 font-heading text-[clamp(2.75rem,6vw,4.4rem)] leading-[0.98] tracking-[-0.04em]">
+          API Reference
         </h1>
-        <p className="mt-5 max-w-3xl text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
+        <p className="mt-5 max-w-3xl text-base leading-7 text-black/58 sm:text-lg sm:leading-8">
           Use these examples against Shopkeeper on port <code>8080</code> or
           through the dashboard proxy where applicable. Endpoints are grouped
           by method so reads, lifecycle actions, settings updates, and deletes
@@ -70,10 +71,10 @@ export default function ApiReferencePage() {
         </p>
       </section>
 
-      <div className="space-y-8">
+      <div className="space-y-14">
         {endpointsByMethod.map((group) => (
           <section key={group.method}>
-            <div className="mb-4">
+            <div className="mb-5">
               <div className="flex flex-wrap items-center gap-3">
                 <span
                   className={`rounded-full border px-3 py-1.5 font-mono text-sm font-bold ${
@@ -82,18 +83,18 @@ export default function ApiReferencePage() {
                 >
                   {group.method}
                 </span>
-                <h2 className="font-heading text-2xl tracking-tight sm:text-3xl">
+                <h2 className="font-heading text-3xl tracking-[-0.025em]">
                   {group.method} endpoints
                 </h2>
               </div>
-              <p className="mt-2 text-muted-foreground">
+              <p className="mt-2 text-sm text-black/55">
                 {methodDescriptions[group.method]}
               </p>
             </div>
             <div className="grid gap-4">
               {group.endpoints.map((endpoint) => (
-                <Card key={`${endpoint.method}-${endpoint.path}`} className="min-w-0 overflow-hidden">
-                  <CardHeader className="min-w-0 px-4 sm:px-6">
+                <Card key={`${endpoint.method}-${endpoint.path}`} className="min-w-0 overflow-hidden py-0">
+                  <CardHeader className="min-w-0 border-b border-black/8 px-5 py-5 sm:px-6">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <span
                         className={`rounded-full border px-2.5 py-1 font-mono text-xs font-bold ${
@@ -102,25 +103,25 @@ export default function ApiReferencePage() {
                       >
                         {endpoint.method}
                       </span>
-                      <code className="max-w-full min-w-0 overflow-x-auto whitespace-nowrap rounded-lg bg-muted px-2 py-1 font-mono text-xs sm:text-sm">
+                      <code className="max-w-full min-w-0 overflow-x-auto whitespace-nowrap rounded-md bg-black/[0.045] px-2 py-1 font-mono text-xs sm:text-sm">
                         {endpoint.path}
                       </code>
-                      <span className="max-w-full rounded-full border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                      <span className="max-w-full rounded-full border border-black/10 bg-white px-2.5 py-1 text-xs font-medium text-black/50">
                         {endpoint.surface}
                       </span>
                     </div>
-                    <CardTitle className="break-words text-xl sm:text-2xl">{endpoint.title}</CardTitle>
+                    <CardTitle className="mt-2 break-words text-xl sm:text-2xl">{endpoint.title}</CardTitle>
                     <CardDescription className="break-words">{endpoint.description}</CardDescription>
                   </CardHeader>
-                  <CardContent className="min-w-0 space-y-4 px-4 sm:px-6">
+                  <CardContent className="min-w-0 space-y-5 px-5 py-5 sm:px-6">
                     <div className="grid min-w-0 gap-3 text-sm md:grid-cols-2">
                       <div className="min-w-0">
                         <div className="font-semibold">Auth</div>
-                        <p className="mt-1 break-words text-muted-foreground">{endpoint.auth}</p>
+                        <p className="mt-1 break-words text-black/55">{endpoint.auth}</p>
                       </div>
                       <div className="min-w-0">
                         <div className="font-semibold">Response</div>
-                        <p className="mt-1 break-words text-muted-foreground">{endpoint.response}</p>
+                        <p className="mt-1 break-words text-black/55">{endpoint.response}</p>
                       </div>
                     </div>
                     {endpoint.body ? (
@@ -131,9 +132,9 @@ export default function ApiReferencePage() {
                         </code>
                       </div>
                     ) : null}
-                    <div className="min-w-0 rounded-2xl border bg-black p-3 text-[#fffbe6] sm:p-4">
+                    <div className="min-w-0 rounded-xl border border-white/10 bg-black p-4 text-[#fffbe6]">
                       <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#fffbe6]/60">
-                        <TerminalIcon className="size-4" />
+                        <MaterialSymbol name="terminal" size={16} />
                         Example
                       </div>
                       <pre className="max-w-full overflow-x-auto whitespace-pre text-xs leading-6 sm:text-sm">

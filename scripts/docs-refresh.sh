@@ -10,6 +10,34 @@ UI_BASE="http://localhost:${UI_PORT}"
 DEFAULT_SCAN_TARGETS="https://heysuman.com,https://www.fake-university.com/,https://overlaysdontwork.com/"
 IFS=',' read -r -a SCAN_TARGETS <<< "${LIME_DOCS_SCAN_TARGETS:-${DEFAULT_SCAN_TARGETS}}"
 SCREENSHOT_DIR="${ROOT_DIR}/docs-site/public/product-screenshots"
+STACK_STARTED=false
+
+require_command() {
+  local command_name="$1"
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    echo "${command_name} is required for the docs refresh pipeline." >&2
+    exit 1
+  fi
+}
+
+validate_port() {
+  local port="$1"
+  local label="$2"
+  if ! [[ "${port}" =~ ^[0-9]+$ ]] || [ "${port}" -lt 1 ] || [ "${port}" -gt 65535 ]; then
+    echo "${label} must be an integer between 1 and 65535; received '${port}'." >&2
+    exit 1
+  fi
+}
+
+for required_command in curl node npm docker; do
+  require_command "${required_command}"
+done
+validate_port "${API_PORT}" "LIME_DOCS_API_PORT"
+validate_port "${UI_PORT}" "LIME_DOCS_UI_PORT"
+if [ "${API_PORT}" = "${UI_PORT}" ]; then
+  echo "LIME_DOCS_API_PORT and LIME_DOCS_UI_PORT must be different." >&2
+  exit 1
+fi
 
 if docker compose version >/dev/null 2>&1; then
   DOCKER_COMPOSE=(docker compose)
@@ -23,6 +51,21 @@ fi
 compose() {
   "${DOCKER_COMPOSE[@]}" -p "${COMPOSE_PROJECT}" -f "${ROOT_DIR}/docker-compose.docs.yml" "$@"
 }
+
+cleanup() {
+  local exit_code=$?
+  trap - EXIT INT TERM
+  if [ "${STACK_STARTED}" = "true" ]; then
+    if [ "${LIME_DOCS_KEEP_STACK:-false}" = "true" ]; then
+      echo "Docs stack kept running because LIME_DOCS_KEEP_STACK=true."
+    else
+      echo "Stopping isolated docs stack..."
+      compose down >/dev/null 2>&1 || true
+    fi
+  fi
+  exit "${exit_code}"
+}
+trap cleanup EXIT INT TERM
 
 wait_for_url() {
   local url="$1"
@@ -202,10 +245,21 @@ const data = process.env.ISSUES_JSON || "{}";
 NODE
 }
 
+scan_has_completed_page() {
+  local scan_id="$1"
+  local scan_json
+  local scanned
+
+  scan_json="$(curl -fsS "${API_BASE}/api/scans/${scan_id}")"
+  scanned="$(printf '%s' "${scan_json}" | json_field scanned_urls || true)"
+  [ "${scanned:-0}" -gt 0 ]
+}
+
 echo "Preparing docs-site dependencies..."
-if [ ! -d "${ROOT_DIR}/docs-site/node_modules" ]; then
-  npm --prefix "${ROOT_DIR}/docs-site" ci
-fi
+npm --prefix "${ROOT_DIR}/docs-site" ci
+
+echo "Linting docs-site before starting the isolated scan stack..."
+npm --prefix "${ROOT_DIR}/docs-site" run lint
 
 echo "Checking Playwright Chromium..."
 if node -e "const { chromium } = require(process.argv[1]); const fs = require('fs'); process.exit(fs.existsSync(chromium.executablePath()) ? 0 : 1);" "${ROOT_DIR}/docs-site/node_modules/playwright" >/dev/null 2>&1; then
@@ -219,6 +273,7 @@ fi
 
 echo "Resetting isolated ${COMPOSE_PROJECT} docs stack..."
 compose down -v --remove-orphans
+STACK_STARTED=true
 compose up -d --build
 
 wait_for_url "${API_BASE}/api/health" "Shopkeeper"
@@ -234,10 +289,18 @@ for target in "${SCAN_TARGETS[@]}"; do
   if [ -z "${target}" ]; then
     continue
   fi
+  if ! node -e "const target = new URL(process.argv[1]); if (!['http:', 'https:'].includes(target.protocol)) process.exit(1);" "${target}" >/dev/null 2>&1; then
+    echo "Skipping invalid docs scan target: ${target}" >&2
+    continue
+  fi
   echo "Creating docs scan for ${target}..."
   scan_id="$(create_docs_scan "${target}")"
   echo "Created docs scan ${scan_id}."
   wait_for_scan "${scan_id}" "${target}"
+  if ! scan_has_completed_page "${scan_id}"; then
+    echo "Skipping docs scan ${scan_id}; it did not produce a completed page." >&2
+    continue
+  fi
   SCAN_IDS+=("${scan_id}")
   SCAN_LABELS+=("${target}")
 done
@@ -277,12 +340,5 @@ npm --prefix "${ROOT_DIR}/docs-site" run docs:screenshots -- \
 
 echo "Building static docs site..."
 npm --prefix "${ROOT_DIR}/docs-site" run build
-
-if [ "${LIME_DOCS_KEEP_STACK:-false}" = "true" ]; then
-  echo "Docs stack kept running because LIME_DOCS_KEEP_STACK=true."
-else
-  echo "Stopping isolated docs stack..."
-  compose down
-fi
 
 echo "Docs refreshed. Static output: ${ROOT_DIR}/docs-site/out"

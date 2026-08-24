@@ -19,10 +19,11 @@ The public docs build is a static export. CI builds the site and uploads `docs-s
 make docs-dev      # hot-reload docs development server on LIME_DOCS_PORT, default 3001
 make docs-build    # build the static docs site into docs-site/out
 make docs-run      # build and serve docs-site/out locally
+make docs-verify   # build, validate, and browser-check desktop/mobile routes and interactions
 make docs          # refresh isolated demo screenshots, then build the static site
 ```
 
-Use `make docs` before release-facing docs changes when screenshots may be stale. Use `make docs-build` for fast validation when content or layout changed but screenshots did not. Use `make docs-run` for GitHub Pages parity: it builds the static export first, then serves `docs-site/out` instead of running the Next development server.
+Use `make docs` before release-facing docs changes when screenshots may be stale. Use `make docs-build` for fast validation when content or layout changed but screenshots did not. Use `make docs-verify` for the complete local static-export and browser verification pass. Use `make docs-run` for GitHub Pages parity: it builds the static export first, then serves `docs-site/out` instead of running the Next development server.
 
 ## Local Development Shape
 
@@ -33,7 +34,9 @@ The docs site is a normal Next app with static export enabled in `docs-site/next
 - `LIME_DOCS_BASE_PATH` can add a project-site base path such as `/lime`.
 - `NEXT_PUBLIC_LIME_DOCS_URL` controls canonical metadata and public docs links.
 - `docs-site/scripts/prepare-assets.mjs` copies shared brand assets into `docs-site/public/brand/` before build.
+- `npm run dev` prepares shared brand assets before starting, so the local site does not render broken logos.
 - `make docs-build` checks for untracked or ignored docs source files before building so local-only files cannot make `make docs-run` look correct while CI deploys a missing route.
+- Every production build runs `docs-site/scripts/validate-static-export.mjs` after export. It fails on missing required routes, internal links, assets, or undersized product screenshots.
 
 For the custom domain, keep `LIME_DOCS_BASE_PATH` empty and publish `docs-site/public/CNAME`. For a GitHub Pages project URL such as `https://sumanbasuli.github.io/lime/`, set `LIME_DOCS_BASE_PATH=/lime`.
 
@@ -107,16 +110,17 @@ This keeps search fast, offline, static-export friendly, and custom-domain safe 
 
 The command runs `scripts/docs-refresh.sh`, which:
 
-1. Installs docs-site dependencies if needed.
-2. Installs Playwright Chromium for screenshot capture.
-3. Resets an isolated Docker Compose project named `lime-docs`.
-4. Starts an isolated PostgreSQL database, Shopkeeper, and production-built dashboard UI from `docker-compose.docs.yml`.
-5. Creates fresh docs-demo scans from public demo targets.
-6. Selects the scan with the richest issue data for issue screenshots.
-7. Seeds exactly one intentional failed URL into a completed docs-demo scan for partial-retry screenshots.
-8. Captures screenshots with `docs-site/scripts/capture-screenshots.mjs`.
-9. Builds the static docs site.
-10. Stops the isolated docs stack unless `LIME_DOCS_KEEP_STACK=true`.
+1. Validates required commands, ports, and scan-target URLs.
+2. Reinstalls docs-site dependencies from the lockfile and runs ESLint before starting Docker.
+3. Verifies that Playwright Chromium is available.
+4. Resets an isolated Docker Compose project named `lime-docs`.
+5. Starts an isolated PostgreSQL database, Shopkeeper, and production-built dashboard UI from `docker-compose.docs.yml`.
+6. Creates fresh docs-demo scans from public demo targets and skips scans that produce no completed page.
+7. Selects the scan with the richest issue data for issue screenshots.
+8. Seeds exactly one intentional failed URL into a completed docs-demo scan for partial-retry screenshots.
+9. Captures screenshots with browser, framework-overlay, expected-element, response, and file-size checks.
+10. Builds the static docs site and validates every required route, internal link, asset, and screenshot in the export.
+11. Stops the isolated docs stack on success or failure unless `LIME_DOCS_KEEP_STACK=true`.
 
 The default demo targets are:
 
@@ -165,6 +169,7 @@ Current screenshot IDs are defined in `docs-site/content/screenshots.ts`:
 - `expanded-issue`
 - `reports`
 - `settings`
+- `link-checker`
 
 If you add a screenshot:
 
@@ -181,7 +186,7 @@ To add a screenshot request:
 
 1. Decide which isolated docs-demo scan should drive the screenshot. Use `--scan-id` for the rich issue scan and `--partial-scan-id` for partial retry UI.
 2. Add a `capture(...)` call in `docs-site/scripts/capture-screenshots.mjs` with the exact dashboard route and output filename.
-3. Add an `afterLoad` assertion for the important UI state, such as a heading, button, issue card, menu, or expanded panel. The script should fail when the expected state is missing.
+3. Add an `afterLoad` assertion for the important UI state, such as a heading, button, issue card, menu, or expanded panel. The capture runner also fails on blank pages, framework overlays, HTTP 5xx responses, browser errors, and unexpectedly small image files.
 4. If the screenshot needs special data, add deterministic setup in `scripts/docs-refresh.sh` against only the `lime-docs` Compose project and isolated database.
 5. Add screenshot metadata in `docs-site/content/screenshots.ts`.
 6. Reference the screenshot from a curated doc's `screenshots` list and, when useful, as an inline Markdown image.
@@ -211,8 +216,10 @@ Before handing off a docs-site change:
 1. Run `npm --prefix docs-site run lint`.
 2. Run `NEXT_PUBLIC_LIME_DOCS_URL=https://lime.heysuman.com/ npm --prefix docs-site run build`.
 3. Run `make docs` when screenshot content changed.
-4. Run `make docs-run` when debugging a GitHub Pages routing issue locally.
-5. Confirm `docs-site/out/index.html` exists after build.
-6. Confirm custom-domain builds do not include a stale `/lime` base path.
-7. Update `CHANGELOG.md` for release-facing docs changes.
-8. Do not push until the maintainer explicitly asks.
+4. Run `make docs-verify` for desktop/mobile routes plus search, navigation, and screenshot interaction checks.
+5. Run `make docs-run` when debugging a GitHub Pages routing issue locally.
+6. Confirm `docs-site/out/index.html` exists after build.
+7. Confirm the post-build static-export validator reports all internal routes, assets, and screenshots as valid.
+8. Confirm custom-domain builds do not include a stale `/lime` base path.
+9. Update `CHANGELOG.md` for release-facing docs changes.
+10. Do not push until the maintainer explicitly asks.

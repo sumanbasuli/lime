@@ -28,7 +28,11 @@ function normalizeParts(parts: string[]): string[] {
 }
 
 function resolveRelativePath(currentSlug: string[], target: string): string[] {
-  const baseParts = ["docs", ...currentSlug.slice(0, -1)];
+  const contentSlug =
+    currentSlug[0] === "reference"
+      ? currentSlug.slice(1)
+      : currentSlug;
+  const baseParts = ["docs", ...contentSlug.slice(0, -1)];
   return normalizeParts([...baseParts, ...target.split("/")]);
 }
 
@@ -72,11 +76,15 @@ function rewriteLink(href: string, currentSlug: string[]): string {
     (!hasFileExtension && !target.startsWith("."));
 
   if (looksLikeDocRoute) {
+    if (!repoPath.startsWith("docs/")) {
+      return `${siteConfig.repoUrl}/blob/main/${repoPath}${anchor}`;
+    }
     const docsPath = repoPath
       .replace(/^docs\//, "")
       .replace(/\.md$/, "")
       .replace(/\/index$/, "");
-    return withBasePath(`/docs/${docsPath}${anchor}`);
+    const docsPrefix = currentSlug[0] === "reference" ? "/docs/reference" : "/docs";
+    return withBasePath(`${docsPrefix}/${docsPath}${anchor}`);
   }
 
   return `${siteConfig.repoUrl}/blob/main/${repoPath}${anchor}`;

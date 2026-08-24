@@ -9,13 +9,14 @@ export const metadata = {
 
 export default function ScreenshotsPage() {
   return (
-    <SiteShell>
-      <main className="mx-auto w-full max-w-[96rem] px-2.5 py-6 sm:px-4 md:px-6 md:py-8">
-        <section className="mb-8">
-          <h1 className="max-w-5xl font-heading text-[clamp(2.25rem,12vw,4.75rem)] leading-[0.95] tracking-[-0.045em]">
-            See the dashboard workflow.
+    <SiteShell active="screenshots">
+      <main className="site-container py-12 sm:py-16">
+        <section className="mb-12">
+          <div className="section-kicker">Product walkthrough</div>
+          <h1 className="mt-5 max-w-5xl font-heading text-[clamp(2.75rem,6vw,4.4rem)] leading-[0.98] tracking-[-0.04em]">
+            Screenshots
           </h1>
-          <p className="mt-5 max-w-3xl text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
+          <p className="mt-5 max-w-3xl text-base leading-7 text-black/58 sm:text-lg sm:leading-8">
             Review the main screens before installing: scan creation, progress,
             issue evidence, exports, and settings. Click any image to expand it.
           </p>

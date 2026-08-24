@@ -14,7 +14,7 @@ export const productDocs: ProductDoc[] = [
     title: "LIME Documentation",
     description: "Use, operate, extend, and integrate with LIME.",
     category: "User Docs",
-    screenshots: ["dashboard", "issues", "reports"],
+    screenshots: ["dashboard", "issues", "reports", "link-checker"],
     markdown: `# LIME Documentation
 
 LIME is a self-hosted accessibility scanner for teams that need reviewable results. It runs axe-core in Chromium, captures screenshots, groups failures and needs-review checks, and exports PDF, CSV, and LLM-ready reports.
@@ -25,6 +25,7 @@ LIME is a self-hosted accessibility scanner for teams that need reviewable resul
 - Understand same-scan failed-page retry for partial scans.
 - Export PDF, CSV, and LLM reports without blocking large issue pages.
 - Configure server-wide reporting and performance settings.
+- Preview the Link Checker workflow and understand its current non-scanning state.
 - Find contributor docs for the backend, dashboard, docs site, and release process.
 
 ## Docs structure
@@ -37,7 +38,7 @@ User docs explain the product workflow from first scan to report export. Develop
     title: "User Docs",
     description: "Operate LIME from first scan through triage, exports, partial retry, and settings.",
     category: "User Docs",
-    screenshots: ["dashboard", "scan-detail", "issues", "reports"],
+    screenshots: ["dashboard", "scan-detail", "issues", "reports", "link-checker"],
     sourceFiles: ["docs-site/content/product-docs.ts"],
     markdown: `# User Docs
 
@@ -51,7 +52,8 @@ Use these docs when you are running audits, reviewing scan evidence, or exportin
 4. Review [Issues And Screenshots](/docs/user/issues/) to triage failures and needs-review items.
 5. Use [Export Reports](/docs/user/reports/) when you need PDF, CSV, or LLM-ready output.
 6. Adjust [Settings](/docs/user/settings/) for report limits, feature toggles, and performance defaults.
-7. Read [MCP For AI Tools](/docs/user/mcp/) when preparing to connect external AI clients to LIME.
+7. Review [Link Checker Preview](/docs/user/link-checker/) to see the planned link-validation workflow.
+8. Read [MCP For AI Tools](/docs/user/mcp/) when preparing to connect external AI clients to LIME.
 
 ## What matters operationally
 
@@ -142,6 +144,39 @@ The dashboard is the operational view for all scans. Use it to find recent work,
 2. Do not treat a partial scan score as final when failed pages remain.
 3. Retry failed pages from the scan detail page before exporting the final report.
 4. Use labels to compare the same site across release candidates, environments, or remediation passes.
+`,
+  },
+  {
+    slug: ["user", "link-checker"],
+    title: "Link Checker Preview",
+    description: "Understand the redesigned link-check workflow and what is available before backend checks ship.",
+    category: "User Docs",
+    screenshots: ["link-checker"],
+    sourceFiles: ["lime/src/app/links/page.tsx", "lime/src/components/link-checker-preview.tsx"],
+    markdown: `# Link Checker Preview
+
+The **Link checker** screen is part of the redesigned dashboard. It establishes the interaction, result states, and visual language for validating links without changing the current scanning backend.
+
+![Link checker preview](/product-screenshots/link-checker.png "The preview includes the target URL field, run action, and the result layout planned for link validation.")
+
+## Current availability
+
+- The page and navigation entry are available in the dashboard.
+- URL entry and the preview interaction are available for design review.
+- The page does not crawl or validate links yet.
+- No link-check result is stored in PostgreSQL or included in scan reports.
+
+## Planned workflow
+
+1. Open **Link checker** from the dashboard sidebar.
+2. Enter a fully qualified site or page URL.
+3. Start the link check.
+4. Review totals for healthy, redirected, and broken links.
+5. Filter and export the result once backend support is added.
+
+## Why the preview is documented
+
+Calling out the preview state keeps operators from treating the screen as a completed scan feature. When the backend is implemented, update this page, the API manifest, screenshot assertions, and release notes together.
 `,
   },
   {

@@ -1,12 +1,6 @@
 "use client";
 
 import {
-  CornerDownLeftIcon,
-  FileTextIcon,
-  SearchIcon,
-  XIcon,
-} from "lucide-react";
-import {
   useDeferredValue,
   useEffect,
   useRef,
@@ -14,6 +8,7 @@ import {
 } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
+import { MaterialSymbol } from "@/components/material-symbol";
 import type { DocsSearchEntry } from "@/lib/docs-search";
 import { withBasePath } from "@/lib/site";
 import { Button } from "@/components/ui/button";
@@ -168,12 +163,12 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
           role="dialog"
           aria-modal="true"
           aria-label="Search docs"
-          className="w-full max-w-2xl overflow-hidden rounded-2xl border bg-background shadow-2xl sm:rounded-3xl"
+          className="w-full max-w-2xl overflow-hidden rounded-[18px] border border-black/15 bg-[#fdfcf8] shadow-2xl"
           onClick={(event) => event.stopPropagation()}
           onKeyDown={handleDialogKeyDown}
         >
           <div className="flex items-center gap-2 border-b px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
-            <SearchIcon className="size-5 text-muted-foreground" />
+            <MaterialSymbol name="search" size={20} className="text-black/45" />
             <Input
               ref={inputRef}
               value={query}
@@ -191,7 +186,7 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
               onClick={closeSearch}
               aria-label="Close search"
             >
-              <XIcon className="size-4" />
+              <MaterialSymbol name="close" size={18} />
             </Button>
           </div>
 
@@ -212,7 +207,7 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
                   >
                     <div className="flex items-start gap-3">
                       <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl bg-background text-foreground shadow-sm">
-                        <FileTextIcon className="size-4" />
+                        <MaterialSymbol name="description" size={18} />
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-2">
@@ -244,7 +239,7 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
           <div className="flex items-center justify-between border-t bg-muted/40 px-3 py-2 text-[11px] text-muted-foreground sm:px-4 sm:text-xs">
             <span>Use ↑ ↓ to move</span>
             <span className="inline-flex items-center gap-1">
-              <CornerDownLeftIcon className="size-3" />
+              <MaterialSymbol name="keyboard_return" size={14} />
               Open result
             </span>
           </div>
@@ -262,7 +257,7 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
         onClick={() => setOpen(true)}
       >
         <span className="inline-flex items-center gap-2">
-          <SearchIcon className="size-4" />
+          <MaterialSymbol name="search" size={18} />
           Search docs
         </span>
         <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
@@ -277,7 +272,7 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
         onClick={() => setOpen(true)}
         aria-label="Search docs"
       >
-        <SearchIcon className="size-4" />
+        <MaterialSymbol name="search" size={18} />
       </Button>
 
       {dialog ? createPortal(dialog, document.body) : null}

@@ -1,9 +1,9 @@
 "use client";
 
-import { XIcon, ZoomInIcon } from "lucide-react";
 import { useState } from "react";
 import { ProductScreenshot } from "@/content/screenshots";
 import { assetPath } from "@/lib/site";
+import { MaterialSymbol } from "@/components/material-symbol";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -16,7 +16,7 @@ export function ScreenshotGallery({
 
   return (
     <>
-      <div className="space-y-5 sm:space-y-8">
+      <div className="grid gap-5 lg:grid-cols-2">
         {screenshots.map((shot) => (
           <button
             key={shot.id}
@@ -24,20 +24,20 @@ export function ScreenshotGallery({
             onClick={() => setSelected(shot)}
             className="group block w-full text-left"
           >
-            <figure className="overflow-hidden rounded-2xl border bg-muted shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md sm:rounded-3xl">
-              <div className="relative bg-muted p-1">
+            <figure className="overflow-hidden rounded-[18px] border border-black/10 bg-[#f3f2ed] transition-all hover:-translate-y-0.5 hover:shadow-lg">
+              <div className="relative aspect-[16/10] overflow-hidden bg-[#f3f2ed] p-3 sm:p-5">
                 <img
                   src={assetPath(shot.src)}
                   alt={shot.alt}
-                  className="h-auto w-full rounded-[1rem] border bg-white object-contain sm:rounded-[1.35rem]"
+                  className="h-full w-full rounded-xl border border-black/10 bg-white object-cover object-top shadow-sm"
                 />
-                <span className="absolute right-2 top-2 inline-flex rounded-full border bg-background/90 p-2 shadow-sm sm:right-3 sm:top-3">
-                  <ZoomInIcon className="size-4" />
+                <span className="absolute top-4 right-4 inline-flex rounded-full border border-black/15 bg-white/90 p-2 shadow-sm sm:top-6 sm:right-6">
+                  <MaterialSymbol name="zoom_in" size={18} />
                 </span>
               </div>
-              <figcaption className="border-t bg-background px-4 py-3 sm:px-5 sm:py-4">
-                <span className="block font-heading text-lg font-bold sm:text-xl">{shot.title}</span>
-                <span className="mt-1 block text-sm text-muted-foreground">
+              <figcaption className="border-t border-black/10 bg-white px-5 py-4">
+                <span className="block font-heading text-lg font-semibold sm:text-xl">{shot.title}</span>
+                <span className="mt-1 block text-sm text-black/52">
                   {shot.caption}
                 </span>
               </figcaption>
@@ -51,7 +51,7 @@ export function ScreenshotGallery({
           role="dialog"
           aria-modal="true"
           aria-label={selected.title}
-          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-2 backdrop-blur-sm sm:p-4"
+          className="fixed inset-0 z-[100] grid place-items-center bg-black/75 p-2 backdrop-blur-sm sm:p-4"
           onClick={() => setSelected(null)}
         >
           <Card
@@ -70,7 +70,7 @@ export function ScreenshotGallery({
                 onClick={() => setSelected(null)}
                 aria-label="Close screenshot"
               >
-                <XIcon className="size-4" />
+                <MaterialSymbol name="close" size={18} />
               </Button>
             </CardHeader>
             <CardContent className="overflow-auto p-0">

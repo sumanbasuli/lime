@@ -5,6 +5,10 @@ section matching `VERSION` to populate GitHub Release notes.
 
 ## [Unreleased]
 
+- Redesigned the public marketing and documentation site to match the dashboard visual system, with responsive Material Symbol navigation, improved documentation reading layouts, and consistent product, API, screenshot, roadmap, and onboarding pages.
+- Added the Link Checker preview to the public product documentation and reproducible screenshot set, while clearly documenting that backend link validation is planned for a later release.
+- Hardened the docs refresh pipeline with deterministic dependency installs, preflight linting and target validation, automatic isolated-stack cleanup, browser/runtime error checks, screenshot integrity checks, and post-build internal-link and asset validation.
+
 ## [1.0.5] - 2026-05-14
 
 - Fixed needs-review-only scans so the scan detail page links to issue details when review-required audit checks exist without failed issue groups.

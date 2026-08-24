@@ -13,13 +13,14 @@ export default function RoadmapPage() {
   const roadmap = getDocPage(["reference", "roadmap"]);
 
   return (
-    <SiteShell>
-    <main className="mx-auto w-full max-w-6xl px-3 py-6 sm:px-4 md:px-8 md:py-8">
-      <section className="mb-8">
-        <h1 className="font-heading text-[clamp(2.25rem,12vw,4.75rem)] leading-[0.95] tracking-[-0.045em]">
+    <SiteShell active="roadmap">
+    <main className="site-container py-12 sm:py-16">
+      <section className="mb-12">
+        <div className="section-kicker">What comes next</div>
+        <h1 className="mt-5 max-w-5xl font-heading text-[clamp(2.75rem,6vw,4.4rem)] leading-[0.98] tracking-[-0.04em]">
           V1 hardening first. MCP keeps improving.
         </h1>
-        <p className="mt-5 max-w-3xl text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
+        <p className="mt-5 max-w-3xl text-base leading-7 text-black/58 sm:text-lg sm:leading-8">
           V1 focuses on open-source release readiness, predictable deployment,
           performance, caching, and large-report usability. The existing MCP
           endpoint stays read-only while compatibility, origin controls, and
@@ -35,8 +36,8 @@ export default function RoadmapPage() {
         </div>
       </section>
       {roadmap ? (
-        <Card>
-          <CardContent className="p-4 sm:p-6 md:p-10">
+        <Card className="py-0">
+          <CardContent className="p-5 sm:p-8 md:p-12">
             <div
               className="docs-prose"
               dangerouslySetInnerHTML={{ __html: roadmap.html }}

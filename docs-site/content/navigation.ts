@@ -31,10 +31,16 @@ const referenceItems = [
   { title: "MCP Integration", href: "/docs/reference/mcp", description: "Connect AI tools to LIME through the read-only MCP interface." },
   { title: "Database", href: "/docs/reference/database", description: "PostgreSQL schema and migration notes." },
   { title: "Performance", href: "/docs/reference/performance", description: "Optimization and cache strategy." },
+  { title: "Shopkeeper Architecture", href: "/docs/reference/architecture/shopkeeper", description: "HTTP API, orchestration, persistence, and background work." },
+  { title: "Profiler Architecture", href: "/docs/reference/architecture/profiler", description: "Sitemap discovery, validation, and URL collection." },
+  { title: "Juicer Architecture", href: "/docs/reference/architecture/juicer", description: "Chromium workers, axe-core audits, and screenshots." },
+  { title: "Sweetner Architecture", href: "/docs/reference/architecture/sweetner", description: "Issue normalization, grouping, and persistence." },
+  { title: "UI Architecture", href: "/docs/reference/architecture/ui", description: "Next.js dashboard routes, data loading, and reports." },
   { title: "Docker Deploy", href: "/docs/reference/deployment/docker", description: "Docker-based deployment guide." },
   { title: "Debian Deploy", href: "/docs/reference/deployment/debian", description: "Native systemd install for Debian-family Linux." },
   { title: "Fly.io Deploy", href: "/docs/reference/deployment/fly", description: "Fly launch and deploy notes." },
   { title: "Updates", href: "/docs/reference/deployment/updates", description: "Release update and upgrade process." },
+  { title: "Roadmap Reference", href: "/docs/reference/roadmap", description: "Detailed repository roadmap and release readiness." },
 ];
 
 export const navigationGroups: NavigationGroup[] = [

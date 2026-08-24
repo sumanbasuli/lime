@@ -63,4 +63,11 @@ export const productScreenshots: ProductScreenshot[] = [
     alt: "LIME settings page with reporting and performance controls.",
     src: "/product-screenshots/settings.png",
   },
+  {
+    id: "link-checker",
+    title: "Link Checker Preview",
+    caption: "The redesigned link-check workflow, ready for backend validation in a later release.",
+    alt: "LIME link checker preview with URL input, run action, and planned result states.",
+    src: "/product-screenshots/link-checker.png",
+  },
 ];

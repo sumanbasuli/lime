@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -19,22 +19,59 @@ const scanId = readArg("--scan-id", process.env.LIME_DOCS_SCAN_ID);
 const partialScanId = readArg("--partial-scan-id", process.env.LIME_DOCS_PARTIAL_SCAN_ID ?? scanId);
 const outputDir = path.resolve(readArg("--output", path.join(docsSiteRoot, "public", "product-screenshots")));
 
+try {
+  new URL(baseUrl);
+} catch {
+  console.error("Invalid --base-url. Provide an absolute http(s) URL.");
+  process.exit(1);
+}
+
 if (!scanId) {
   console.error("Missing --scan-id. The docs screenshot runner must target the isolated docs-demo scan explicitly.");
   process.exit(1);
 }
 
+const runtimeErrors = [];
+
+function isExpectedOptionalRequest(url) {
+  try {
+    return new URL(url).pathname === "/_lime/update-check";
+  } catch {
+    return false;
+  }
+}
+
 async function capture(page, url, fileName, options = {}) {
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  runtimeErrors.length = 0;
+  const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90_000 });
+  if (!response?.ok()) {
+    throw new Error(`Could not capture ${url}: HTTP ${response?.status() ?? "no response"}.`);
+  }
   await page.waitForLoadState("networkidle", { timeout: 12_000 }).catch(() => {});
   await page.waitForTimeout(800);
   if (options.afterLoad) {
     await options.afterLoad(page);
   }
+  const bodyText = (await page.locator("body").innerText()).trim();
+  if (bodyText.length < 40) {
+    throw new Error(`Could not capture ${url}: the page did not render meaningful content.`);
+  }
+  if (await page.locator("[data-nextjs-dialog], .vite-error-overlay, #webpack-dev-server-client-overlay").count()) {
+    throw new Error(`Could not capture ${url}: a framework error overlay is visible.`);
+  }
+  if (runtimeErrors.length) {
+    throw new Error(`Could not capture ${url}: browser errors:\n${runtimeErrors.join("\n")}`);
+  }
+  const outputPath = path.join(outputDir, fileName);
   await page.screenshot({
-    path: path.join(outputDir, fileName),
+    path: outputPath,
     fullPage: false,
   });
+  const screenshot = await stat(outputPath);
+  if (screenshot.size < 10_000) {
+    throw new Error(`Screenshot ${fileName} is unexpectedly small (${screenshot.size} bytes).`);
+  }
+  console.log(`Captured ${fileName} from ${url}`);
 }
 
 async function clickIfVisible(page, locator, timeout = 5_000) {
@@ -55,10 +92,32 @@ const page = await browser.newPage({
   viewport: { width: 1440, height: 1000 },
   deviceScaleFactor: 1,
 });
+await page.emulateMedia({ reducedMotion: "reduce" });
+page.on("pageerror", (error) => runtimeErrors.push(`pageerror: ${error.message}`));
+page.on("console", (message) => {
+  if (message.type() === "error" && !isExpectedOptionalRequest(message.location().url)) {
+    runtimeErrors.push(`console: ${message.text()}`);
+  }
+});
+page.on("response", (response) => {
+  if (response.status() >= 500) {
+    runtimeErrors.push(`response: ${response.status()} ${response.url()}`);
+  }
+});
 
 try {
-  await capture(page, `${baseUrl}/`, "dashboard.png");
-  await capture(page, `${baseUrl}/scans/new`, "new-scan.png");
+  await capture(page, `${baseUrl}/`, "dashboard.png", {
+    afterLoad: (currentPage) => currentPage.getByRole("heading", { name: /^overview$/i }).waitFor(),
+  });
+  await capture(page, `${baseUrl}/scans/new`, "new-scan.png", {
+    afterLoad: (currentPage) => currentPage.getByRole("heading", { name: /new scan/i }).waitFor(),
+  });
+  await capture(page, `${baseUrl}/links`, "link-checker.png", {
+    afterLoad: async (currentPage) => {
+      await currentPage.getByRole("heading", { name: /link checker/i }).waitFor();
+      await currentPage.getByRole("button", { name: /start link check/i }).waitFor();
+    },
+  });
   await capture(page, `${baseUrl}/scans/${scanId}`, "scan-detail.png");
   await capture(page, `${baseUrl}/scans/${partialScanId}`, "partial-retry.png", {
     afterLoad: async (currentPage) => {
