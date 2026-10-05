@@ -104,6 +104,7 @@ const screenshotNames = [
   "reports.png",
   "settings.png",
   "link-checker.png",
+  "link-check-results.png",
 ];
 for (const name of screenshotNames) {
   const screenshotPath = path.join(outDir, "product-screenshots", name);

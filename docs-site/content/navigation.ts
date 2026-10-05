@@ -55,6 +55,7 @@ const referenceItems = [
   { title: "Profiler Architecture", href: "/docs/reference/architecture/profiler", description: "Sitemap discovery, validation, and URL collection." },
   { title: "Juicer Architecture", href: "/docs/reference/architecture/juicer", description: "Chromium workers, axe-core audits, and screenshots." },
   { title: "Sweetner Architecture", href: "/docs/reference/architecture/sweetner", description: "Issue normalization, grouping, and persistence." },
+  { title: "Link Checker Architecture", href: "/docs/reference/architecture/link-checker", description: "Standalone checks, scan companions, network policy, and saved destinations." },
   { title: "UI Architecture", href: "/docs/reference/architecture/ui", description: "Next.js dashboard routes, data loading, and reports." },
   { title: "MCP Protocol Reference", href: "/docs/reference/mcp", description: "Transport, authentication, schemas, and integration checks." },
   { title: "Roadmap Reference", href: "/docs/reference/roadmap", description: "Shipped baseline, validation priorities, and proposed work." },

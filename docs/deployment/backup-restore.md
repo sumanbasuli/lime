@@ -10,7 +10,7 @@ Keep these together, with the capture time and running application version/tag:
 
 | Item | Source | Why it matters |
 |------|--------|----------------|
-| PostgreSQL dump/provider snapshot | Database used by **both** services | Scans, URLs, findings, audit evidence, settings, schema version, caches |
+| PostgreSQL dump/provider snapshot | Database used by **both** services | Scans, URLs, findings, audit evidence, link jobs/destinations/source references, settings, schema version, caches |
 | Screenshot tree | Docker/Fly `/app/screenshots`; native `SHOPKEEPER_SCREENSHOT_DIR` | Full-page, spotlight, and preview PNG evidence under each scan ID |
 | Protected configuration | Compose/env overrides, systemd env files, or provider secret inventory | Database/backend/UI targets, runtime ports, physical storage paths |
 | Application/catalog version | Release tag/image identifiers and `data/` JSON catalogs | Reproduce the schema, engine, scoring, and read-time guidance |
@@ -19,8 +19,8 @@ Database backups contain site URLs, HTML snippets, settings, and the MCP key has
 
 ## Quiesce For A Matched Snapshot
 
-1. Schedule maintenance and prevent new scans/triage/settings writes.
-2. Let active scans complete, or request **Pause** and wait until each is `paused` rather than merely `pause_requested`.
+1. Schedule maintenance and prevent new scans, link checks, triage, and settings writes.
+2. Let active accessibility scans complete, or request **Pause** and wait until each is `paused` rather than merely `pause_requested`. Let independent/companion link checks settle or use **Cancel check**; accessibility Pause does not pause a link job that has already started.
 3. Stop the UI and Shopkeeper, leaving PostgreSQL running. This prevents database/filesystem changes while taking the matched set. Do not remove containers/volumes.
 4. Dump PostgreSQL, copy screenshots/config/catalogs, and inspect all command outcomes.
 5. Start the same services/version again and verify health/pages/evidence; resume paused scans only when ready.

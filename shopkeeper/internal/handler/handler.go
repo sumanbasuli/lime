@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/actrules"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/linkchecker"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/screenshots"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
@@ -48,9 +49,11 @@ type IssueReportGenerator interface {
 
 // Handler holds dependencies for HTTP handlers.
 type Handler struct {
-	repo     ScanRepository
-	scanner  ScanRunner
-	reporter IssueReportGenerator
+	repo       ScanRepository
+	scanner    ScanRunner
+	reporter   IssueReportGenerator
+	links      LinkRepository
+	linkRunner LinkRunner
 }
 
 // New creates a new Handler with the given repository, scanner, and reporter.
@@ -130,7 +133,13 @@ func (h *Handler) CreateScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create scan record
-	scan, err := h.repo.CreateScan(r.Context(), req.SitemapURL, req.ScanType, req.Tag, scanViewport)
+	if req.IncludeLinkCheck {
+		if _, err := linkchecker.Normalize(req.SitemapURL); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+	}
+	scan, err := h.createScan(r.Context(), req.SitemapURL, req.ScanType, req.Tag, scanViewport, req.IncludeLinkCheck)
 	if err != nil {
 		log.Printf("Failed to create scan: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -287,12 +296,13 @@ func (h *Handler) RescanScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newScan, err := h.repo.CreateScan(
+	newScan, err := h.createScan(
 		r.Context(),
 		scan.SitemapURL,
 		scan.ScanType,
 		scan.Tag,
 		viewport.SettingsFromStored(scan.ViewportPreset, scan.ViewportWidth, scan.ViewportHeight),
+		scan.IncludeLinkCheck,
 	)
 	if err != nil {
 		log.Printf("Failed to create rescan: %v", err)
@@ -383,6 +393,14 @@ func (h *Handler) DeleteScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var companion *models.LinkCheck
+	if h.links != nil {
+		companion, err = h.links.GetScanLinkCheck(r.Context(), id)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to load companion link check"})
+			return
+		}
+	}
 	deleted, err := h.repo.DeleteScan(r.Context(), id)
 	if err != nil {
 		log.Printf("Failed to delete scan: %v", err)
@@ -396,6 +414,9 @@ func (h *Handler) DeleteScan(w http.ResponseWriter, r *http.Request) {
 			"error": "Scan not found",
 		})
 		return
+	}
+	if companion != nil && h.linkRunner != nil {
+		h.linkRunner.Cancel(companion.ID)
 	}
 
 	if err := os.RemoveAll(screenshotDir(id)); err != nil {

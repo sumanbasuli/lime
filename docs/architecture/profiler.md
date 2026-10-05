@@ -4,7 +4,7 @@
 
 ## Responsibility
 
-To discover sitemap URLs, resolve page redirects, and return the eligible same-host pages to scan. It is not the accessibility scanner, a general crawler, or the link-checker preview's backend.
+To discover sitemap URLs, resolve page redirects, and return the eligible same-host pages to scan. It is not the accessibility scanner or the standalone link crawler. The separate [link checker](link-checker.md) can reuse a scan's persisted discovered page URLs as companion source pages after accessibility completes.
 
 ## Implementation
 

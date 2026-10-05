@@ -32,6 +32,8 @@ For release deployments, consistently include the actual `--env-file`, `-f`, pro
 | PNG URLs 404 after an update | Check the existing screenshot volume/root and exact scan/file; database paths are metadata, not image pixels |
 | MCP returns 401/403 or missing scores | Use the canonical dashboard `/mcp`, confirm enablement/key, and review [MCP Integration](../mcp.md); direct backend score cache can be null when cold/stale |
 | No release card | Inspect `/_lime/update-check`, server flag, browser visibility/dismissal, current version, and best-effort GitHub failure behavior |
+| Link companion stays queued | Check parent scan status; it waits for accessibility completion, remains queued during a pause, and has independent progress afterward |
+| Link targets are blocked, errored, or incomplete | Distinguish network policy, timeout/redirect/network errors, failed source fetches, and truncation; see [Link Checker Architecture](../architecture/link-checker.md) |
 
 ## Database And Migrations
 
@@ -81,6 +83,8 @@ Current source/docs Compose sets the report URL; release Compose and Fly require
 PDF/CSV/LLM toggles and the PDF limiter apply through dashboard routes. Direct backend PDF downloads bypass those Next controls. Report metadata availability is not proof a file has already been generated.
 
 ## Update Notice And Cache Expectations
+
+For link-check problems, inspect the job's own status, `pages_failed`, `truncated`, result categories, and `error_kind`; accessibility completion does not mean its companion has completed. Use a complete webpage URL reachable from Shopkeeper, not a sitemap XML file or a browser-only login URL. Extraction is HTML-only and does not verify fragment anchors. Entered root origins are trusted and may be private; external discovered destinations and off-origin redirects are restricted. Keep job-creation access protected instead of removing policy to make a blocked target pass. [Link Checker Architecture](../architecture/link-checker.md) covers limits, lifecycle, source/reference paging, and safe evidence collection.
 
 `LIME_UPDATE_CHECK` defaults on when unset; explicit false disables outbound GitHub checks. The per-browser setting only hides the card. Dismissing a release hides that exact tag on the same origin, not all future releases. The endpoint intentionally returns 200 with no latest release/card on best-effort failures; this is not a deployment failure. See [Updating LIME](updates.md).
 

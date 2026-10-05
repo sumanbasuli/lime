@@ -6,19 +6,20 @@ import (
 
 // Scan represents a top-level accessibility scan record.
 type Scan struct {
-	ID             string    `json:"id"`
-	SitemapURL     string    `json:"sitemap_url"`
-	Status         string    `json:"status"`
-	PauseRequested bool      `json:"pause_requested"`
-	ScanType       string    `json:"scan_type"`
-	Tag            *string   `json:"tag"`
-	ViewportPreset string    `json:"viewport_preset"`
-	ViewportWidth  int       `json:"viewport_width"`
-	ViewportHeight int       `json:"viewport_height"`
-	TotalURLs      int       `json:"total_urls"`
-	ScannedURLs    int       `json:"scanned_urls"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID               string    `json:"id"`
+	SitemapURL       string    `json:"sitemap_url"`
+	Status           string    `json:"status"`
+	PauseRequested   bool      `json:"pause_requested"`
+	ScanType         string    `json:"scan_type"`
+	Tag              *string   `json:"tag"`
+	ViewportPreset   string    `json:"viewport_preset"`
+	ViewportWidth    int       `json:"viewport_width"`
+	ViewportHeight   int       `json:"viewport_height"`
+	TotalURLs        int       `json:"total_urls"`
+	ScannedURLs      int       `json:"scanned_urls"`
+	IncludeLinkCheck bool      `json:"include_link_check"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // URL represents an individual page URL discovered during a scan.
@@ -113,10 +114,11 @@ type IssueWithOccurrences struct {
 
 // CreateScanRequest is the request body for POST /api/scans.
 type CreateScanRequest struct {
-	SitemapURL     string  `json:"sitemap_url"`
-	ScanType       string  `json:"scan_type,omitempty"`
-	Tag            *string `json:"tag,omitempty"`
-	ViewportPreset string  `json:"viewport_preset,omitempty"`
+	SitemapURL       string  `json:"sitemap_url"`
+	ScanType         string  `json:"scan_type,omitempty"`
+	Tag              *string `json:"tag,omitempty"`
+	ViewportPreset   string  `json:"viewport_preset,omitempty"`
+	IncludeLinkCheck bool    `json:"include_link_check,omitempty"`
 }
 
 // RetryFailedPagesResponse is the response body for POST /api/scans/{id}/retry-failed.

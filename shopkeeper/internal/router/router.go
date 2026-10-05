@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rs/cors"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/handler"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/linkchecker"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/mcp"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
 )
@@ -16,9 +17,15 @@ func Setup(
 	repo *repository.Repository,
 	scanner handler.ScanRunner,
 	reporter handler.IssueReportGenerator,
+	linkRunner ...*linkchecker.Runner,
 ) http.Handler {
 	r := chi.NewRouter()
 	h := handler.New(repo, scanner, reporter)
+	var lr handler.LinkRunner
+	if len(linkRunner) > 0 {
+		lr = linkRunner[0]
+	}
+	h.WithLinkChecker(repo, lr)
 
 	// Middleware
 	r.Use(middleware.Logger)
@@ -45,6 +52,18 @@ func Setup(
 		r.Get("/health", h.HealthCheck)
 		r.Get("/version", h.Version)
 		r.Get("/stats", h.GetStats)
+		r.Route("/link-checks", func(r chi.Router) {
+			r.Post("/", h.CreateLinkCheck)
+			r.Get("/", h.ListLinkChecks)
+			r.Get("/stats", h.LinkCheckStats)
+			r.Get("/{id}", h.GetLinkCheck)
+			r.Delete("/{id}", h.DeleteLinkCheck)
+			r.Get("/{id}/results", h.LinkResults)
+			r.Get("/{id}/results/{resultId}/sources", h.LinkSources)
+			r.Get("/{id}/export.csv", h.ExportLinksCSV)
+			r.Post("/{id}/cancel", h.CancelLinkCheck)
+			r.Post("/{id}/recheck", h.RecheckLinks)
+		})
 
 		r.Route("/scans", func(r chi.Router) {
 			r.Post("/", h.CreateScan)
@@ -56,6 +75,7 @@ func Setup(
 			r.Get("/{id}", h.GetScan)
 			r.Delete("/{id}", h.DeleteScan)
 			r.Get("/{id}/issues", h.GetScanIssues)
+			r.Get("/{id}/link-check", h.GetScanLinkCheck)
 			r.Get("/{id}/issues/report.pdf", h.DownloadIssueReport)
 			r.Post("/{id}/issues/{issueId}/false-positive", h.MarkIssueFalsePositive)
 			r.Delete("/{id}/issues/{issueId}/false-positive", h.UnmarkIssueFalsePositive)

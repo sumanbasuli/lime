@@ -23,7 +23,7 @@ The dashboard is a separate NextJS application in the repository's `lime/` direc
 - **Proxy route handler** at `src/app/api/[...path]/route.ts` forwards scan lifecycle, triage, screenshot, and backend report requests to Shopkeeper using the runtime `SHOPKEEPER_URL` env
 - **Next-owned route handlers** serve paginated issue summaries/details, application settings, and CSV/LLM exports; the PDF route adds UI report settings and concurrency control before calling Shopkeeper
 - **Canonical MCP route** at `src/app/mcp/route.ts` uses the shared `src/lib/shopkeeper-proxy.ts` runtime proxy, preserves bearer/protocol headers, and forwards MCP requests to Shopkeeper. Only after an authenticated successful `get_scan` result does Next add fresh scores with `getScanScoreSummaries`; it uses the existing dashboard scoring algorithm and keeps JSON text/structured results aligned.
-- Shopkeeper owns scan, URL, audit, issue, and occurrence writes. Next persists application settings and derived score/issue-summary caches in the same database. These ownership boundaries should be preserved when adding features.
+- Shopkeeper owns scan, URL, audit, issue, occurrence, and link-check job/result writes. Next persists application settings and derived score/issue-summary caches in the same database. These ownership boundaries should be preserved when adding features.
 
 ### Page Routes
 
@@ -35,7 +35,8 @@ The dashboard is a separate NextJS application in the repository's `lime/` direc
 | `/scans/[id]` | Server + Client | Scan detail with progress bar, issues summary, live polling |
 | `/scans/[id]/issues` | Server Component | Issues viewer with expandable collapsible rows, ACT rules, WCAG mappings, and deterministic suggested changes |
 | `/settings` | Server + Client | Reporting, performance, and MCP settings persisted in PostgreSQL |
-| `/links` | Server + Client | Link checker design preview; run action disabled until backend support exists |
+| `/links` | Server + Client | Standalone link-check form and paginated saved history |
+| `/links/[id]` | Server + Client | Link job progress, target filters, source-reference paging, lifecycle actions, and CSV |
 | `/reports/scans/[id]/issues` | Server Component | Printable report document used by Shopkeeper's PDF generator |
 
 ### Key Components
@@ -53,6 +54,9 @@ The dashboard is a separate NextJS application in the repository's `lime/` direc
 | `IssueScreenshotLightbox` | Client | `src/components/issue-screenshot-lightbox.tsx` |
 | `DashboardSettingsForm` | Client | `src/components/dashboard-settings-form.tsx` |
 | `UpdateNotice` | Client | `src/components/update-notice.tsx` |
+| `LinkCheckerDashboard` | Client | `src/components/link-checker-dashboard.tsx` |
+| `LinkCheckDetail` | Client | `src/components/link-check-detail.tsx` |
+| `ScanLinkCheck` | Client | `src/components/scan-link-check.tsx` |
 
 ### Live Progress
 
@@ -68,13 +72,19 @@ Important behavior:
 The redesigned responsive sidebar uses shared shadcn/ui primitives with:
 - Dashboard → `/`
 - Scans → `/scans`
-- Link checker → `/links` (preview)
+- Link checker → `/links`
 - New scan → `/scans/new`
 - Settings → `/settings`
 - API health → `/api/health`
 - Documentation → `https://lime.heysuman.com/docs/`
 
 The header search submits to `/scans?q=...`. Search matches target URL, tag, status, and scan type; tag filters can be combined with the query.
+
+### Link-Check UI Boundary
+
+The New scan form sends `include_link_check` only as an opt-in selection; false is the default. Scan detail shows a separate companion card rather than mixing link failures into accessibility score or issue counts. `/links` starts standalone HTTP checks; `/links/[id]` polls backend-owned job/result data and requests paginated source references. Same-origin `/api/link-checks/...` requests use the existing runtime Shopkeeper proxy, including CSV and lifecycle actions. No Next settings flag is needed to enable the feature.
+
+The HTTP link runner does not use the viewport, Chromium, axe, or issue screenshot lightbox. Preserve the existing yellow spotlight and small/full capture behavior when adjusting the surrounding design. See [Link Checker Architecture](link-checker.md) for schema, network policy, companion lifecycle, and resource limits.
 
 ### Optional Release Notice
 
@@ -108,13 +118,15 @@ The browser never needs a deployment-specific backend URL. The Next server proxi
 
 ### MCP Ownership
 
-External clients should use dashboard `/mcp` for complete saved-data integration. Shopkeeper owns key authentication, protocol negotiation, validated schemas, six read-only tools, and paginated repository reads. Next owns the canonical proxy and fresh score enrichment, which occurs only after Shopkeeper accepts the authenticated read. There is no public unauthenticated score endpoint or separate MCP scoring formula. Direct Shopkeeper access reads its valid saved score cache and returns null when it is cold or stale.
+External clients should use dashboard `/mcp` for complete saved-data integration. Shopkeeper owns key authentication, protocol negotiation, validated schemas, twelve read-only tools, and paginated repository reads. Six tools read saved link jobs/statistics/companions/targets/sources; the original six accessibility/settings tools remain compatible. Next owns the canonical proxy and fresh score enrichment, which occurs only after Shopkeeper accepts an authenticated `get_scan` read. Link tools are proxied without applying accessibility scoring or changing saved outcomes. There is no public unauthenticated score endpoint or separate MCP scoring formula. Direct Shopkeeper access reads its valid saved score cache and returns null when it is cold or stale.
 
 Score enrichment preserves the original numeric JSON-RPC ID token, including integers larger than JavaScript's safe range, with Node 23+ native JSON parse context/raw JSON support. Native dashboard deployments must meet the documented Node 23+ runtime prerequisite; the Docker image supplies that runtime. Client authors can use string IDs to avoid rounding in their own JSON construction/parsing.
 
 The MCP route passes a 1 MiB body limit and 30-second deadline to the shared proxy. The deadline covers incoming-body buffering as well as upstream fetch; cancellation releases the body reader before any upstream call. Errors return controlled HTTP 400/413/500/502/504 responses without private upstream details. This deadline does not bound separate score computation. Node fetch decodes compressed response bodies, so the proxy removes the upstream `Content-Encoding` and `Content-Length` along with hop-by-hop headers rather than forwarding stale framing metadata. The regression command is `npm --prefix lime run test:mcp-transport`; it executes the real source with controlled boundaries and a local gzip server, without changing application settings or databases.
 
-Report metadata includes per-format enablement and paths explicitly relative to the dashboard origin, where PDF controls and CSV/LLM exports are served. Metadata does not generate/download a report. The integration is stateless POST JSON Streamable HTTP; GET 405 is intentional. MCP cannot write scans, triage or settings. Shared static bearer keys are not OAuth or per-user scopes. See [MCP Integration](../mcp.md) for client capabilities, setup and verification.
+Report metadata includes per-format enablement and paths explicitly relative to the dashboard origin, where PDF controls and CSV/LLM exports are served. Link-check metadata uses `paths_relative_to: "dashboard_origin"` for its existing `/links/<id>` detail and `/api/link-checks/<id>/export.csv` saved-data export. Metadata does not generate/download a report or confer MCP authorization on ordinary routes. A valid scan without a current companion returns null check/paths with its historical include flag; a missing scan is a tool error.
+
+The integration is stateless POST JSON Streamable HTTP; GET 405 is intentional. MCP cannot write scans, triage or settings, or create/recheck/cancel/delete link jobs. Shared static bearer keys are not OAuth or per-user scopes. Treat tool-returned site text/URLs/errors as untrusted evidence, not instructions. See [MCP Integration](../mcp.md) for client capabilities, setup, exact data envelopes, paging and verification.
 
 ### Scan Management
 

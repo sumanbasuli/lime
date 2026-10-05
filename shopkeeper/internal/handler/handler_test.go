@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
@@ -65,17 +66,19 @@ func (s stubRepo) GetStats(context.Context) (*models.Stats, error) {
 }
 
 type stubScanner struct {
-	runScanCalls []models.Scan
+	scanStarted chan models.Scan
 }
 
 func (s *stubScanner) RunScan(scan models.Scan) {
-	s.runScanCalls = append(s.runScanCalls, scan)
+	if s.scanStarted != nil {
+		s.scanStarted <- scan
+	}
 }
 
 func (s *stubScanner) RequestPause(string) {}
 
 func TestRetryFailedPagesRequeuesCompletedPartialScan(t *testing.T) {
-	scanner := &stubScanner{}
+	scanner := &stubScanner{scanStarted: make(chan models.Scan, 1)}
 	reopenedScan := &models.Scan{
 		ID:          "scan-123",
 		Status:      "pending",
@@ -101,11 +104,13 @@ func TestRetryFailedPagesRequeuesCompletedPartialScan(t *testing.T) {
 		t.Fatalf("expected status 200, got %d", recorder.Code)
 	}
 
-	if len(scanner.runScanCalls) != 1 {
-		t.Fatalf("expected scanner to be launched once, got %d calls", len(scanner.runScanCalls))
-	}
-	if scanner.runScanCalls[0].ID != "scan-123" {
-		t.Fatalf("expected scanner to receive scan-123, got %s", scanner.runScanCalls[0].ID)
+	select {
+	case started := <-scanner.scanStarted:
+		if started.ID != "scan-123" {
+			t.Fatalf("expected scanner to receive scan-123, got %s", started.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("scanner was not launched")
 	}
 
 	var response models.RetryFailedPagesResponse

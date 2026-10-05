@@ -12,6 +12,7 @@ LIME is a self-hosted accessibility scanner built with axe-core, Chromium, Postg
 | Host an instance for a team | [Docker deployment](deployment/docker.md), [Debian](deployment/debian.md), or [Fly.io](deployment/fly.md) | [Backups and restore](deployment/backup-restore.md), then [updates](deployment/updates.md) |
 | Fix an installation or scan problem | [Operator troubleshooting](deployment/troubleshooting.md) | [Setup diagnostics](setup.md) |
 | Connect an AI tool | [User MCP guide](https://lime.heysuman.com/docs/user/mcp/) | [MCP protocol and integration reference](mcp.md) |
+| Check broken destinations | [User link-checker guide](https://lime.heysuman.com/docs/user/link-checker/) | [Link checker architecture and limits](architecture/link-checker.md) |
 | Change the code | [Contributing](../CONTRIBUTING.md) | [Architecture](architecture/shopkeeper.md) and [verification](verification.md) |
 | Improve the website or guides | [Docs site](docs-site.md) | [Verification and handoff](verification.md) |
 
@@ -40,6 +41,7 @@ LIME is a self-hosted accessibility scanner built with axe-core, Chromium, Postg
 | [Profiler](architecture/profiler.md) | Sitemap discovery and URL collection |
 | [Juicer](architecture/juicer.md) | Chromium workers, axe-core audits, and screenshot capture |
 | [Sweetner](architecture/sweetner.md) | Normalize and group audit evidence |
+| [Link checker](architecture/link-checker.md) | Bounded HTTP extraction and destination checks, saved source references, and scan companions |
 | [Dashboard](architecture/ui.md) | Results, scoring, triage, reports, settings, and same-origin proxy routes |
 
 - [Database](database.md): schema, migrations, and data ownership.

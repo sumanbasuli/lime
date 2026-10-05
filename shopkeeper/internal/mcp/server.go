@@ -42,6 +42,12 @@ type Repository interface {
 	GetMCPIssueSummaries(ctx context.Context, scanID string, limit, offset int) ([]models.MCPIssueSummary, int, error)
 	GetMCPIssueDetail(ctx context.Context, scanID, kind, key string, limit, offset int) (*models.MCPIssueDetail, error)
 	GetMCPVisibleSettings(ctx context.Context) (*models.MCPVisibleSettings, error)
+	ListLinkChecks(ctx context.Context, limit, offset int) ([]models.LinkCheck, int, error)
+	GetLinkCheck(ctx context.Context, id string) (*models.LinkCheck, error)
+	GetLinkCheckStats(ctx context.Context) (map[string]int64, error)
+	GetScanLinkCheck(ctx context.Context, scanID string) (*models.LinkCheck, error)
+	GetLinkResults(ctx context.Context, checkID, status string, limit, offset int) ([]models.LinkResult, int, error)
+	GetLinkSources(ctx context.Context, checkID, resultID string, limit, offset int) ([]models.LinkSource, int, bool, error)
 }
 
 type Server struct {
@@ -313,11 +319,23 @@ func (s *Server) handleToolCall(ctx context.Context, raw json.RawMessage) (any, 
 		result, err = s.getReportMetadata(ctx, arguments)
 	case "get_settings":
 		result, err = s.repo.GetMCPVisibleSettings(ctx)
+	case "list_link_checks":
+		result, err = s.listLinkChecks(ctx, arguments)
+	case "get_link_check":
+		result, err = s.getLinkCheck(ctx, arguments)
+	case "get_link_check_stats":
+		result, err = s.getLinkCheckStats(ctx)
+	case "get_scan_link_check":
+		result, err = s.getScanLinkCheck(ctx, arguments)
+	case "list_link_check_results":
+		result, err = s.listLinkCheckResults(ctx, arguments)
+	case "list_link_check_sources":
+		result, err = s.listLinkCheckSources(ctx, arguments)
 	default:
 		return nil, &rpcError{Code: -32602, Message: "unknown tool"}
 	}
 	if err != nil {
-		if errors.Is(err, errScanNotFound) || errors.Is(err, errIssueNotFound) {
+		if errors.Is(err, errScanNotFound) || errors.Is(err, errIssueNotFound) || errors.Is(err, errLinkCheckNotFound) || errors.Is(err, errLinkResultNotFound) {
 			return toolError(err.Error()), nil
 		}
 		log.Printf("MCP tool %s failed: %v", params.Name, err)
@@ -442,7 +460,7 @@ func (s *Server) getReportMetadata(ctx context.Context, args map[string]any) (an
 }
 
 func tools() []map[string]any {
-	return []map[string]any{
+	return append([]map[string]any{
 		tool("list_scans", "List scans with status and progress metadata.", map[string]any{
 			"limit":  integerSchema("Maximum scans to return.", 1, 100, 20),
 			"offset": integerSchema("Number of scans to skip.", 0, 100000, 0),
@@ -466,7 +484,7 @@ func tools() []map[string]any {
 			"scan_id": uuidSchema("Scan ID."),
 		}, "scan_id"),
 		tool("get_settings", "Read MCP settings visible to clients.", map[string]any{}),
-	}
+	}, linkTools()...)
 }
 
 func tool(name, description string, properties map[string]any, required ...string) map[string]any {

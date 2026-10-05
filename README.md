@@ -35,7 +35,8 @@ Migrations apply on boot, interrupted scans recover on restart, and deployment h
 - **Pause and resume** - cooperatively pause an active scan and continue pending pages on the same scan.
 - **Scan recovery** - non-terminal scans resume after Shopkeeper restarts.
 - **Update notice** - enabled-by-default release checks and a sidebar banner when a newer GitHub release is available; server and browser controls let you opt out.
-- **Read-only MCP** - let compatible AI clients inspect saved scans, scores, issues, report availability, and settings with a generated bearer key.
+- **Read-only MCP** - let compatible AI clients inspect saved scans, scores, issues, link-check jobs/destinations/source references, report availability, and settings with a generated bearer key; no scan or link-check mutation tools.
+- **Link checker (unreleased source)** - bounded single-page or same-origin crawl checks with saved destinations/source references and CSV; opt in with **Include link check** on a normal accessibility scan without changing its score or screenshots. Six additive MCP tools read its saved history, totals, companion status, targets, and paginated references through the existing endpoint/key.
 - **Three deploy targets** - Fly.io, Docker, and Debian systemd.
 
 ## Architecture
@@ -176,13 +177,13 @@ Public docs are published at [lime.heysuman.com/docs](https://lime.heysuman.com/
 
 To review the complete marketing website and docs locally, install the docs dependencies with `npm --prefix docs-site ci`, then run `make docs-dev`. Open [http://localhost:3001](http://localhost:3001) for the website or [http://localhost:3001/docs/](http://localhost:3001/docs/) for documentation. `LIME_DOCS_PORT` overrides that port. The product dashboard runs separately at [http://localhost:3000](http://localhost:3000).
 
-`make docs` refreshes the docs site locally. It uses a separate `lime-docs` Docker Compose project, separate Postgres and screenshot volumes, non-default ports, and fresh single-page demo scans for `https://heysuman.com`, `https://www.fake-university.com/`, and `https://overlaysdontwork.com/` so it never screenshots current private/local scans.
+`make docs` refreshes the docs site locally. It uses a separate `lime-docs` Docker Compose project, separate Postgres and screenshot volumes, non-default ports, fresh single-page demo scans for `https://heysuman.com`, `https://www.fake-university.com/`, and `https://overlaysdontwork.com/`, and a new standalone link check for the selected capture target. It supplies explicit isolated IDs and refreshes ten product images, never current private/local scans. See [Docs Site](docs/docs-site.md) for capture arguments, wait boundaries, assertions, and cleanup.
 
-For the project handoff, feature verification matrix, isolated test workflow, and current verification evidence, see [Verification And Handoff](docs/verification.md). The **Link checker** screen is a design preview; backend checks and persisted results are not available yet.
+For the project handoff, feature verification matrix, isolated test workflow, and current verification evidence, see [Verification And Handoff](docs/verification.md). The working **Link checker** replaces the earlier design preview in unreleased source: see the [user guide](https://lime.heysuman.com/docs/user/link-checker/) and [architecture/limits](docs/architecture/link-checker.md). Published images may not include this source change yet. Link reachability is separate from accessibility scoring and does not verify fragment anchors or JavaScript-created links.
 
 ## AI Client Integration
 
-Use the dashboard's `http://localhost:3000/mcp` locally, or its reachable HTTPS `/mcp` URL remotely. Generate a key in **Settings > Integrations**, then configure a client supporting Streamable HTTP with a bearer header (or a reviewed local stdio bridge). The [MCP guide](docs/mcp.md) covers Codex, Claude Code, Cursor, VS Code, key rotation, troubleshooting, and a read-only SDK smoke test. The integration exposes six read-only tools; it does not create scans or change triage/settings. OAuth-only connectors are not supported, and localhost is not reachable from a cloud client.
+Use the dashboard's `http://localhost:3000/mcp` locally, or its reachable HTTPS `/mcp` URL remotely. Generate a key in **Settings > Integrations**, then configure a client supporting Streamable HTTP with a bearer header (or a reviewed local stdio bridge). The [MCP guide](docs/mcp.md) covers Codex, Claude Code, Cursor, VS Code, key rotation, troubleshooting, and a read-only SDK smoke test. The integration exposes twelve read-only tools, including saved link-check history/statistics, companions, destinations, and full retained source paging. It does not create/change scans, link checks, triage or settings. Link dashboard/CSV metadata does not authorize those ordinary HTTP routes. Optional `LIME_MCP_LINK_CHECK_ID` selects saved evidence for the operator smoke test; its `checked` output distinguishes actual reads from tool discovery. OAuth-only connectors are not supported, and localhost is not reachable from a cloud client.
 
 ## Contributing
 

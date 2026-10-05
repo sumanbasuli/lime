@@ -13,6 +13,7 @@ function getBreadcrumb(pathname: string): string {
   if (/^\/scans\/[^/]+\/issues$/.test(pathname)) return "Scans · Issues";
   if (/^\/scans\/[^/]+$/.test(pathname)) return "Scans · Scan details";
   if (pathname === "/links") return "Link checker";
+  if (/^\/links\/[^/]+$/.test(pathname)) return "Link checker · Check details";
   if (pathname === "/settings") return "Settings";
   return "Workspace";
 }

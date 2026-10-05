@@ -1,6 +1,6 @@
 # Database Architecture
 
-LIME uses PostgreSQL as the shared durable store for scan configuration, progress, findings, audit outcomes, settings, and derived score/issue summaries. Screenshot pixels live on a separate filesystem volume, not in PostgreSQL.
+LIME uses PostgreSQL as the shared durable store for scan configuration, progress, findings, audit outcomes, link checks/results, settings, and derived score/issue summaries. Screenshot pixels live on a separate filesystem volume, not in PostgreSQL.
 
 ## Engine And Access Model
 
@@ -17,7 +17,9 @@ Both services must connect to the same database. Shopkeeper's pool uses a maximu
 scans ── urls ── url_audits / url_audit_occurrences
   │         └── issue_occurrences ── issues
   ├── issues
+  ├── link_checks ── link_check_results
   └── scan_score_summary_cache / scan_issue_summary_cache / scan_report_data_cache
+standalone link_checks (scan_id = null) ── link_check_results
 app_settings (one server-wide row, key = 'global')
 ```
 
@@ -33,6 +35,7 @@ Key fields:
 
 - target URL, scan type, tag, viewport preset, and stored viewport dimensions
 - status and pause-request state
+- `include_link_check`: optional companion selection, default `false`
 - total and scanned URL counters
 - created and updated timestamps
 
@@ -97,6 +100,19 @@ Key fields:
 - HTML snippet
 - page and element screenshot paths
 - created timestamp
+
+### `link_checks` And `link_check_results`
+
+Migration `000013_add_link_checks` adds the default-false `scans.include_link_check` selection and two backend-owned tables:
+
+- `link_checks` stores the root URL, mode (`single`, `crawl`, or companion `scan`), nullable unique parent `scan_id`, configured page cap, lifecycle status, progress counters, truncation/error, JSONB summary and internal seed URLs, and timestamps.
+- `link_check_results` stores a deduplicated target URL per check, response category/code/final URL/redirect count, link type, occurrence count, JSONB source references, and optional error/error-kind.
+
+Statuses are `queued`, `running`, `completed`, `failed`, and `cancelled`. Result categories are `healthy`, `redirected`, `broken`, `error`, `blocked`, and `unchecked`; summary `timeout` is a subset of errors, not another result category. Source-preview reads are bounded independently of full source-reference paging.
+
+The unique nullable `scan_id` allows at most one companion per scan while permitting independent standalone jobs. Deleting a scan cascades to its companion and target rows; deleting a standalone check cascades to its target rows. This does not share or mutate accessibility issue/audit/cache tables. Checks are HTTP-only and have no screenshot tree of their own.
+
+Recent-job and active-status indexes support history and startup recovery; `(link_check_id, status, target_url)` supports paginated target filtering, and `(link_check_id, target_url)` prevents duplicate destinations. See [Link Checker Architecture](architecture/link-checker.md) for lifecycle, bounded extraction, and network rules.
 
 ### `app_settings`
 
@@ -172,7 +188,7 @@ SELECT status, count(*) FROM scans GROUP BY status ORDER BY status;
 SELECT status, count(*) FROM urls GROUP BY status ORDER BY status;
 ```
 
-These are diagnostic reads, not recovery operations. SQL migrations currently run through `000012_add_report_data_cache`; inspect the checked-out release's files rather than assuming a fixed version forever.
+These are diagnostic reads, not recovery operations. Unreleased source includes `000013_add_link_checks` after `000012_add_report_data_cache`; inspect the checked-out release's files rather than assuming a fixed version forever. The new selection defaults to false for existing scan rows; adding the checker does not enable companions retroactively.
 
 ## Backup Boundary
 

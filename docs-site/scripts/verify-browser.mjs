@@ -125,7 +125,7 @@ try {
   await interactionPage.goto(baseUrl + "/docs/", { waitUntil: "networkidle" });
   await interactionPage.getByRole("button", { name: /search docs/i }).click();
   await interactionPage.getByPlaceholder(/search partial retry/i).fill("link checker");
-  await interactionPage.getByRole("link", { name: /link checker preview/i }).first().waitFor();
+  await interactionPage.getByRole("link", { name: /link checker/i }).first().waitFor();
   const searchUrl = interactionPage.url();
   await interactionPage.getByRole("button", { name: "Close search" }).focus();
   await interactionPage.keyboard.press("Enter");
@@ -138,7 +138,7 @@ try {
   }
   await interactionPage.getByRole("button", { name: /search docs/i }).click();
   const searchDialog = interactionPage.getByRole("dialog", { name: /search docs/i });
-  await searchDialog.getByRole("link", { name: /link checker preview/i }).first().waitFor();
+  await searchDialog.getByRole("link", { name: /link checker/i }).first().waitFor();
   await interactionPage.getByRole("textbox", { name: "Search documentation" }).focus();
   await interactionPage.keyboard.press("Shift+Tab");
   const lastResult = searchDialog.getByRole("link").last();

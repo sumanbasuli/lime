@@ -56,6 +56,12 @@ make start-all`}
                 Create first scan <MaterialSymbol name="arrow_forward" size={18} />
               </a>
             </Button>
+            <p className="mt-4 text-sm leading-6 text-black/70">
+              In source versions with link checking, select <strong>Include link check</strong> when
+              creating a scan, or use <strong>Link checker</strong> for a separate page or crawl.
+              Read the <a href={withBasePath("/docs/user/link-checker/")} className="font-semibold underline">link checker guide</a> for
+              scope, saved results, and limits. Unreleased source features may not exist in a published image yet.
+            </p>
           </CardContent>
         </Card>
 

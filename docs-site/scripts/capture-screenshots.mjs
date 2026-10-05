@@ -17,6 +17,7 @@ function readArg(name, fallback) {
 const baseUrl = readArg("--base-url", process.env.LIME_DOCS_UI_URL ?? "http://localhost:13000").replace(/\/$/, "");
 const scanId = readArg("--scan-id", process.env.LIME_DOCS_SCAN_ID);
 const partialScanId = readArg("--partial-scan-id", process.env.LIME_DOCS_PARTIAL_SCAN_ID ?? scanId);
+const linkCheckId = readArg("--link-check-id", process.env.LIME_DOCS_LINK_CHECK_ID);
 const outputDir = path.resolve(readArg("--output", path.join(docsSiteRoot, "public", "product-screenshots")));
 
 try {
@@ -28,6 +29,10 @@ try {
 
 if (!scanId) {
   console.error("Missing --scan-id. The docs screenshot runner must target the isolated docs-demo scan explicitly.");
+  process.exit(1);
+}
+if (!linkCheckId) {
+  console.error("Missing --link-check-id. Capture a completed check from the isolated docs-demo stack explicitly.");
   process.exit(1);
 }
 
@@ -42,6 +47,7 @@ function isExpectedOptionalRequest(url) {
 }
 
 async function capture(page, url, fileName, options = {}) {
+  await page.setViewportSize(options.viewport ?? { width: 1440, height: 1000 });
   runtimeErrors.length = 0;
   const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 90_000 });
   if (!response?.ok()) {
@@ -146,6 +152,20 @@ try {
     afterLoad: async (currentPage) => {
       await currentPage.getByRole("heading", { name: /link checker/i }).waitFor();
       await currentPage.getByRole("button", { name: /start link check/i }).waitFor();
+      await currentPage.getByRole("link", { name: /view link check for/i }).first().waitFor();
+    },
+  });
+  await capture(page, `${baseUrl}/links/${linkCheckId}`, "link-check-results.png", {
+    viewport: { width: 1440, height: 1600 },
+    afterLoad: async (currentPage) => {
+      await currentPage.getByRole("heading", { name: "Link check details", exact: true }).waitFor();
+      await currentPage.getByRole("heading", { name: "Link targets", exact: true }).waitFor();
+      await currentPage.locator('section[aria-labelledby="link-target-title"] article').first().waitFor();
+      await currentPage.getByRole("button", { name: "Recheck", exact: true }).waitFor();
+      const firstTarget = currentPage.locator('section[aria-labelledby="link-target-title"] article').first();
+      await firstTarget.getByRole("button", { name: /show sources/i }).click();
+      await firstTarget.getByRole("heading", { name: "Referenced from", exact: true }).waitFor();
+      await firstTarget.locator("li").first().waitFor();
     },
   });
   await capture(page, `${baseUrl}/scans/${scanId}`, "scan-detail.png");

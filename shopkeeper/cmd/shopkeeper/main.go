@@ -14,6 +14,7 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/config"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/database"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/linkchecker"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/reporter"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/router"
@@ -58,9 +59,14 @@ func main() {
 	if err := sc.RecoverInterruptedScans(); err != nil {
 		log.Printf("Scanner recovery failed: %v", err)
 	}
+	lc := linkchecker.NewRunner(repo)
+	if err := lc.Start(context.Background()); err != nil {
+		log.Fatalf("Link checker recovery failed: %v", err)
+	}
+	defer lc.Stop()
 
 	// Setup router with scan and report handlers.
-	mux := router.Setup(repo, sc, pdfReporter)
+	mux := router.Setup(repo, sc, pdfReporter, lc)
 
 	// Create server
 	srv := &http.Server{

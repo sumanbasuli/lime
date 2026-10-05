@@ -24,6 +24,17 @@ const milestones = [
     ],
   },
   {
+    tag: "Unreleased",
+    tone: "yellow",
+    title: "Link checking",
+    items: [
+      "Standalone single-page and bounded same-origin crawl checks",
+      "Optional Include link check companion for accessibility scans",
+      "Saved target results, source references, progress, cancellation, rechecks, and CSV",
+      "HTTP-only extraction with explicit network and resource limits; no effect on accessibility scoring",
+    ],
+  },
+  {
     tag: "Next priorities",
     tone: "yellow",
     title: "Validation and hardening",
@@ -39,7 +50,7 @@ const milestones = [
     tone: "outline",
     title: "Future product work",
     items: [
-      "Link Checker backend validation and saved results — the current screen is a preview",
+      "Link-check coverage feedback before adding scheduling or JavaScript-rendered extraction",
       "MCP diagnostics, origin policies, or session support when client needs justify them",
       "Deferred: OAuth, scoped keys, write tools, and multi-user authentication",
     ],
@@ -66,7 +77,8 @@ export default function RoadmapPage() {
           <p className="mt-4 max-w-[600px] text-base leading-[1.6] text-black/65">
             What is available in the current 1.x codebase, what still needs
             validation, and what we may build next. Planned items are not
-            available features or release-date promises.
+            available features or release-date promises. Unreleased items describe
+            the current source work, not a deployed or published release.
           </p>
 
           <div className="mt-11 flex flex-col gap-4">

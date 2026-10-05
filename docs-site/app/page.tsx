@@ -51,14 +51,14 @@ const features = [
   },
   {
     icon: "link",
-    title: "Link checker preview",
-    copy: "The redesigned dashboard includes the complete link-checker workflow and status UI, ready for backend checks in a later release.",
-    badge: "Preview",
+    title: "Find broken destinations",
+    copy: "Check one page, crawl same-origin pages, or include a companion link check with an accessibility scan. Review saved destinations and export CSV.",
+    badge: "New · unreleased",
   },
   {
     icon: "smart_toy",
     title: "MCP for AI tools",
-    copy: "A read-only MCP endpoint lets AI clients query scans and issues for assisted remediation, gated by a generated key.",
+    copy: "A read-only MCP endpoint lets AI clients inspect scans, issues, saved link checks and source references, gated by a generated key.",
   },
 ];
 

@@ -13,12 +13,20 @@ The existing product includes:
 - Scan-level and issue-scoped PDF, CSV, and LLM exports, with reporting limits and export flags.
 - Server-wide Reporting, Performance, and Integrations settings stored in PostgreSQL.
 - PostgreSQL score/issue-summary read caches, paginated occurrence reads, request timing, and a dashboard PDF-generation concurrency cap.
-- A redesigned dashboard, static marketing website/docs, and a Link checker design preview.
+- A redesigned dashboard and static marketing website/docs.
 - A read-only MCP endpoint, one generated instance key, and six bounded tools for saved data.
 - Source-built Docker development, published images/release bundles, and Docker, Fly.io, and Debian deployment/update helpers.
 - Contributor/security guidance and release publishing tied to `VERSION` and `CHANGELOG.md`.
 
 The deterministic verification suite covers existing dashboard/API/data workflows in an isolated production stack. MCP checks include pinned official SDK v1/v2 clients and a pinned local stdio bridge. These checks do not establish that every installed AI application or remote deployment has connected.
+
+## Current Unreleased Feature
+
+### Link Checker
+
+The source now replaces the earlier preview with standalone single-page and bounded same-origin crawl checks, saved destinations/source references, progress, cancellation, fresh rechecks, deletion, and CSV. A default-off **Include link check** checkbox creates a companion for normal accessibility scans; the companion runs after accessibility finishes and does not alter scoring, issue groups, reports, or screenshot evidence.
+
+This describes unreleased source, not a published image, remote deployment, or production-load claim. Read [Link Checker Architecture](architecture/link-checker.md) and the [user guide](https://lime.heysuman.com/docs/user/link-checker/) for HTTP-only extraction, fragment/network limitations, resource budgets, and lifecycle behavior. The dated [verification record](verification.md) is the authority for checks actually performed.
 
 ## Next Validation And Hardening Priorities
 
@@ -55,9 +63,9 @@ Collect evidence from real client/deployment combinations before extending the p
 
 ## Future Product Work
 
-### Link Checker
+### Broader Link-Checking Workflows
 
-The current screen is a design preview with a disabled run action. Link checking, persisted runs/results, progress, retries, and exports need a backend workflow and end-to-end verification before the feature can be described as available. Add user instructions and API/reference documentation alongside that implementation, not ahead of it.
+Gather real-site feedback before expanding one-shot checking into scheduled monitoring, notifications, JavaScript-rendered extraction, authenticated crawling, or fragment-anchor verification. None of those follow automatically from HTTP reachability checking. Keep resource and network boundaries explicit when adding a new extraction mode.
 
 ### Integration Boundaries
 

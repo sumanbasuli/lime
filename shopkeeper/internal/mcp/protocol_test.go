@@ -22,24 +22,42 @@ const testToken = "lime-test-only-key"
 // This stub counts data reads separately from per-request authentication so
 // malformed inputs can be shown not to reach UUID casts or data queries.
 type stubRepository struct {
-	auth     *models.MCPAuthSettings
-	calls    int
-	err      error
-	scan     *models.Scan
-	score    *models.MCPScanScoreSummary
-	detail   *models.MCPIssueDetail
-	settings *models.MCPVisibleSettings
-	limit    int
-	offset   int
+	auth        *models.MCPAuthSettings
+	calls       int
+	err         error
+	scan        *models.Scan
+	score       *models.MCPScanScoreSummary
+	detail      *models.MCPIssueDetail
+	settings    *models.MCPVisibleSettings
+	limit       int
+	offset      int
+	check       *models.LinkCheck
+	checks      []models.LinkCheck
+	companion   *models.LinkCheck
+	results     []models.LinkResult
+	sources     []models.LinkSource
+	linkStats   map[string]int64
+	linkTotal   int
+	sourceFound bool
+	checkID     string
+	resultID    string
+	linkStatus  string
+	linkErr     error
 }
 
 func newStubRepository() *stubRepository {
 	sum := sha256.Sum256([]byte(testToken))
 	hash := hex.EncodeToString(sum[:])
 	return &stubRepository{
-		auth:   &models.MCPAuthSettings{Enabled: true, KeyHash: &hash},
-		scan:   &models.Scan{ID: testScanID, Status: "completed", TotalURLs: 2, ScannedURLs: 2},
-		detail: &models.MCPIssueDetail{Summary: models.MCPIssueSummary{Key: testIssueID}, Occurrences: []models.IssueOccurrence{}},
+		auth:        &models.MCPAuthSettings{Enabled: true, KeyHash: &hash},
+		scan:        &models.Scan{ID: testScanID, Status: "completed", TotalURLs: 2, ScannedURLs: 2},
+		detail:      &models.MCPIssueDetail{Summary: models.MCPIssueSummary{Key: testIssueID}, Occurrences: []models.IssueOccurrence{}},
+		check:       &models.LinkCheck{ID: testCheckID, URL: "https://example.test", Status: "completed", CheckType: "single"},
+		checks:      []models.LinkCheck{},
+		results:     []models.LinkResult{},
+		sources:     []models.LinkSource{},
+		sourceFound: true,
+		linkStats:   map[string]int64{"total_checks": 0},
 		settings: &models.MCPVisibleSettings{
 			Reporting:    map[string]any{"pdf_reports_enabled": false, "csv_reports_enabled": true, "llm_reports_enabled": false},
 			Integrations: map[string]any{"mcp_enabled": true, "mcp_mode": "read_only"},
@@ -76,6 +94,39 @@ func (r *stubRepository) GetMCPIssueDetail(_ context.Context, _, _, _ string, li
 func (r *stubRepository) GetMCPVisibleSettings(context.Context) (*models.MCPVisibleSettings, error) {
 	r.calls++
 	return r.settings, r.err
+}
+
+func (r *stubRepository) ListLinkChecks(_ context.Context, limit, offset int) ([]models.LinkCheck, int, error) {
+	r.calls++
+	r.limit, r.offset = limit, offset
+	return r.checks, r.linkTotal, r.linkErr
+}
+func (r *stubRepository) GetLinkCheck(_ context.Context, id string) (*models.LinkCheck, error) {
+	r.calls++
+	r.checkID = id
+	if r.check == nil || !strings.EqualFold(r.check.ID, id) {
+		return nil, r.err
+	}
+	return r.check, r.err
+}
+func (r *stubRepository) GetLinkCheckStats(context.Context) (map[string]int64, error) {
+	r.calls++
+	return r.linkStats, r.linkErr
+}
+func (r *stubRepository) GetScanLinkCheck(_ context.Context, scanID string) (*models.LinkCheck, error) {
+	r.calls++
+	r.checkID = scanID
+	return r.companion, r.linkErr
+}
+func (r *stubRepository) GetLinkResults(_ context.Context, checkID, status string, limit, offset int) ([]models.LinkResult, int, error) {
+	r.calls++
+	r.checkID, r.linkStatus, r.limit, r.offset = checkID, status, limit, offset
+	return r.results, r.linkTotal, r.linkErr
+}
+func (r *stubRepository) GetLinkSources(_ context.Context, checkID, resultID string, limit, offset int) ([]models.LinkSource, int, bool, error) {
+	r.calls++
+	r.checkID, r.resultID, r.limit, r.offset = checkID, resultID, limit, offset
+	return r.sources, r.linkTotal, r.sourceFound && strings.EqualFold(checkID, testCheckID) && strings.EqualFold(resultID, testResultID), r.linkErr
 }
 
 func postRPC(server *Server, body string, headers map[string]string) *httptest.ResponseRecorder {
@@ -230,8 +281,8 @@ func TestInitializeNegotiation(t *testing.T) {
 
 func TestToolSchemasAndArgumentValidation(t *testing.T) {
 	definitions := tools()
-	if len(definitions) != 6 {
-		t.Fatalf("expected six existing tools, got %d", len(definitions))
+	if len(definitions) != 12 {
+		t.Fatalf("expected six existing and six Link Checker tools, got %d", len(definitions))
 	}
 	for _, definition := range definitions {
 		annotations := definition["annotations"].(map[string]any)

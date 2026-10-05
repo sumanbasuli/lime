@@ -17,7 +17,7 @@ export const productScreenshots: ProductScreenshot[] = [
   {
     id: "new-scan",
     title: "New Scan",
-    caption: "Start sitemap or single-page checks with viewport presets and tags.",
+    caption: "Start sitemap or single-page audits with viewport presets, tags, and an optional companion link check.",
     alt: "New scan form in LIME.",
     src: "/product-screenshots/new-scan.png",
   },
@@ -65,9 +65,16 @@ export const productScreenshots: ProductScreenshot[] = [
   },
   {
     id: "link-checker",
-    title: "Link Checker Preview",
-    caption: "Design preview only: link validation and saved results are not implemented.",
-    alt: "LIME link checker design preview, not a working link scan.",
+    title: "Link Checker",
+    caption: "Start a bounded page or site check and revisit saved runs.",
+    alt: "LIME Link checker page for starting and reviewing link checks.",
     src: "/product-screenshots/link-checker.png",
+  },
+  {
+    id: "link-check-results",
+    title: "Link Check Results",
+    caption: "Saved destination status and grouped source references.",
+    alt: "LIME link-check detail page with destination status filters and source references.",
+    src: "/product-screenshots/link-check-results.png",
   },
 ];

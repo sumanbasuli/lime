@@ -6,6 +6,13 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 export const MCP_TOOL_NAMES = [
   "list_scans", "get_scan", "list_scan_issues", "get_issue_detail",
   "get_report_metadata", "get_settings",
+  "list_link_checks", "get_link_check", "get_link_check_stats",
+  "get_scan_link_check", "list_link_check_results", "list_link_check_sources",
+];
+
+export const MCP_LINK_TOOL_NAMES = [
+  "list_link_checks", "get_link_check", "get_link_check_stats",
+  "get_scan_link_check", "list_link_check_results", "list_link_check_sources",
 ];
 
 // Real SDK handshake, including initialized notification and negotiated headers.
@@ -54,6 +61,39 @@ export async function readMcpTool(client, name, args = {}) {
   return result.structuredContent;
 }
 
+// Read only records already saved by the dashboard. Empty histories and scans
+// without companions are valid; checked contains only tools actually called.
+export async function readMcpLinkTools(client, { scanId, checkId, checked = [] } = {}) {
+  const read = async (name, args) => {
+    const data = await readMcpTool(client, name, args);
+    checked.push(name);
+    return data;
+  };
+  const history = await read("list_link_checks", { limit: 1 });
+  assert.ok(Array.isArray(history.checks), "Link history returns saved check records");
+  await read("get_link_check_stats");
+  if (scanId) {
+    const companion = await read("get_scan_link_check", { scan_id: scanId });
+    assert.equal(companion.scan_id, scanId);
+    assert.equal(companion.paths_relative_to, "dashboard_origin");
+  }
+  const id = checkId || history.checks[0]?.id;
+  if (id) {
+    const detail = await read("get_link_check", { check_id: id });
+    assert.equal(detail.check.id, id);
+    assert.equal(detail.dashboard_path, `/links/${id}`);
+    assert.equal(detail.csv_path, `/api/link-checks/${id}/export.csv`);
+    assert.equal(detail.paths_relative_to, "dashboard_origin");
+    const results = await read("list_link_check_results", { check_id: id, limit: 1 });
+    assert.ok(Array.isArray(results.results), "Saved destinations are available through MCP");
+    if (results.results[0]) {
+      const sources = await read("list_link_check_sources", { check_id: id, result_id: results.results[0].id, limit: 1 });
+      assert.ok(Array.isArray(sources.sources), "Saved source references are available through MCP");
+    }
+  }
+  return checked;
+}
+
 // Optional operator smoke test: read-only, never enables MCP or rotates a key.
 export async function verifyMcpReadClient(url, key, scanId, options) {
   const { client, trace } = await connectMcp(url, key, options);
@@ -80,6 +120,7 @@ export async function verifyMcpReadClient(url, key, scanId, options) {
         checked.push("get_issue_detail");
       }
     }
+    await readMcpLinkTools(client, { scanId: id, checkId: options?.linkCheckId, checked });
     return {
       server: client.getServerVersion(), checked, trace,
       protocol: options?.sdk === "v2"
@@ -95,5 +136,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const url = process.env.LIME_MCP_URL || "http://localhost:3000/mcp";
   const key = process.env.LIME_MCP_KEY;
   if (!key) throw new Error("Set LIME_MCP_KEY to a key generated in LIME Settings. No settings will be changed.");
-  console.log(JSON.stringify(await verifyMcpReadClient(url, key, process.env.LIME_MCP_SCAN_ID, { sdk: process.env.LIME_MCP_SDK || "v1" }), null, 2));
+  console.log(JSON.stringify(await verifyMcpReadClient(url, key, process.env.LIME_MCP_SCAN_ID, {
+    sdk: process.env.LIME_MCP_SDK || "v1", linkCheckId: process.env.LIME_MCP_LINK_CHECK_ID,
+  }), null, 2));
 }

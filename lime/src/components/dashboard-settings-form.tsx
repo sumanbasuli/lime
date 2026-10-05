@@ -571,7 +571,8 @@ export function DashboardSettingsForm({
             <div className="min-w-0 space-y-1.5">
               <h3 className="text-sm font-semibold text-foreground">Connect an AI tool</h3>
               <p className="text-xs leading-5 text-muted-foreground">
-                MCP can read scans, saved findings, and report metadata. It cannot
+                MCP can read scans, saved findings, report metadata, and saved
+                link checks with their destinations and source references. It cannot
                 create scans or change your data.
               </p>
             </div>

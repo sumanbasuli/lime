@@ -5,13 +5,17 @@ section matching `VERSION` to populate GitHub Release notes.
 
 ## [Unreleased]
 
+- Replaced the Link Checker preview with persisted standalone page/crawl jobs, bounded HTTP destination checks, grouped source references, lifecycle actions, and link CSV exports; added an optional **Include link check** companion for normal scans without changing accessibility scoring or screenshot evidence.
+- Added link-checker user/API/architecture guidance and updated marketing/onboarding/roadmap copy with resource, network, rendering, and unreleased-version limitations.
+- Refined saved link-check results with local Bootstrap brand icons, compact destinations and full-URL evidence, structured source occurrence cards, all-outcome filters, run metadata, non-standard HTTP guidance, and source-page retry states that hide outdated rows.
+- Added six read-only Link Checker MCP tools for saved job history/details/statistics, scan companions, filtered destinations, and paginated retained source references; kept the existing six accessibility/settings tools, endpoint/key contract, scoring, and exports unchanged. Documented dashboard-relative link/CSV metadata, no/deleted-companion semantics, historical HTTP limitations, untrusted site evidence, and user prompt/paging recipes.
 - Refined all user, operator, and contributor documentation against current behavior; added troubleshooting/FAQ and backup/restore guides, audience-specific reading paths, and clearer operational and MCP limitations.
 - Improved docs Markdown rendering, mobile section navigation, search keyboard behavior, and project-path hydration; added complete content/example, internal-anchor, and desktop/mobile route verification.
 - Enabled the sidebar release check by default, with `LIME_UPDATE_CHECK=false` as the server opt-out; preserved browser-off/release-dismissal preferences and explicitly disabled checks in the isolated docs/verification stack.
 - Corrected release comparison to use the packaged dashboard version when no nonblank build/runtime override is supplied, preventing default development placeholders from announcing false updates.
 - Hardened the shared dashboard proxy used by MCP with body/fetch deadlines, cancellation and controlled error handling, and corrected decoded-compression headers; added actual-source transport regressions without changing authentication or scoring rules.
 - Validated MCP integer arguments exactly instead of accepting floating-point-rounded fractions, rejected explicit null arguments, and corrected standalone ESM client setup instructions.
-- Verified the pinned `mcp-remote` stdio-to-HTTP bridge against all six read-only tools with isolated credentials and process/port cleanup checks; documented its runtime and client-host environment requirements.
+- Verified the pinned `mcp-remote` stdio-to-HTTP bridge against the original six accessibility/settings tools with isolated credentials and process/port cleanup checks; documented its runtime and client-host environment requirements. Later tool additions require their own dated verification evidence.
 - Added a canonical dashboard `/mcp` proxy with authenticated fresh score enrichment through the existing scorer, dashboard-relative report metadata with availability and screenshot URLs, validated tool schemas/errors, and complete issue-detail pagination.
 - Added real v1/v2 SDK-based MCP verification using the legacy 2025 protocol and client-agnostic bearer-key guides for Codex, Claude Code, Cursor, VS Code, and stdio bridges; documented read-only scope, direct-backend cache limitations, legacy audit details, and unsupported OAuth-only connectors.
 - Fixed interrupted Chromium startups being persisted as failed pages after pause cancellation; parent-run cancellation now keeps unfinished pages pending for resume, while active-run browser failures and local page timeouts remain genuine failures.
@@ -24,7 +28,7 @@ section matching `VERSION` to populate GitHub Release notes.
 - Restored the optional release-notice endpoint by escaping the App Router's private-folder prefix, and bounded its best-effort GitHub request to five seconds while preserving browser visibility and release-dismissal preferences.
 - Added isolated existing-feature end-to-end verification and a project handoff guide covering ownership, setup, lifecycle, reports, settings, MCP, and reproducible checks.
 - Redesigned the public marketing and documentation site to match the dashboard visual system, with responsive Material Symbol navigation, improved documentation reading layouts, and consistent product, API, screenshot, roadmap, and onboarding pages.
-- Added the Link Checker preview to the public product documentation and reproducible screenshot set, while clearly documenting that backend link validation is planned for a later release.
+- Added the original Link Checker design preview to the public documentation and reproducible screenshot set; the working checker replaces it in the unreleased source above.
 - Hardened the docs refresh pipeline with deterministic dependency installs, preflight linting and target validation, automatic isolated-stack cleanup, browser/runtime error checks, screenshot integrity checks, and post-build internal-link and asset validation.
 
 ## [1.0.5] - 2026-05-14

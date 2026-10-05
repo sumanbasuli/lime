@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { MCP_TOOL_NAMES, readMcpTool } from "./verify-mcp.mjs";
+import { MCP_TOOL_NAMES, readMcpTool, readMcpLinkTools } from "./verify-mcp.mjs";
 
 // Reviewed release: https://github.com/punkpeye/mcp-remote/tree/v0.14.3
 // npm gitHead: 6a06aca546a8fd3b7beb040f39761b364893198d.
@@ -24,7 +24,7 @@ async function availablePort(port = 0) {
 
 // SDK stdio -> a real pinned bridge subprocess -> canonical dashboard HTTP.
 // Call only with the isolated suite's key; this never enables MCP or edits settings.
-export async function verifyMcpBridge(url, key, scanId) {
+export async function verifyMcpBridge(url, key, scanId, { linkCheckId, linkScanId = scanId } = {}) {
   const endpoint = new URL(url);
   assert.ok(["http:", "https:"].includes(endpoint.protocol), "Bridge endpoint must be HTTP(S)");
   assert.ok(!endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash,
@@ -95,6 +95,8 @@ export async function verifyMcpBridge(url, key, scanId) {
       assert.ok(groups.issues[0], "Bridge fixture must include an issue group");
       const { kind, key: groupKey } = groups.issues[0];
       await read("get_issue_detail", { scan_id: scanId, kind, key: groupKey, limit: 1 });
+      phase = "reading saved link checks through the bridge";
+      await readMcpLinkTools(reader, { scanId: linkScanId, checkId: linkCheckId, checked });
       assert.ok(!stderr.includes(key), "Bridge stderr must not expose the MCP key");
       evidence = {
         bridge: MCP_BRIDGE_PACKAGE,

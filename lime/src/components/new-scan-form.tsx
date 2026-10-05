@@ -31,6 +31,7 @@ export function NewScanForm() {
   const [scanType, setScanType] = useState<ScanType>("sitemap");
   const [viewportPreset, setViewportPreset] = useState<ViewportPreset>("desktop");
   const [tag, setTag] = useState("");
+  const [includeLinkCheck, setIncludeLinkCheck] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -58,6 +59,7 @@ export function NewScanForm() {
         scanType,
         viewportPreset,
         tag: tag.trim() || undefined,
+        includeLinkCheck,
       });
       router.push(`/scans/${scan.id}`);
     } catch (scanError) {
@@ -176,6 +178,30 @@ export function NewScanForm() {
           disabled={loading}
           className="h-11 rounded-xl bg-[#FBFAF6] px-4 shadow-none focus:bg-white"
         />
+      </div>
+
+      <div className="rounded-2xl border border-black/12 bg-[#FBFAF6] p-4">
+        <label htmlFor="include-link-check" className="flex cursor-pointer items-start gap-3">
+          <input
+            id="include-link-check"
+            type="checkbox"
+            aria-labelledby="include-link-check-label"
+            checked={includeLinkCheck}
+            onChange={(event) => setIncludeLinkCheck(event.target.checked)}
+            disabled={loading}
+            aria-describedby="include-link-check-help"
+            className="mt-0.5 size-4 shrink-0 accent-black"
+          />
+          <span>
+            <span className="flex items-center gap-2 text-sm font-semibold">
+              <MaterialSymbol name="link" size={18} />
+              <span id="include-link-check-label">Include link check</span>
+            </span>
+            <span id="include-link-check-help" className="mt-1 block text-xs leading-5 text-muted-foreground">
+              Check links on this scan’s pages after accessibility scanning finishes. Link results are separate and do not change the accessibility score.
+            </span>
+          </span>
+        </label>
       </div>
 
       <button

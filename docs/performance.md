@@ -74,6 +74,14 @@ Full PDF occurrence sampling defaults to 30 per group, scoped PDF to 2000, small
 
 Juicer's five workers, 30-second page deadline, and 500ms politeness delay are code constants, not dashboard performance settings. Five workers applies per scan run, not a global server-wide cap across simultaneous scans. Increasing report concurrency or submitting many scans together can compete for Chromium CPU/memory.
 
+## Link-Check Costs
+
+The HTTP link runner is separate from Juicer and the PDF limiter. It runs at most two jobs per Shopkeeper process, with sequential source/target requests inside each job and bounded pages, targets, references, request count, body size, and deadlines. The dashboard report-concurrency setting does not tune this worker pool. An optional companion waits for its own accessibility parent to complete; it does not wait for every other job on the instance.
+
+Link history/results are SQL-paginated. Result lists preview at most five sources per destination; the source endpoint pages the retained JSONB references independently. Snapshots replace bounded target rows transactionally under the job's running-state guard. CSV reads a consistent bounded target/source snapshot in one SQL query and buffers the export; it is not the accessibility full-CSV streaming path. Retained references and repeated checks still consume database/storage/network resources and belong in representative-load measurements.
+
+See [Link Checker Architecture](architecture/link-checker.md) for exact budgets, truncation semantics, network trust, recovery, and schema. Do not call a bounded one-shot job a recurring monitor or a complete arbitrary-size site crawl.
+
 ## Verification
 
 Before and after optimization work, measure:

@@ -52,6 +52,7 @@ export const scans = pgTable("scans", {
   status: scanStatusEnum("status").notNull().default("pending"),
   pauseRequested: boolean("pause_requested").notNull().default(false),
   scanType: text("scan_type").notNull().default("sitemap"),
+  includeLinkCheck: boolean("include_link_check").notNull().default(false),
   tag: text("tag"),
   viewportPreset: text("viewport_preset").notNull().default("desktop"),
   viewportWidth: integer("viewport_width").notNull().default(1440),

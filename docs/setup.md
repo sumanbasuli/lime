@@ -2,6 +2,8 @@
 
 This document describes how to set up the LIME accessibility scanner for local development.
 
+Unreleased source also includes the HTTP [link checker](architecture/link-checker.md), with standalone jobs and an optional default-off companion for normal scans. It uses the existing backend/database, not another service. Published images may not include this source feature yet.
+
 ## Prerequisites
 
 - **Docker** and **Docker Compose** (for running PostgreSQL and full stack)
@@ -286,7 +288,8 @@ docker compose logs -f shopkeeper
 | `/scans/[id]` | Scan detail with live progress |
 | `/scans/[id]/issues` | Expandable issues viewer |
 | `/settings` | Persisted reporting, performance, and MCP controls |
-| `/links` | Link checker design preview; no backend checks or saved results |
+| `/links` | Standalone single-page/crawl link checks and saved history |
+| `/links/[id]` | Link-check progress, destinations/source references, lifecycle actions, and CSV |
 | `/reports/scans/[id]/issues` | Printable report document used by PDF generation |
 
 ## Project Structure

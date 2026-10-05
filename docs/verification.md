@@ -9,7 +9,7 @@ Use this guide when reviewing the redesign, reproducing a regression, or prepari
 - Reproducing a regression: [Isolated Product Verification](#isolated-product-verification) and [Debugging A Failed Check](#debugging-a-failed-check).
 - Checking a coverage claim: [Existing Feature Matrix](#existing-feature-matrix) and the [dated verification history](#dated-verification-history).
 
-The latest recorded full product run passed 18 workflows at `2026-10-05T08:52:44.921Z`. The final installed-version fallback change was checked afterward with eight actual-source release-notice tests and corrected production HTTP/browser reads, not a later full-suite run. One earlier React hydration warning remains unreproduced; no cause or hydration fix is claimed. The history below retains those distinctions and the limits of each check.
+The latest Link Checker MCP run passed 24 full product workflows at `2026-10-05T12:55:12.165Z`, including existing accessibility, reports, settings and MCP flows, loaded responsive link layouts, and real SDK v1/v2 plus stdio-bridge reads of saved link evidence. Additional read-only checks covered the operator's saved link check without changing its results or settings. One earlier React hydration warning remains unreproduced; no cause or hydration fix is claimed. The dated history retains the tested configurations and limits of each check.
 
 ## Run The Project
 
@@ -42,6 +42,7 @@ Open `http://localhost:3001/` for the website or `http://localhost:3001/docs/` f
 | Next-owned APIs and caches | `lime/src/app/api/`, `lime/src/lib/` | Paginated issue reads, CSV/LLM exports, PDF controls, settings, derived read caches |
 | External MCP integration | `lime/src/app/mcp/`, `lime/src/lib/shopkeeper-proxy.ts`, `shopkeeper/internal/mcp/` | Canonical dashboard proxy and existing-scorer enrichment; Go authentication, protocol, schemas, read-only tools and pagination |
 | Optional release notice | `lime/src/app/%5Flime/update-check/`, `lime/src/components/update-notice.tsx`, `lime/src/lib/update-notice-preference.ts` | Default-enabled release check with server opt-out, browser-local visibility and release-tag dismissal |
+| Link checking | `shopkeeper/internal/linkchecker/`, `repository/link_checks.go`, `handler/link_checks.go`, dashboard `/links` | Independent durable HTTP checks, bounded crawling, target/source evidence, companion opt-in and lifecycle |
 | Shared metadata | `data/` | Local ACT and axe rule guidance used by both services |
 | Website and documentation | `docs-site/`, `docs/` | Static product site, curated docs, reference Markdown, search and committed screenshots |
 
@@ -63,7 +64,7 @@ From the repository root:
 Run the integrated checks from the repository root:
 
 ```bash
-make verify-app       # existing product features in an isolated production stack
+make verify-app       # accessibility, MCP, link checking and lifecycle in an isolated production stack
 make docs-verify      # website/docs build, assets, links, desktop/mobile interactions
 ```
 
@@ -83,6 +84,15 @@ npm --prefix lime run test:update-notice
 
 This executes the actual update route with mocked GitHub responses, without outbound calls or application-setting writes. Browser display preferences/dismissal and the full stack are checked separately by `make verify-app`.
 
+For changes to the link-check API client, also run:
+
+```bash
+npm --prefix lime run test:link-check-api
+npm --prefix lime run test:link-presentation
+```
+
+The API suite checks the actual TypeScript client with mocked requests: default-off/opt-in scan payloads, standalone creation, pagination/filter paths, lifecycle actions, reader-facing errors and abort signals. The presentation suite checks actual hostname parsing, brand/resource icon selection, invalid/hostile URL fallbacks, and safe local SVG markup. Neither runs a worker or proves HTTP reachability. The full `make verify-app` suite uses real controlled HTTP responses and durable database records; see [Link Checker Architecture](architecture/link-checker.md) for network policy and limits.
+
 For an already-enabled instance, a separate read-only MCP SDK smoke check is available:
 
 ```bash
@@ -91,7 +101,7 @@ export LIME_MCP_KEY="<your-generated-key>"
 npm --prefix docs-site run verify:mcp
 ```
 
-It never generates keys or changes settings. Optional `LIME_MCP_SCAN_ID` selects a saved scan; otherwise the latest returned scan is used. The `checked` output identifies the tools actually called: an empty instance only supplies list/settings data, and an instance without an issue group cannot exercise issue detail. It defaults to pinned official SDK v1 `1.32.0`; set `LIME_MCP_SDK=v2` for the pinned `@modelcontextprotocol/client@2.3.0` in legacy `2025-11-25` mode. That does not upgrade LIME to modern 2026 discovery/capabilities. The sanitized transport trace excludes authorization headers and response bodies. See [MCP Integration](mcp.md) before connecting an AI client. This smoke check is not proof that an installed desktop/web client or a remote deployment has connected.
+It never generates keys or changes settings. Optional `LIME_MCP_SCAN_ID` selects a saved scan and `LIME_MCP_LINK_CHECK_ID` selects a saved link check; otherwise each latest returned record is used. The `checked` output identifies tools actually called, not just discovered: an empty instance can read scan/link history, link statistics and settings, but cannot exercise saved detail/source tools. A scan without an issue group cannot exercise issue detail; a scan without a link companion returns the explicit null-companion state. It defaults to pinned official SDK v1 `1.32.0`; set `LIME_MCP_SDK=v2` for the pinned `@modelcontextprotocol/client@2.3.0` in legacy `2025-11-25` mode. That does not upgrade LIME to modern 2026 discovery/capabilities. The sanitized transport trace excludes authorization headers and response bodies. See [MCP Integration](mcp.md) before connecting an AI client. This smoke check is not proof that an installed desktop/web client or a remote deployment has connected.
 
 The browser checks use Playwright from `docs-site`. Install its dependencies with `npm --prefix docs-site ci` and its browser with `(cd docs-site && npx playwright install chromium)` if the local browser cache is missing. Bash must be on `PATH` for build-time documentation shell-example checks. Docker with the Compose plugin and curl must be available for `make verify-app`. A first build may need network access to pull base images and install locked dependencies. The real stdio-bridge check invokes pinned `mcp-remote@0.14.3` through npx and may also need package-download/cache access; it uses an ephemeral key and private temporary state.
 
@@ -108,7 +118,7 @@ Default verification ports are:
 | PostgreSQL | `16432` |
 | Deterministic fixture server | `19090` |
 
-The fixture server supplies pages with known accessibility failures, sitemap inputs, delayed responses, and controlled navigation failures. On Docker Desktop for macOS, containers reach it through `host.docker.internal`. Linux users need a container-reachable fixture origin; set `LIME_VERIFY_FIXTURE_ORIGIN` to the host address reachable from those containers, including the fixture port.
+The fixture server supplies pages with known accessibility failures, sitemap inputs, delayed responses, and controlled navigation failures. Link fixtures include healthy/broken destinations, redirect chains/loops, timeouts, HEAD fallback, document/media targets, blocked private destinations, repeated references, base URLs and restart recovery. On Docker Desktop for macOS, containers reach it through `host.docker.internal`. Linux users need a container-reachable fixture origin; set `LIME_VERIFY_FIXTURE_ORIGIN` to the host address reachable from those containers, including the fixture port.
 
 The runner accepts `LIME_VERIFY_UI_PORT`, `LIME_VERIFY_API_PORT`, `LIME_VERIFY_DB_PORT`, and `LIME_VERIFY_FIXTURE_PORT` for port overrides. For example:
 
@@ -142,10 +152,11 @@ The required evidence below describes the product baseline. Runtime results must
 | Reports | Scan-level and issue-scoped PDF, small/full CSV, and LLM exports contain the expected scan/rule data |
 | Settings | Reporting/performance/integration values persist after reload; disabled formats reject exports; values can be restored |
 | Optional release notice | Default-enabled server branch and explicit opt-out; disabled endpoint returns 200 without outbound calls; mocked newer release renders a card; browser visibility persists immediately; exact-tag dismissal survives reload |
-| MCP | Pinned official SDK v1/v2 and real stdio-bridge initialization/tool reads; canonical cold/triaged scores, direct stale-cache behavior, group/occurrence pagination, screenshot/report paths and format gates, schema/errors, read-only capability, UI copy/settings/key rotation/disable |
+| MCP | Pinned official SDK v1/v2 and real stdio-bridge initialization/tool reads; canonical cold/triaged scores, direct stale-cache behavior, issue and saved link-result/source pagination, companion/null states, screenshot/report/CSV paths, schema/errors, read-only capability, unchanged link evidence/settings, UI copy/settings/key rotation/disable |
 | Responsive redesign | Desktop and mobile routes are usable; navigation, forms, dialogs and controls have no unintended horizontal page overflow |
 | Marketing and documentation | Static routes/assets/internal links pass; search, mobile navigation, gallery and roadmap render and interact correctly |
-| Link checker preview | Navigation and target-entry design render; run action remains disabled; no check/result storage is claimed |
+| Link checker | Standalone single-page and bounded same-origin crawl create durable jobs; targets classify HTTP outcomes, redirects, errors and blocked destinations; source references, filters, pagination and CSV remain usable after reload; cancellation, recheck, deletion and interrupted-job recovery preserve saved state |
+| Optional companion link check | New scans default off; opt-in waits for the original accessibility page inventory, respects pause/cancellation, preserves scoring and screenshots, copies configuration on rescan, and cascades only the original companion when its scan is deleted |
 
 A small deterministic suite cannot establish behavior for every public site, very large report, browser/OS combination, or deployment target. Add a targeted reproduction when a regression depends on those conditions. See [Performance](performance.md) for large-scan concerns and deployment guides for release-specific checks.
 
@@ -159,7 +170,7 @@ A small deterministic suite cannot establish behavior for every public site, ver
 6. Run `make docs` when product screenshots need refreshing. It uses separate public demo scans; it is a documentation pipeline, not the product feature regression suite.
 7. Record evidence and limitations here or in the change handoff. Update `CHANGELOG.md` for release-facing behavior.
 
-The Link checker currently remains a design preview. Complete and verify existing features before adding its backend workflow. There is no profile/account management behind the sidebar identity display.
+Link checking is an independent HTTP/HTML workflow; it does not execute page JavaScript or change accessibility scoring. Completed link checks are historical snapshots, not a guarantee that every link works. Record limits, unread source pages and inconclusive outcomes, and use Recheck for fresh evidence. There is no profile/account management behind the sidebar identity display.
 
 ## Debugging A Failed Check
 
@@ -291,3 +302,70 @@ Completed documentation evidence:
 - Read-only checks confirmed the normal instance still had 2 scans, 6 issues, and 44 pages, with exactly unchanged reporting/performance/integration settings and MCP still disabled/unconfigured.
 
 This refinement changes documentation, docs-site presentation/navigation, and documentation verifiers only. It does not change backend/dashboard behavior, refresh product screenshots, configure an AI client, publish the website, or rerun the full product lifecycle suite. The earlier product verification records remain the applicable baseline for application behavior.
+
+### Link Checker Extension
+
+The stable redesign/documentation branch was committed as `535c433` and fast-forwarded into local `main`. The independent feature work is on `codex/link-checker`, based on that same commit. No remote push, public deployment, or feature release is implied by this local merge.
+
+The first completed feature `make verify-app` run passed all 23 workflows with exit 0 at `2026-10-05T11:17:57.721Z`, with `browserErrors: []`. The suite retains the existing scan lifecycle, issue review, triage/scoring, yellow screenshot preview/full lightbox, PDF/CSV/LLM reports, settings, release-notice preferences, and actual MCP SDK v1/v2 plus stdio-bridge checks. Five new workflows cover standalone checking, crawl/history/source evidence, optional scan companions, cancellation/recovery/failures, and responsive integration. The default-off checkbox is asserted by its exact accessible name, **Include link check**.
+
+Controlled HTTP fixtures establish healthy and broken targets, redirects and loops, request timeout, HEAD fallback, document/media destinations, base URLs, blocked cross-origin private destinations, and limited coverage. The browser creates jobs and reads persisted results, filters, expands source references, downloads CSV, cancels active jobs, rechecks into new IDs, and deletes terminal jobs. Forty-five retained references page through `20/20/5`; exports include all retained references, not only the five-reference result preview.
+
+Companion checks wait for accessibility completion, use its persisted page inventory, remain queued while the parent is paused, and honor explicit cancellation after parent completion. Opt-in and plain scans produce equal accessibility scores and the same rule inventory. Rescan copies the opt-in flag; deleting a parent removes its original companion, not a detached recheck. Deleting a terminal companion leaves accessibility results intact and displays an explicit missing-companion state. An unstarted canceled companion without saved seed pages returns an actionable 409 for Recheck instead of inventing a new crawl. Interrupted standalone checks recover with their original IDs.
+
+Focused verification passed:
+
+- Full `go test ./...`, `go vet ./...`, and `go test -race ./internal/linkchecker ./internal/handler ./internal/repository`.
+- Real isolated PostgreSQL checks for migration 13 up/down and preservation of a legacy scan, atomic scan/companion creation, snapshot/source pagination, cancellation and late writes, recovery, failed-only retry, and completed/canceled companion preservation.
+- SQL tests retain the bounded 500-page companion inventory plus one overflow marker, including detached rechecks, and exercise concurrent parent retry/companion claim with the shared parent-first lock order. A CSV snapshot contains all seven retained test references while the result preview contains five.
+- Dashboard and documentation ESLint/TypeScript checks, six actual-source link API client checks, 14 MCP transport checks, and eight release-notice checks. These focused tests supplement rather than replace the real stack run.
+
+Early responsive screenshots contained loaders. A follow-up at `2026-10-05T11:25:56.739Z` waited for saved target rows, history, companion controls and fonts, then passed 24 loaded states at widths 1440, 768, 390 and 320 with no page overflow or browser errors. Visual review found the expanded source pagination cramped its own padded panel at 320px despite no page-level overflow. Its button group now wraps; the shared verifier additionally requires every source-pagination button to fit within the panel. The earlier page-level pass is not evidence for this final local-panel correction; retain the later full rerun below as its proof.
+
+The extension's final `make verify-app` rerun completed at `2026-10-05T11:36:38.087Z` with exit 0, all 23 workflows passed, and `browserErrors: []`. Its responsive link workflow exercises all 24 loaded states and source-panel button bounds at the four widths. The refreshed 320px expanded-source screenshot was visually reviewed: both controls remain inside the panel on separate rows. The disposable Compose project was empty after cleanup. Later presentation checks replace `results.json` and `link-check-sources-{1440,768,390,320}.png`; the earlier focused `link-loaded-layout-results.json` remains diagnostic evidence predating the wrapping correction.
+
+Candidate form runs exposed an overly broad checkbox accessible name that included icon/help text; the label now names only the control and uses a separate description. One candidate's injected issue-detail retry probe timed out without an established product cause. Read-only settled probes passed; the verifier now confirms its intercepted 503 response before retrying and retains actual probe state on failure. No hydration or issue-rendering fix is claimed for that timeout. Candidate evidence is retained in `link-candidate-checkbox-results.json` and `link-candidate-issue-retry-results.json` under the ignored verification directory.
+
+`make docs` completed using separate public demo scans and a real standalone link check, never the operator's existing private data. All ten screenshot captures were refreshed, including the checkbox, live link history, and saved target/source results. The link images and new-scan form were visually reviewed. The production docs export validates 37 guides, 82 JSON/shell examples, 45 HTML pages, internal links/anchors/assets, and ten product screenshots. The `/lime` project-path `make docs-verify` pass completed at `2026-10-05T11:34:28.418Z`: all 42 website/docs routes at desktop and mobile widths, 84 route/viewport checks, plus search/keyboard focus, reading order, mobile navigation/section links, gallery, and literal MCP examples; no failures. Evidence is `link-docs-project-path-results.json`. These checks do not publish the website or execute deployment examples.
+
+The final root-path `make docs-verify` pass completed at `2026-10-05T11:40:09.485Z`, validating the same 42 routes/84 desktop-mobile combinations and reader interactions without failures. Evidence is `link-docs-root-results.json`. The export was rebuilt once more after adding this evidence timestamp; that last change is documentation-only, not a subsequent product-code change or new full browser run.
+
+Before the normal-instance migration, a validated custom-format `pg_dump` backup was saved locally as `.artifacts/verification/normal-before-link-checker.dump`. The normal stack was rebuilt without removing its PostgreSQL or screenshot volumes. Read-only before/after checks preserved 2 scans, 6 issues and 44 pages and exactly unchanged reporting/performance/integration settings. Both completed scans retained identical scan/issue JSON hashes after excluding only the newly added default-false field. MCP remained disabled/unconfigured. Migration 13 reports `dirty=false`, every existing scan has `include_link_check=false`, and link jobs/results were not added retroactively. Evidence is `normal-link-check-before.json` and `normal-link-check-after.json`; backups and private evidence are ignored local artifacts, not public screenshots or committed data.
+
+After rebuilding the normal UI with the final wrapping change, read-only browser checks completed at `2026-10-05T11:36:08.633Z`. Link history/form, new scan with the default-off checkbox, and an existing completed scan passed nine route/width combinations at 1440, 390 and 320, with one main landmark, no page overflow, no browser errors and no non-read requests. Settings, aggregate counts and zero link jobs were checked again; both saved scans still had no associated check. Evidence is `normal-link-browser-results.json` and `normal-link-new-scan-{1440,390,320}.png`. No job was submitted or preference changed on the operator instance.
+
+This establishes a deterministic local integration baseline, not universal public-site reachability, arbitrary-size crawl completeness, JavaScript-rendered link extraction, load capacity, recovery on every provider, or production security clearance. The checker is bounded, static HTTP/HTML and one-shot; use the canonical root origin and read coverage/inconclusive outcomes. Existing locked dependency audit warnings remain a separate upgrade/security backlog, not resolved by this feature. See [Link Checker Architecture](architecture/link-checker.md) for request budgets, network trust and known limits. No user's AI client, keys, unrelated containers, or normal settings were changed.
+
+### Link Result Presentation Refinement
+
+The saved check reported by the operator exposed a very long query URL, repeated source references, empty captured text and a LinkedIn HTTP 999 response. This refinement changes presentation only: locally bundled MIT-licensed Bootstrap SVG icons, hostname/brand headings, full destination URLs in expanded panels, numbered source cards, outcome filters, run timestamps and elapsed time. Backend classifications, HTTP codes, saved evidence, accessibility scoring and screenshot behavior are unchanged. HTTP 999 remains its recorded Broken outcome and is explicitly described as a non-standard response requiring manual verification, not proof that a profile is missing. Empty captured text is not described as an accessibility finding.
+
+Read-only browser checks of that actual saved check completed at `2026-10-05T12:16:33.615Z` at widths 1440, 768, 390 and 320. Brand icons, outcome filters, expanded full URLs/source fields and narrow layouts passed with no page overflow, browser errors or non-read requests. Before/after job, result and source JSON hashes were identical, as were normal settings and scan statistics. Private evidence is kept only in ignored `link-ui-saved-before.json`, `link-ui-saved-browser-results.json` and `link-ui-after-expanded-*.png`; it is not used in public documentation images.
+
+The final `make verify-app` run completed at `2026-10-05T12:23:12.922Z` with exit 0, all 23 workflows passed and `browserErrors: []`. In addition to the retained lifecycle/report/MCP and 24 loaded layout states, its controlled presentation probe checked all six outcome filters, parsed brand/lookalike URLs, HTTP 999 guidance, full long URLs, repeated/empty/synthetic source evidence, and 45-reference pagination through 20/20/5. An intentionally injected 503 hid stale rows; Retry sources recovered the same offset before reaching the last page. Only that exact expected response was allowed; no unexpected errors were suppressed. `link-check-presentation-results.json` records four additional layout states, requests `[0,20,20,40]`, one injected failure and no unexpected errors. The disposable verification stack and volumes were removed by the runner; normal data was untouched.
+
+Dashboard/docs ESLint, dashboard TypeScript, six actual-source API checks and seven actual-source presentation checks passed. One initial Docker dependency install failed with `esbuild ETXTBSY`; an unchanged retry built and passed. A test-only Playwright context setup error was corrected before the successful presentation checks; no product change is claimed for either launch failure.
+
+The two public Link Checker screenshots were refreshed from an existing completed `fake-university.com` check in the isolated `lime-docs` stack, not from the operator's saved check. They show a saved historical HTTP snapshot, not freshly verified public-site availability. The capture runner now gives expanded result evidence a 1440×1600 viewport and resets other captures to 1440×1000. User instructions and the architecture guide document the icons, source fields, timestamps, outcome meanings and pagination recovery.
+
+Root-path `make docs-verify` passed at `2026-10-05T12:29:21.322Z`: 37 guides, 82 JSON/shell examples, 45 exported HTML pages, ten screenshot assets, and all 42 website/docs routes at desktop/mobile widths (84 combinations), with no browser failures. Search, reading order, section navigation and screenshot interactions passed. Evidence is `docs-refinement-results.json`. Visual review then increased only the public detail screenshot height so its complete first source card fits; the final export was rebuilt after that image and this evidence note. No later full browser rerun or public deployment is implied by that documentation-only rebuild. The temporary docs containers were stopped without removing their retained demo volumes; normal LIME remains running.
+
+### Link Checker MCP Extension
+
+Six saved-link tools were added alongside the original six accessibility/settings tools. They reuse read-only repository methods for history, job metadata/statistics, scan companions, filtered destinations and complete retained source paging. The existing `/mcp` endpoint, bearer key, supported 2025 protocol revisions and client setup remain unchanged. Dashboard and CSV paths resolve on the dashboard origin; these ordinary HTTP routes do not inherit MCP authorization. The canonical proxy leaves link data unchanged and does not invoke the accessibility scorer for it. No link-check create/recheck/cancel/delete or settings/triage mutation tool was introduced.
+
+The final isolated `make verify-app` run completed at `2026-10-05T12:55:12.165Z` with exit 0, all 24 workflows passed and `browserErrors: []`. It retains the existing lifecycle, screenshots, reports, settings and accessibility MCP checks and adds an explicit saved-link SDK/bridge workflow. `link-mcp-client-results.json` completed at `2026-10-05T12:55:09.023Z` and records:
+
+- Real SDK v1 `1.32.0` and split-package v2 `2.3.0` clients, each executing all six new tools through the canonical endpoint in the supported legacy protocol mode.
+- History/target/source default, bounded, exhausted and filtered pages matching exact saved REST data. Forty-five repeated references returned as 20/20/5; raw HTTP 999 remained its saved Broken category/code. CSV metadata resolved to an actual saved export.
+- Present companions, ordinary no-companion scans and selected-but-deleted companions; missing scans/checks and mismatched result ownership returned tool errors rather than invented evidence.
+- Forty-six invalid calls per SDK plus four rejected link mutation tool names, missing/wrong-key rejection, and matching structured/text results. Snapshot comparisons preserved link-check/result rows, scan rows and non-secret settings.
+- The real pinned `mcp-remote@0.14.3` stdio bridge reading all twelve tools, unchanged saved rows/settings, exited launcher and released callback port. No user's client config or key was changed; generated credentials belonged only to the disposable stack and were not written into evidence.
+
+An earlier candidate incorrectly expected nine called tools for empty link history, but the preceding pause/resume workflow already supplied a completed companion. The client correctly read all twelve. Only the verifier's assertion was corrected before the successful full rerun; no product fix or empty-history runtime result is claimed for that failure. Empty/absent data handling has focused Go coverage and the smoke command reports only tools actually called.
+
+Full Go tests/vet and MCP race checks passed, as did dashboard/docs ESLint and TypeScript, fifteen actual-source MCP transport checks, six link API checks, seven presentation checks and eight update-notice checks. The new transport case proves saved link fields and numeric JSON-RPC IDs pass through byte-for-byte without score enrichment. A sandbox-only loopback-listen restriction was resolved by running the temporary-server test with its required permission; no error was suppressed or product code changed.
+
+The normal backend/dashboard were rebuilt with existing volumes retained. Read-only checks completed at `2026-10-05T12:53:28.552Z`: Settings and the operator's saved expanded link check passed at 1440, 768, 390 and 320px, with no page overflow, browser errors or non-read requests. Saved check/result/source, scan statistics, link statistics and settings hashes matched their pre-rebuild values. MCP stayed disabled/unconfigured, as before, and unauthenticated `tools/list` returned 401. Evidence is `normal-link-mcp-before.json`, `normal-link-mcp-after.json` and the visually reviewed `normal-link-mcp-settings-320.png`. The normal instance was not temporarily enabled just for testing; authenticated SDK/bridge proof comes from the isolated stack.
+
+User MCP and Link Checker guides, API/architecture references, Settings help, README, marketing copy and changelog now describe the twelve-tool scope, pagination/coverage, CSV paths, companion semantics, prompt recipes and untrusted captured evidence. Root-path `make docs-verify` passed at `2026-10-05T12:47:38.698Z` with 37 guides, 82 JSON/shell examples, 45 exported HTML pages, ten screenshot assets and 84 desktop/mobile checks across 42 routes, with no failures. This evidence note was added afterward and the export rebuilt; no later full docs browser rerun is claimed. The isolated product containers/volumes were cleaned up, and normal LIME remains healthy on port 3000. This is local deterministic integration evidence, not proof that every installed AI client or public deployment has connected, or that historical link outcomes establish current availability.

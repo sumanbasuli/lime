@@ -153,6 +153,38 @@ wait_for_scan() {
   return 1
 }
 
+create_docs_link_check() {
+  local target="$1"
+  local payload
+  payload="$(node -e "process.stdout.write(JSON.stringify({ url: process.argv[1], check_type: 'single', max_pages: 1 }))" "${target}")"
+  curl -fsS -X POST "${API_BASE}/api/link-checks" \
+    -H "Content-Type: application/json" --data "${payload}" | json_field id
+}
+
+wait_for_link_check() {
+  local check_id="$1"
+  local check_json
+  local status
+  echo "Waiting for docs link check ${check_id}..."
+  # The checker has a ten-minute job budget. Allow time for queue/startup too.
+  for attempt in $(seq 1 220); do
+    check_json="$(curl -fsS "${API_BASE}/api/link-checks/${check_id}")"
+    status="$(printf '%s' "${check_json}" | json_field status)"
+    if [ "${status}" = "completed" ]; then
+      echo "Docs link check completed; individual outcomes and coverage remain visible."
+      return 0
+    fi
+    if [ "${status}" = "failed" ] || [ "${status}" = "cancelled" ]; then
+      printf '%s\n' "${check_json}" >&2
+      echo "Docs link check did not produce a completed result." >&2
+      return 1
+    fi
+    sleep 3
+  done
+  echo "Timed out waiting for docs link check ${check_id}" >&2
+  return 1
+}
+
 origin_for_target() {
   local target="$1"
   node -e "const target = new URL(process.argv[1]); process.stdout.write(target.origin);" "${target}"
@@ -330,12 +362,17 @@ done
 
 seed_partial_retry_demo "${PARTIAL_SCAN_ID}" "${PARTIAL_SCAN_LABEL}"
 
+echo "Creating isolated link-check demo for ${CAPTURE_SCAN_LABEL}..."
+LINK_CHECK_ID="$(create_docs_link_check "${CAPTURE_SCAN_LABEL}")"
+wait_for_link_check "${LINK_CHECK_ID}"
+
 mkdir -p "${SCREENSHOT_DIR}"
 echo "Capturing docs screenshots from ${UI_BASE} for scan ${CAPTURE_SCAN_ID} (${CAPTURE_SCAN_LABEL})..."
 npm --prefix "${ROOT_DIR}/docs-site" run docs:screenshots -- \
   --base-url "${UI_BASE}" \
   --scan-id "${CAPTURE_SCAN_ID}" \
   --partial-scan-id "${PARTIAL_SCAN_ID}" \
+  --link-check-id "${LINK_CHECK_ID}" \
   --output "${SCREENSHOT_DIR}"
 
 echo "Building static docs site..."

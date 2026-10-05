@@ -226,6 +226,29 @@ test("canonical auth/protocol/method/notification errors never trigger scoring",
   }
 });
 
+test("canonical Link Checker reads pass through unchanged without accessibility scoring", async () => {
+  const check = { id: "fixture-check", scan_id: null, summary: { broken: 1 }, truncated: true };
+  const payloads = [
+    { checks: [check], total: 1, limit: 20, offset: 0, has_more: false },
+    { check, dashboard_path: "/links/fixture-check", csv_path: "/api/link-checks/fixture-check/export.csv", paths_relative_to: "dashboard_origin" },
+    { stats: { total_checks: 1, broken_links: 1 } },
+    { scan_id: "fixture-scan", include_link_check: false, check: null, dashboard_path: null, csv_path: null, paths_relative_to: "dashboard_origin" },
+    { results: [{ id: "fixture-result", status: "broken", status_code: 999 }], total: 1, limit: 20, offset: 0, has_more: false },
+    { sources: [{ page_url: "https://example.invalid/", element: "a", attribute: "href", text: "Untrusted captured text" }], total: 1, limit: 20, offset: 0, has_more: false },
+  ];
+  for (const data of payloads) {
+    const body = `{"jsonrpc":"2.0","id":9007199254740993,"result":${JSON.stringify({ structuredContent: data, content: [{ type: "text", text: JSON.stringify(data) }] })}}`;
+    const route = await loadSource("../src/app/mcp/route.ts", {}, {
+      "@/lib/shopkeeper-proxy": { proxyShopkeeperRequest: async () => new Response(body, { headers: { "Access-Control-Allow-Origin": "http://localhost:3002", "Cache-Control": "no-store" } }) },
+      "@/lib/scan-score-data": { getScanScoreSummaries: () => assert.fail("Link data must not invoke the accessibility scorer") },
+    });
+    const result = await route.POST({ method: "POST" });
+    assert.equal(await result.text(), body, "Keep raw outcomes, captured sources and large numeric IDs byte-for-byte");
+    assert.equal(result.headers.get("Access-Control-Allow-Origin"), "http://localhost:3002");
+    assert.equal(result.headers.get("Cache-Control"), "no-store");
+  }
+});
+
 test("canonical score failure is actionable, redacted and preserves request ID/CORS", async () => {
   const route = await loadSource("../src/app/mcp/route.ts", {}, {
     "@/lib/shopkeeper-proxy": { proxyShopkeeperRequest: async () => new Response('{"jsonrpc":"2.0","id":9007199254740993,"result":{"structuredContent":{"scan":{"id":"fixture-scan"},"score_summary":null}}}', { headers: { "Access-Control-Allow-Origin": "http://localhost:3002" } }) },

@@ -10,6 +10,7 @@
     * **Juicer**: Distributing the URLs to the scanner workers while respecting concurrency limits.
     * **Sweetner**: Sending the raw Juicer results to be formatted and aggregated.
 3. **Data Persistence**: Save the refined scan data to the database.
+4. **Link Checking**: Own independent HTTP link jobs, persisted destinations/source references, lifecycle actions, CSV, and optional companions that start after accessibility completes. This runner is separate from the three-stage axe/screenshot pipeline; see [Link Checker Architecture](link-checker.md).
 
 ## Architecture
 
@@ -37,7 +38,7 @@ shopkeeper/
 │   │   └── axe.min.js              — axe-core 4.10.2
 │   └── sweetner/sweetner.go        — Result deduplication + DB persistence
 └── migrations/
-    └── 000001…000012_*.sql         — Versioned schema migrations (inspect the current checkout)
+    └── 000001…000013_*.sql         — Versioned schema migrations (inspect the current checkout)
 
 repo root
 ├── data/act-rules.json             — Shared checked-in ACT catalog used by Go + Next at read time
@@ -65,7 +66,13 @@ repo root
 | GET | `/api/screenshots/{scanId}/{filename}` | ServeScreenshot | Serve a saved screenshot |
 | GET | `/api/scans/{id}/issues/report.pdf` | DownloadIssueReport | Render the dashboard report document using Chromium |
 
-Shopkeeper owns the read-only `/mcp` transport, bearer-key authentication, 2025 protocol negotiation, tool schemas, and paginated repository reads. Clients should use the dashboard's canonical `/mcp` proxy: after an authenticated `get_scan` read, Next adds fresh scores using its existing scorer. Direct Shopkeeper calls return only a valid saved score cache, or null when it is cold or stale. Report metadata includes per-format availability and paths explicitly relative to the dashboard origin. Paginated issue-detail REST routes, settings, and CSV/LLM exports belong to Next and must use that origin. See [MCP Integration](../mcp.md) for enablement, client capabilities, and the read-only SDK smoke test. Stateless JSON POST results and GET 405 are intentional; no OAuth, scoped keys, or mutation tools are implemented.
+The `/api/link-checks` family adds create/list/detail, target/source paging, CSV, cancel, recheck, and delete. `GET /api/scans/{id}/link-check` retrieves an optional companion. `POST /api/scans` accepts default-false `include_link_check`; a selected companion starts only after accessibility completes and uses persisted discovered page URLs. Link jobs/results are separate from axe issue/audit writes and scoring. The complete route and safety contract is in [Link Checker Architecture](link-checker.md) and the [API Reference](https://lime.heysuman.com/api/).
+
+Shopkeeper owns the read-only `/mcp` transport, bearer-key authentication, 2025 protocol negotiation, twelve tool schemas, and paginated repository reads. The six saved-link tools read job history/details/statistics, scan companions, filtered targets, and retained source references alongside the original accessibility/settings tools. They do not launch HTTP checks or change jobs. MCP link lists default to 20, cap at 100, and accept offsets up to 100,000; UUID validation and tool-error handling remain explicit.
+
+Clients should use the dashboard's canonical `/mcp` proxy: after an authenticated `get_scan` read, Next adds fresh scores using its existing scorer. Direct Shopkeeper calls return only a valid saved score cache, or null when it is cold or stale. Report metadata includes per-format availability and paths explicitly relative to the dashboard origin. Link-check metadata similarly returns dashboard-relative `/links/<id>` and `/api/link-checks/<id>/export.csv` paths; it neither downloads CSV nor changes accessibility exports. A valid scan with no/deleted companion returns null check/paths and its historical selection; a missing scan returns a tool error. Ordinary dashboard/download routes do not inherit MCP authentication.
+
+Paginated issue-detail REST routes, settings, and accessibility CSV/LLM exports belong to Next and must use that origin. See [MCP Integration](../mcp.md) for exact tool envelopes, enablement, client capabilities, and the read-only SDK smoke test. Stateless JSON POST results and GET 405 are intentional; no OAuth, scoped keys, or mutation tools are implemented. Site-derived URLs, captured text and error content are untrusted evidence, not instructions for connected clients.
 
 MCP issue-detail lookup queries the selected group directly rather than searching a capped first-page list. Failed issue UUID keys are canonicalized to lowercase; needs-review keys remain rule IDs. Older incomplete audit rows may provide summary counts without stored node occurrences: detail then returns an empty list and `has_more: false`, preserving the count without inventing evidence. MCP detail adds dashboard-relative `screenshot_url` and `element_screenshot_url` while retaining raw storage paths for compatibility; absent/empty stored paths omit the corresponding URL field. It does not verify file existence during a detail read. These added fields do not change normal REST occurrence payloads. SDK v1 and v2 client checks use the legacy 2025 contract; client package generation does not imply modern 2026 server protocol support.
 
@@ -129,6 +136,7 @@ Juicer audits pages concurrently, but its synchronized per-run progress callback
 
 - Each scan now stores `viewport_preset`, `viewport_width`, and `viewport_height` on the `scans` row. Shopkeeper resolves these at create time and reuses them for every page in the scan.
 - Rescans create a brand new `scans` row and re-run the pipeline with the original target URL, scan type, tag, and viewport.
+- Rescans preserve `include_link_check`; selected rescans get a fresh companion. Deleting the parent cascades to companion jobs/results. A waiting companion remains queued while its parent is paused; an already running companion can be cancelled independently without cancelling accessibility work.
 - Failed-page retries keep the same `scans` row. They are limited to completed partial scans with at least one completed page and at least one failed page.
 - Active scans can be paused cooperatively. In-flight pages may settle first; partial successful results are stored before the status becomes `paused`.
 - Resume changes a paused scan back to pending and continues persisted URL state. It preserves the scan ID, viewport, successful pages, and existing findings.

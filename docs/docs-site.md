@@ -11,7 +11,7 @@ The docs site combines four content sources:
 3. Repository Markdown docs from `docs/`, rendered under `/docs/reference/...`.
 4. Committed product screenshots in `docs-site/public/product-screenshots/`.
 
-The public docs build is a static export. CI builds the site and uploads `docs-site/out` to GitHub Pages. CI does not run scans or regenerate screenshots because external scan results are slower and less deterministic.
+The public docs build is a static export. CI builds the site and uploads `docs-site/out` to GitHub Pages. CI does not run accessibility scans or link checks, or regenerate screenshots, because external results are slower and less deterministic.
 
 ## Commands
 
@@ -94,7 +94,7 @@ The public API page is generated from the typed manifest in `docs-site/content/a
 
 When API behavior changes:
 
-1. Update the owning route/handler: Shopkeeper owns scan actions and MCP tools; the dashboard owns settings, issue pagination, export controls, and the canonical MCP proxy.
+1. Update the owning route/handler: Shopkeeper owns scan/link actions, link target/source paging and CSV, and MCP tools; the dashboard owns settings, accessibility issue pagination/export controls, and the canonical MCP proxy.
 2. Update any affected dashboard proxy or client code.
 3. Update `docs-site/content/api.ts`.
 4. Run `make docs-build`.
@@ -125,9 +125,12 @@ The command runs `scripts/docs-refresh.sh`, which:
 6. Creates fresh docs-demo scans from public demo targets and skips scans that produce no completed page.
 7. Selects the scan with the richest issue data for issue screenshots.
 8. Seeds exactly one intentional failed URL into a completed docs-demo scan for partial-retry screenshots.
-9. Captures screenshots with browser, framework-overlay, expected-element, response, and file-size checks.
-10. Builds the static docs site and validates every required route, internal link, asset, and screenshot in the export.
-11. Stops the isolated docs stack on success or failure unless `LIME_DOCS_KEEP_STACK=true`.
+9. Creates a fresh standalone **Single page** link check for the selected rich-scan target. It waits for `completed`, fails on `failed`/`cancelled`, and polls up to 220 times at three-second intervals (approximately 660 seconds plus request time). This allows the checker's ten-minute job budget and queue/startup overhead.
+10. Passes explicit accessibility, partial-retry, and link-check IDs to the capture runner, which captures ten images with browser, framework-overlay, expected-element, response, and file-size checks.
+11. Builds the static docs site and validates every required route, internal link, asset, and all ten product screenshots in the export.
+12. Stops the isolated docs stack on success or failure unless `LIME_DOCS_KEEP_STACK=true`.
+
+The link-demo job is not a mocked result or a companion attached to an existing user scan. It requests the configured public target from the isolated backend. A completed check can contain broken, redirected, errored, blocked, or truncated results; screenshot generation must preserve those outcomes rather than replacing them with an invented clean result. Real external responses can vary between refreshes. The screenshot run is product evidence, not the deterministic full functional suite or a production security/load assessment.
 
 The default demo targets are:
 
@@ -155,12 +158,35 @@ The seeded URL is derived from the scan target origin:
 
 The script updates only the isolated `lime-docs` database. It does not touch the normal local database, screenshots, or user scans. It also clears derived read caches for that scan so the dashboard recomputes partial coverage before screenshots are captured.
 
-`docs-site/scripts/capture-screenshots.mjs` receives two scan IDs:
+`docs-site/scripts/capture-screenshots.mjs` receives explicit IDs from the isolated docs stack:
 
 - `--scan-id` for rich issue screenshots.
 - `--partial-scan-id` for `partial-retry.png`.
+- `--link-check-id` for the completed link-demo detail page. This is a different job ID, not an accessibility scan ID.
 
 The screenshot capture fails if the partial-retry page does not show `Partial scan recovery` and the `Retry failed pages` button. This makes broken retry screenshots visible during `make docs`.
+
+## Link-Check Screenshots
+
+The live checker replaces the old design-only screenshot:
+
+- `link-checker.png` captures `/links`, including **Start link check** and a saved-history **View results** entry.
+- `link-check-results.png` captures `/links/<link-check-id>`, requiring **Link check details**, **Link targets**, an actual target row, and the settled-job **Recheck** action.
+
+The capture runner refuses to run without an explicit link-check ID. It accepts `--link-check-id` or `LIME_DOCS_LINK_CHECK_ID`; `make docs` creates and supplies the isolated ID automatically. Accessibility inputs similarly accept `--scan-id`/`LIME_DOCS_SCAN_ID` and `--partial-scan-id`/`LIME_DOCS_PARTIAL_SCAN_ID`. The partial ID defaults to the explicit rich scan ID if omitted, but canonical refresh always supplies its seeded retry ID.
+
+For capture-runner debugging **only after preparing the isolated docs stack**, the argument shape is:
+
+```bash
+npm --prefix docs-site run docs:screenshots -- \
+  --base-url http://localhost:13000 \
+  --scan-id '<isolated-accessibility-scan-id>' \
+  --partial-scan-id '<isolated-partial-scan-id>' \
+  --link-check-id '<isolated-completed-link-check-id>' \
+  --output docs-site/public/product-screenshots
+```
+
+Replace those placeholders with IDs created in the isolated project, and use its configured UI port if changed. Do not point the runner at port 3000 or copy IDs from private normal scans. Capture assertions prove the required visible state rendered, not every target classification, network policy, lifecycle edge case, or companion checkbox flow; those need the isolated product verification suite and a dated record in [Verification And Handoff](verification.md).
 
 ## Screenshot Files
 
@@ -177,6 +203,7 @@ Current screenshot IDs are defined in `docs-site/content/screenshots.ts`:
 - `reports`
 - `settings`
 - `link-checker`
+- `link-check-results`
 
 If you add a screenshot:
 
@@ -191,7 +218,7 @@ Screenshots should be requested through code, not captured manually from a devel
 
 To add a screenshot request:
 
-1. Decide which isolated docs-demo scan should drive the screenshot. Use `--scan-id` for the rich issue scan and `--partial-scan-id` for partial retry UI.
+1. Decide which isolated docs-demo record should drive the screenshot. Use `--scan-id` for the rich issue scan, `--partial-scan-id` for partial retry UI, and `--link-check-id` for the completed standalone link job.
 2. Add a `capture(...)` call in `docs-site/scripts/capture-screenshots.mjs` with the exact dashboard route and output filename.
 3. Add an `afterLoad` assertion for the important UI state, such as a heading, button, issue card, menu, or expanded panel. The capture runner also fails on blank pages, framework overlays, HTTP 5xx responses, browser errors, and unexpectedly small image files.
 4. If the screenshot needs special data, add deterministic setup in `scripts/docs-refresh.sh` against only the `lime-docs` Compose project and isolated database.

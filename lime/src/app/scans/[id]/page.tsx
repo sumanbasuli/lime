@@ -16,6 +16,7 @@ import {
   TagBadge,
 } from "@/components/status-badge";
 import { ScanProgress } from "@/components/scan-progress";
+import { ScanLinkCheck } from "@/components/scan-link-check";
 import { measureServerAction } from "@/lib/performance-logging";
 import { formatViewportLabel, getViewportPresetOption } from "@/lib/viewport-presets";
 import { getScanAuditReports } from "@/lib/scan-score-data";
@@ -347,6 +348,8 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
           </div>
         </section>
       )}
+
+      <ScanLinkCheck scanId={scan.id} enabled={scan.includeLinkCheck} />
 
       <section className="space-y-4">
         <div className="lime-card rounded-[22px] p-6">

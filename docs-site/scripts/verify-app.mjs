@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { connectMcp, readMcpTool, MCP_TOOL_NAMES, verifyMcpReadClient } from "./verify-mcp.mjs";
 import { verifyMcpBridge } from "./verify-mcp-bridge.mjs";
+import { verifyLinkMcp } from "./verify-link-mcp.mjs";
+import { handleLinkFixture, verifyLinkChecks, waitForLinkCheck } from "./verify-links.mjs";
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(name);
@@ -53,6 +55,7 @@ ${Array.from({length:4},(_,index)=>`<input id="missing-label-${index}">`).join("
 const fixtureServer = createServer((request, response) => {
   const pathname = new URL(request.url, fixtureOrigin).pathname;
   requests.set(pathname, (requests.get(pathname) || 0) + 1);
+  if (handleLinkFixture(request, response, { origin: fixtureOrigin, requests })) return;
   if (pathname === "/index.xml") {
     response.writeHead(200, { "Content-Type": "application/xml" });
     response.end(`<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>${fixtureOrigin}/nested.xml</loc></sitemap><sitemap><loc>${fixtureOrigin}/nested.xml</loc></sitemap></sitemapindex>`);
@@ -128,12 +131,15 @@ async function navigate(route, heading) {
   await page.locator('[data-nextjs-dialog], .vite-error-overlay').waitFor({ state: "hidden" });
 }
 
-async function createFromForm(target, type, preset, tag) {
+async function createFromForm(target, type, preset, tag, includeLinkCheck = false) {
   await navigate("/scans/new", "New scan");
   await page.getByRole("button", { name: type === "single" ? "Single page" : "Sitemap", exact: true }).click();
   await page.getByRole("button", { name: new RegExp(preset, "i") }).click();
   await page.getByLabel(type === "single" ? "Page URL" : "Sitemap URL", { exact: true }).fill(fixtureOrigin + target);
   await page.getByLabel(/Tag/).fill(tag);
+  const includeLinks = page.getByLabel("Include link check", { exact: true });
+  assert.equal(await includeLinks.isChecked(), false, "Accessibility scans keep link checks opt-in");
+  if (includeLinkCheck) await includeLinks.check();
   const [response] = await Promise.all([
     page.waitForResponse((response) => response.url().endsWith("/api/scans") && response.request().method() === "POST"),
     page.getByRole("button", { name: "Start scan", exact: true }).click(),
@@ -146,6 +152,7 @@ async function createFromForm(target, type, preset, tag) {
   assert.deepEqual([scan.viewport_width, scan.viewport_height], dimensions);
   assert.equal(scan.scan_type, type);
   assert.equal(scan.tag, tag);
+  assert.equal(scan.include_link_check, includeLinkCheck);
   return scan;
 }
 
@@ -280,29 +287,36 @@ try {
 
   let paused;
   await check("sitemap scan, cooperative pause, resume and persisted coverage", async () => {
-    paused = await createFromForm("/sitemap.xml", "sitemap", "Desktop", "verification-pause");
+    paused = await createFromForm("/sitemap.xml", "sitemap", "Desktop", "verification-pause", true);
     await waitForScan(paused.id, ["scanning"]);
     await page.getByRole("button", { name: "Pause", exact: true }).click();
     const state = await waitForScan(paused.id, ["paused"]);
     assert.equal(state.total_urls, 8);
     assert.ok(state.scanned_urls < state.total_urls, "Fixture must pause before completion");
     assert.equal(await verificationSql(`SELECT count(*) FROM urls WHERE scan_id='${paused.id}' AND status='failed'`), "0", "Pause cancellation leaves unfinished healthy pages pending, not failed");
-    const recovery = await createFromForm("/sitemap.xml", "sitemap", "Tablet", "verification-recovery");
+    const pausedLinks = await json(`${scanUrl(paused.id)}/link-check`);
+    assert.equal(pausedLinks.status, "queued", "A scan companion waits for accessibility completion");
+    const recovery = await createFromForm("/sitemap.xml", "sitemap", "Tablet", "verification-recovery", true);
+    const recoveryLinks = await json(`${scanUrl(recovery.id)}/link-check`);
     await waitForScan(recovery.id, ["scanning"]);
-    await navigate("/links");
+    await navigate("/scans/new", "New scan");
     await exec("docker", ["compose", "-p", "lime-verification", "-f", "docker-compose.docs.yml", "restart", "shopkeeper"], { cwd: repoRoot });
     for (let attempt = 0; attempt < 30; attempt += 1) {
       if (await fetch(`${apiUrl}/api/health`).then((response) => response.ok).catch(() => false)) break;
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
     assert.equal((await waitForScan(paused.id, ["paused"])).scanned_urls, state.scanned_urls);
+    assert.equal((await json(`${scanUrl(paused.id)}/link-check`)).status, "queued", "Restart must not run a paused scan's companion");
     assert.equal((await waitForScan(recovery.id)).scanned_urls, 8);
+    await waitForLinkCheck(json, baseUrl, recoveryLinks.id);
     await navigate(`/scans/${paused.id}`);
     await page.getByRole("button", { name: "Resume", exact: true }).click();
     const completed = await waitForScan(paused.id);
     assert.equal(completed.total_urls, 8);
     assert.equal(completed.scanned_urls, 8);
     assert.equal(await verificationSql(`SELECT count(*) FROM urls WHERE scan_id='${paused.id}' AND status='completed'`), "8", "Resume audits every healthy page, not only counts attempted pages");
+    const completedLinks = await waitForLinkCheck(json, baseUrl, pausedLinks.id);
+    assert.equal(completedLinks.pages_checked, 8, "The companion checks the same persisted scan page set after resume");
   });
 
   await check("nested sitemap discovery, duplicate removal and off-host filtering", async () => {
@@ -429,14 +443,28 @@ try {
     assert.equal(defaultDetail.detail.occurrences.length, 25, "Omitted detail limit uses default page size");
     assert.equal(defaultDetail.detail.occurrenceOffset, 0);
     const probe = await browser.newPage();
+    let interceptedDetails = 0;
     try {
-      await probe.route("**/issues/details?**", (route) => route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"Temporary verification failure"}' }));
-      await probe.goto(`${baseUrl}/scans/${single.id}/issues`, { waitUntil: "domcontentloaded" });
-      await probe.locator(".issue-card-trigger").first().click();
+      await probe.route("**/issues/details?**", (route) => {
+        interceptedDetails += 1;
+        return route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"Temporary verification failure"}' });
+      });
+      // This fresh, settled-scan probe must be interactive before injecting the
+      // error. Progress routes elsewhere use rendered controls, not networkidle.
+      await probe.goto(`${baseUrl}/scans/${single.id}/issues`, { waitUntil: "networkidle" });
+      const [injected] = await Promise.all([
+        probe.waitForResponse((response) => response.url().includes("/issues/details?") && response.status() === 503),
+        probe.locator(".issue-card-trigger").first().click(),
+      ]);
+      assert.equal(injected.status(), 503);
+      assert.ok(interceptedDetails > 0, "The intended issue-detail request was intercepted");
       await probe.getByText("Temporary verification failure", { exact: true }).waitFor();
       await probe.unroute("**/issues/details?**");
       await probe.getByRole("button", { name: "Retry loading details", exact: true }).click();
       await probe.getByText("Affected elements", { exact: true }).waitFor();
+    } catch (error) {
+      await probe.screenshot({ path: path.join(outputDir, "issue-retry-probe-failure.png"), fullPage: true });
+      throw new Error(`Issue retry probe failed (${interceptedDetails} injected requests, expanded=${await probe.locator(".issue-card-trigger").first().getAttribute("aria-expanded")}): ${error.message}`, { cause: error });
     } finally { await probe.close(); }
     await navigate(`/scans/${single.id}/issues`);
   });
@@ -706,12 +734,12 @@ try {
     assert.ok(!JSON.stringify(visible).includes(mcpKey), "Read tools do not expose the bearer key");
     assert.ok(!JSON.stringify(visible).includes("mcp_key_hash"), "Read tools do not expose the hash");
     const smoke = await verifyMcpReadClient(`${baseUrl}/mcp`, mcpKey, mcpScan.id);
-    assert.equal(smoke.checked.length, 6, "Operator SDK smoke helper exercises every tool");
+    assert.deepEqual([...smoke.checked].sort(), [...MCP_TOOL_NAMES].sort(), "The earlier pause/resume fixture already supplies saved companion results, so the smoke helper reads all twelve tools");
     mcpV2Evidence = await verifyMcpReadClient(`${baseUrl}/mcp`, mcpKey, mcpScan.id, { sdk: "v2" });
-    assert.equal(mcpV2Evidence.checked.length, 6, "Current SDK client reads every existing tool");
+    assert.deepEqual([...mcpV2Evidence.checked].sort(), [...smoke.checked].sort(), "Both SDK generations exercise the same available data");
     assert.deepEqual(mcpV2Evidence.protocol, { era: "legacy", version: "2025-11-25" });
     mcpBridgeEvidence = await verifyMcpBridge(`${baseUrl}/mcp`, mcpKey, mcpScan.id);
-    assert.equal(mcpBridgeEvidence.checked.length, 6, "Real stdio bridge reads every existing tool");
+    assert.deepEqual([...mcpBridgeEvidence.checked].sort(), [...smoke.checked].sort(), "Real stdio bridge reads all available saved-data tools");
   });
 
   await check("MCP protocol errors, read-only boundary, rotation and disable", async () => {
@@ -821,6 +849,48 @@ try {
     await request(screenshotUrl, {}, 404);
   });
 
+  const linkFixtures = await verifyLinkChecks({ baseUrl, fixtureOrigin, json, request, jsonOptions, page, navigate, check, requests, createFromForm, waitForScan, verificationSql, exec, repoRoot, outputDir, download, displayedScore, baselineScan: single });
+
+  await check("Link Checker MCP SDK v1/v2, source pagination, CSV, companions and read-only bridge", async () => {
+    const companionScan = await json(`${baseUrl}/api/scans`, jsonOptions("POST", {
+      sitemap_url: fixtureOrigin + "/good", scan_type: "single", tag: "verification-mcp-links", include_link_check: true,
+    }), 201);
+    await waitForScan(companionScan.id);
+    const companion = await json(`${scanUrl(companionScan.id)}/link-check`);
+    await waitForLinkCheck(json, baseUrl, companion.id);
+    const previousSettings = await json(`${baseUrl}/api/settings`);
+    const generated = await json(`${baseUrl}/api/settings`, jsonOptions("POST", { action: "generate_mcp_key" }));
+    const key = generated.mcpKey;
+    assert.ok(key, "An ephemeral isolated MCP key is generated for saved link reads");
+    const snapshot = () => verificationSql(`SELECT json_build_object(
+      'checks',(SELECT coalesce(json_agg(j ORDER BY j.id),'[]'::json) FROM link_checks j),
+      'results',(SELECT coalesce(json_agg(r ORDER BY r.id),'[]'::json) FROM link_check_results r),
+      'scans',(SELECT coalesce(json_agg(s ORDER BY s.id),'[]'::json) FROM scans s),
+      'settings',(SELECT coalesce(json_agg(to_jsonb(a)-'mcp_key_hash' ORDER BY a.key),'[]'::json) FROM app_settings a)
+    )::text`);
+    try {
+      const sdk = await verifyLinkMcp({
+        url: `${baseUrl}/mcp`, key, baseUrl, json,
+        checkId: linkFixtures.single.id, otherCheckId: linkFixtures.crawl.id,
+        sourceCheckId: linkFixtures.many.id, companionScanId: companionScan.id,
+        noCompanionScanId: single.id, deletedCompanionScanId: linkFixtures.integrated.id,
+        snapshot, requireHttp999: true,
+      });
+      const beforeBridge = await snapshot();
+      const bridge = await verifyMcpBridge(`${baseUrl}/mcp`, key, mcpScan.id, {
+        linkCheckId: linkFixtures.single.id, linkScanId: companionScan.id,
+      });
+      assert.deepEqual([...bridge.checked].sort(), [...MCP_TOOL_NAMES].sort(), "The real stdio bridge reads every one of the twelve saved-data tools");
+      assert.equal(await snapshot(), beforeBridge, "Bridge reads do not change saved scans, link evidence or settings");
+      await writeFile(path.join(outputDir, "link-mcp-client-results.json"), JSON.stringify({
+        completedAt: new Date().toISOString(), tools: MCP_TOOL_NAMES, sdk, bridge,
+        bridgeDataUnchanged: true,
+      }, null, 2));
+    } finally {
+      await json(`${baseUrl}/api/settings`, jsonOptions("PUT", { integrations: { mcpEnabled: previousSettings.integrations.mcpEnabled } }));
+    }
+  });
+
   await check("desktop/tablet/mobile routes, navigation, search and screenshot layout", async () => {
     for (const width of [1440, 768, 390, 320]) {
       await page.setViewportSize({ width, height: 1000 });
@@ -832,7 +902,9 @@ try {
         assert.ok((await page.locator("main").innerText()).length > 40);
       }
       await navigate("/links", "Link checker");
-      assert.equal(await page.getByRole("button", { name: "Start link check", exact: true }).isDisabled(), true);
+      await page.getByRole("button", { name: "Single page", exact: true }).click();
+      await page.getByLabel("Page URL", { exact: true }).fill(fixtureOrigin + "/links/good");
+      assert.equal(await page.getByRole("button", { name: "Start link check", exact: true }).isEnabled(), true);
       await page.screenshot({ path: path.join(outputDir, `link-checker-${width}.png`), fullPage: true });
     }
     await page.getByRole("button", { name: "Toggle Sidebar", exact: true }).click();
