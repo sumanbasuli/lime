@@ -1,5 +1,5 @@
 import { MaterialSymbol } from "@/components/material-symbol";
-import { apiGroups } from "@/content/api";
+import { apiGroups, type ApiEndpoint } from "@/content/api";
 import { SiteShell } from "@/components/site-shell";
 import {
   Card,
@@ -23,19 +23,38 @@ const methodTone: Record<string, string> = {
 
 const methodDescriptions: Record<string, string> = {
   GET: "Read scans, issue groups, report files, health, version, and settings.",
-  POST: "Create scans or trigger scan lifecycle actions.",
+  POST: "Create scans, trigger lifecycle actions, generate MCP keys, or call read-only MCP tools.",
   PUT: "Update server-wide settings.",
-  DELETE: "Remove scan data and stored screenshots.",
+  DELETE: "Remove scan data and stored screenshots, or restore an excluded issue.",
 };
 
 const methodOrder = ["GET", "POST", "PUT", "DELETE"] as const;
 
-function curlForEndpoint(path: string, method: string, body?: string) {
-  const url = `http://localhost:8080${path.replace("{id}", "$SCAN_ID")}`;
-  const lines = [`curl -s -X ${method} "${url}"`];
-  if (body) {
+function curlForEndpoint(endpoint: ApiEndpoint) {
+  const port = endpoint.path === "/mcp" ? 8080 : 3000;
+  const endpointPath = endpoint.path
+    .replaceAll("{id}", "$SCAN_ID")
+    .replaceAll("{scanId}", "$SCAN_ID")
+    .replaceAll("{issueId}", "$ISSUE_ID")
+    .replaceAll("{filename}", "$SCREENSHOT_FILENAME");
+  const query = endpoint.exampleQuery ? `?${endpoint.exampleQuery}` : "";
+  const url = `http://localhost:${port}${endpointPath}${query}`;
+  const lines = [`curl -fSs -X ${endpoint.method} "${url}"`];
+  if (endpoint.bearerKey) {
+    lines.push('  -H "Authorization: Bearer $LIME_MCP_KEY"');
+  }
+  if (endpoint.body) {
     lines.push(`  -H "Content-Type: application/json"`);
-    lines.push(`  --data '${body}'`);
+    lines.push(`  --data '${endpoint.body}'`);
+  }
+  if (endpoint.path.endsWith(".pdf")) {
+    lines.push("  --output lime-report.pdf");
+  } else if (endpoint.path.endsWith(".csv")) {
+    lines.push("  --output lime-report.csv");
+  } else if (endpoint.path.endsWith(".llm.txt")) {
+    lines.push("  --output lime-report.llm.txt");
+  } else if (endpoint.path.startsWith("/api/screenshots/")) {
+    lines.push('  --output "$SCREENSHOT_FILENAME"');
   }
   return lines.join(" \\\n");
 }
@@ -64,10 +83,16 @@ export default function ApiReferencePage() {
           API Reference
         </h1>
         <p className="mt-5 max-w-3xl text-base leading-7 text-black/58 sm:text-lg sm:leading-8">
-          Use these examples against Shopkeeper on port <code>8080</code> or
-          through the dashboard proxy where applicable. Endpoints are grouped
-          by method so reads, lifecycle actions, settings updates, and deletes
-          stay easy to scan.
+          Run REST examples against the dashboard on port <code>3000</code>.
+          It serves its own endpoints and proxies Shopkeeper routes. Each card
+          identifies the owning service; only the MCP transport uses Shopkeeper
+          directly on port <code>8080</code>.
+        </p>
+        <p className="mt-3 text-sm leading-6 text-black/55">
+          Set <code>SCAN_ID</code> and <code>ISSUE_ID</code> to saved result IDs.
+          Screenshot examples also use <code>SCREENSHOT_FILENAME</code> from an
+          occurrence. MCP requests use <code>LIME_MCP_KEY</code>, returned when
+          generating a key in Settings.
         </p>
       </section>
 
@@ -109,6 +134,9 @@ export default function ApiReferencePage() {
                       <span className="max-w-full rounded-full border border-black/10 bg-white px-2.5 py-1 text-xs font-medium text-black/50">
                         {endpoint.surface}
                       </span>
+                      <span className="max-w-full rounded-full border border-black/10 bg-white px-2.5 py-1 text-xs font-medium text-black/50">
+                        {endpoint.owner}
+                      </span>
                     </div>
                     <CardTitle className="mt-2 break-words text-xl sm:text-2xl">{endpoint.title}</CardTitle>
                     <CardDescription className="break-words">{endpoint.description}</CardDescription>
@@ -132,13 +160,21 @@ export default function ApiReferencePage() {
                         </code>
                       </div>
                     ) : null}
+                    {endpoint.query ? (
+                      <div className="min-w-0 text-sm">
+                        <div className="font-semibold">Query parameters</div>
+                        <p className="mt-1 break-words leading-6 text-black/55">
+                          {endpoint.query}
+                        </p>
+                      </div>
+                    ) : null}
                     <div className="min-w-0 rounded-xl border border-white/10 bg-black p-4 text-[#fffbe6]">
                       <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#fffbe6]/60">
                         <MaterialSymbol name="terminal" size={16} />
                         Example
                       </div>
                       <pre className="max-w-full overflow-x-auto whitespace-pre text-xs leading-6 sm:text-sm">
-                        {curlForEndpoint(endpoint.path, endpoint.method, endpoint.body)}
+                        {curlForEndpoint(endpoint)}
                       </pre>
                     </div>
                     {endpoint.notes?.length ? (

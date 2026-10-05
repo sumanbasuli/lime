@@ -96,7 +96,7 @@ Minimum values to set:
 - `DATABASE_URL` in both files
 - `SHOPKEEPER_URL=http://127.0.0.1:8080` in `ui.env`
 - `SHOPKEEPER_SCREENSHOT_DIR=/opt/lime/shopkeeper/screenshots` in `shopkeeper.env`
-- `LIME_UPDATE_CHECK=true` in `ui.env` if you want sidebar update notices
+- `LIME_UPDATE_CHECK=true` in `ui.env` to opt into GitHub release checks; sidebar display also respects the browser preference described in [Updating LIME](updates.md)
 
 ## Start The Services
 

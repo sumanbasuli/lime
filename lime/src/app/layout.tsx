@@ -25,7 +25,7 @@ export default function RootLayout({
       <body className="antialiased" suppressHydrationWarning>
         <a
           href="#main-content"
-          className="fixed top-3 left-3 z-[100] -translate-y-20 rounded-full bg-black px-4 py-2 text-sm font-semibold text-white transition-transform focus:translate-y-0"
+          className="fixed top-3 left-3 z-[100] -translate-y-20 rounded-full bg-black px-4 py-2 text-sm font-semibold text-white transition-transform focus:translate-y-0 print:hidden"
         >
           Skip to content
         </a>
@@ -39,6 +39,7 @@ export default function RootLayout({
               <AppHeader />
               <main
                 id="main-content"
+                tabIndex={-1}
                 className="flex flex-1 flex-col px-4 py-6 sm:px-6 lg:px-7 lg:py-7"
               >
                 {children}

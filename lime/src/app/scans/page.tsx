@@ -183,7 +183,19 @@ export default async function ScansPage({
                     colSpan={7}
                     className="py-14 text-center text-muted-foreground"
                   >
-                    {tagFilter ? (
+                    {queryFilter ? (
+                      <>
+                        No scans match &quot;{params.q?.trim()}&quot;
+                        {tagFilter ? <> with tag &quot;{tagFilter}&quot;</> : null}.{" "}
+                        <Link
+                          href={tagFilter ? `/scans?tag=${encodeURIComponent(tagFilter)}` : "/scans"}
+                          className="underline"
+                        >
+                          Clear search
+                        </Link>
+                        .
+                      </>
+                    ) : tagFilter ? (
                       <>
                         No scans with tag &quot;{tagFilter}&quot;.{" "}
                         <Link href="/scans" className="underline">

@@ -17,7 +17,7 @@ import {
 } from "@/components/status-badge";
 import { ScanProgress } from "@/components/scan-progress";
 import { measureServerAction } from "@/lib/performance-logging";
-import { formatViewportLabel } from "@/lib/viewport-presets";
+import { formatViewportLabel, getViewportPresetOption } from "@/lib/viewport-presets";
 import { getScanAuditReports } from "@/lib/scan-score-data";
 import { getReportSettings } from "@/lib/report-settings";
 import {
@@ -94,6 +94,13 @@ const scoreCardStyles: Record<
     accentClassName: "border border-black/15 bg-white text-[#0A0A0A]",
     label: "Excluded",
   },
+};
+
+const viewportIconNames = {
+  desktop: "desktop_windows",
+  laptop: "laptop_mac",
+  tablet: "tablet_mac",
+  mobile: "smartphone",
 };
 
 function getScoreSummaryCopy(summary: ScanScoreSummary, status: string): string {
@@ -245,7 +252,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
       )}
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
+        <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
             <Link href="/scans" className="transition-colors hover:text-foreground">
               Scans
@@ -254,8 +261,8 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
             <span>Scan details</span>
           </div>
 
-          <h1 className="font-heading text-[34px] font-semibold leading-[1.05] tracking-[-0.01em]">{target.domain}</h1>
-          <p className="max-w-3xl break-all text-sm leading-5 text-muted-foreground">
+          <h1 className="font-heading text-[34px] font-semibold leading-[1.05] tracking-[-0.01em] [overflow-wrap:anywhere]">{target.domain}</h1>
+          <p className="max-w-3xl text-sm leading-5 text-muted-foreground [overflow-wrap:anywhere]">
             {target.url}
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -264,7 +271,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
             </span>
             {scan.tag && <TagBadge tag={scan.tag} />}
             <span className="inline-flex h-7 items-center gap-1.5 rounded-full border border-black/12 bg-white px-3 text-xs text-black/70">
-              <MaterialSymbol name="desktop_windows" size={14} />
+              <MaterialSymbol name={viewportIconNames[getViewportPresetOption(scan.viewportPreset).key]} size={14} />
               {formatViewportLabel(
                 scan.viewportPreset,
                 scan.viewportWidth,
@@ -277,7 +284,7 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
           <StatusBadge
             status={scan.status ?? "pending"}
             summary={scoreSummary}

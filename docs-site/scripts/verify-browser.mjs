@@ -20,6 +20,7 @@ const routes = [
   "/docs/user/link-checker/",
   "/docs/developer/",
   "/docs/reference/setup/",
+  "/docs/reference/verification/",
   "/api/",
   "/screenshots/",
   "/roadmap/",
@@ -97,7 +98,7 @@ try {
   for (const route of routes) {
     await auditRoute(browser, route, { width: 1440, height: 1000 });
   }
-  for (const route of ["/", "/docs/", "/api/", "/screenshots/"]) {
+  for (const route of ["/", "/docs/", "/docs/reference/verification/", "/api/", "/screenshots/", "/roadmap/"]) {
     await auditRoute(browser, route, { width: 390, height: 844 }, true);
   }
 

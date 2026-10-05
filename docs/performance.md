@@ -44,6 +44,14 @@ Derived data must refresh or invalidate when:
 
 Occurrence detail queries should remain live and paginated. The UI should not rebuild a full issue list in memory just to serve the first page of issue cards.
 
+## Concurrent Cache Replacement
+
+The Next UI owns `scan_issue_summary_cache` replacement. A cache miss can be reached at the same time by server rendering, a post-triage refresh, and chunk requests. Replacing rows with uncoordinated `DELETE`/`INSERT` transactions can produce duplicate-key errors even when each request is individually transactional.
+
+`loadCachedIssueSummaries` locks the parent `scans` row with `FOR UPDATE` before replacing cache rows. It verifies that the scan's current `updated_at` matches the snapshot used to compute the summaries, then performs `DELETE` and `INSERT` while holding that lock. This serializes writers across requests and UI processes, including when the cache has no rows to lock. If the scan was deleted or changed, the obsolete snapshot does not persist cache data.
+
+Keep the scan-row lock and source-timestamp guard together when changing this path. Test concurrent cache misses after triage and confirm both stale snapshots and deleted scans cannot replace newer state. See [Verification And Handoff](verification.md) for the recorded regression evidence.
+
 ## Settings
 
 Performance settings should stay minimal:

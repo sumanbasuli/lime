@@ -91,8 +91,11 @@ Use **New Scan** when you want LIME to audit a sitemap, sitemap index, or one sp
 2. Select **New Scan**.
 3. Paste the sitemap URL or page URL.
 4. Choose the scan mode that matches the target.
-5. Submit the form.
-6. Stay on the scan detail page if you want to watch progress, or return to the dashboard later.
+5. Choose **Screen size**: Desktop (1440×900), Laptop (1280×800), Tablet (768×1024), or Mobile (390×844). Desktop is the default.
+6. Add the optional label, then submit the form.
+7. Stay on the scan detail page if you want to watch progress, or return to the dashboard later. The scan continues when you leave the page.
+
+The chosen screen size is stored with the scan and reused for every page, retries, and rescans. Use the Mobile preset to audit the site's mobile layout; resizing your dashboard browser does not change the audit viewport.
 
 ## What LIME does next
 
@@ -129,13 +132,19 @@ The dashboard is the operational view for all scans. Use it to find recent work,
 4. Open the scan detail page for lifecycle and URL-level progress.
 5. Open **Issues** when you are ready to triage grouped findings.
 
+## Find a scan
+
+Use the header search to match a target URL, label, status, or scan type. The scan list also offers label filters; you can combine a filter with search. The Overview shows recent scans and active progress, while **Scans** shows the full list.
+
 ## Statuses
 
 - **Pending** means the scan has been created or reopened and is waiting for work.
+- **Profiling** means LIME is discovering eligible URLs from the sitemap.
 - **Scanning** means Shopkeeper is actively processing pending URLs.
+- **Processing** means completed browser results are being grouped and stored.
 - **Paused** means the scan was stopped cooperatively and can be resumed.
-- **Completed** means all eligible URLs reached a terminal result.
-- **Partial** means some URLs completed and some URLs failed.
+- **Completed** means at least one page completed and the run has finished.
+- **Partial** is a coverage indicator for a completed scan with both completed and failed URLs; it is not a separate stored lifecycle status.
 - **Failed** means no useful page coverage was produced.
 
 ## How to use score and coverage
@@ -202,7 +211,7 @@ The scan detail page is the source of truth for one scan ID. It shows lifecycle,
 
 ## Same-scan failed-page retry
 
-When a completed scan is partial, LIME can retry only the failed pages inside the existing scan. This avoids running a full scan from the start and keeps the same scan ID, report, score history, completed URL rows, and issue grouping.
+When a completed scan is partial, LIME can retry only the failed pages inside the existing scan. This avoids running a full scan from the start and keeps the same scan ID, completed URL rows, audit evidence, and issue grouping. The score and report update as newly successful pages are added.
 
 ![Partial scan retry area](/product-screenshots/partial-retry.png?v=retry-card "Partial scans show an in-place retry area at the top of the scan detail page.")
 
@@ -218,6 +227,21 @@ When a completed scan is partial, LIME can retry only the failed pages inside th
 ## Full rescan versus retry
 
 Use **Retry failed pages** when the scan is partial and you want the current report to become more complete. Use **Full rescan** only when you intentionally want a new scan record for comparison.
+
+## Pause and resume
+
+1. Select **Pause** on an active scan.
+2. Wait for **Pausing...** to become **Paused**. Pages already in flight may finish before the pause is saved.
+3. Select **Resume** when you want to continue pending pages.
+4. LIME keeps the same scan ID, screen size, completed pages, and saved findings. A paused scan stays paused if the backend restarts.
+
+Closing the browser or changing pages does not pause a scan.
+
+## Rescan or delete
+
+Completed and failed scans offer **Rescan** (or **Full rescan** for partial coverage), which creates a new scan using the same target, type, screen size, and label. The original result remains available for comparison.
+
+**Delete** is available for completed, paused, and failed scans. Confirming it removes that scan's results and screenshot files. Resume a paused scan to continue its existing work; do not use deletion as a pause control.
 `,
   },
   {
@@ -247,9 +271,15 @@ The issue page groups audit results by rule. It loads the issue list first and l
 
 When you expand a card, LIME loads the details for that issue group. The expanded view includes affected URLs, CSS selectors, HTML snippets, screenshot evidence, ACT guidance where available, and occurrence paging.
 
+## Inspect screenshot evidence
+
+The small image is a focused preview. Select it to open the larger highlighted screenshot in a lightbox, then use **Close** or Escape to return to the issue. If a focused capture is unavailable, an on-demand page capture may be offered as a fallback. The preview and expanded view use the same saved capture; changing the surrounding design should not change the yellow highlight or screenshot behavior.
+
 ## Needs-review checks
 
 Needs-review items are included in the UI and reports. These are axe incomplete outcomes that need human judgment instead of automatic failure. Review them alongside failures when you are preparing an accessibility remediation backlog.
+
+LIME groups findings by rule. If a rule already has a failed issue group in the scan, it is shown there rather than duplicated as a needs-review card. Its raw incomplete audit data stays saved. Rules with only incomplete outcomes appear as needs-review groups; reports and MCP follow the same grouping.
 
 ## Mark false positives
 
@@ -257,6 +287,10 @@ Needs-review items are included in the UI and reports. These are axe incomplete 
 2. Use **Mark false positive** only when the issue should be excluded from scoring.
 3. LIME keeps the issue visible for audit history.
 4. Score summaries update after the false-positive state changes.
+
+The Overview's open-issue counts exclude marked issues, and excluded groups remain visible after active failures and needs-review checks. Use **Unmark false positive** to include a marked finding again.
+
+Each scan saves its own triage state. A new scan with the same target URL, scan type, and screen size inherits the latest completed, paused, or failed scan's mark or unmark decision for each matching rule. This also applies to **Rescan**. Changing the original scan later does not change a rescan that already saved its inherited state.
 `,
   },
   {
@@ -307,7 +341,7 @@ Server settings cap full PDF and issue-specific PDF occurrence detail so reports
     sourceFiles: ["lime/src/app/settings/page.tsx", "lime/src/components/dashboard-settings-form.tsx"],
     markdown: `# Settings
 
-The settings page controls server-wide reporting, performance, and integration preferences. These settings apply to every user of the deployed instance.
+The settings page controls server-wide reporting, performance, and integration preferences. These settings apply to every user of the deployed instance. The **Update notice** switch is the exception: it is a preference for this browser only.
 
 ![Settings page](/product-screenshots/settings.png "Settings are grouped into reporting, performance, and integration sections.")
 
@@ -327,9 +361,17 @@ The settings page controls server-wide reporting, performance, and integration p
 3. Set the report-generation concurrency cap based on server CPU and memory.
 4. Keep conservative defaults on small servers and increase only after profiling.
 
+Select **Save settings** and wait for its confirmation. Reload the page to confirm persisted values. Disabling a report format also disables its download action and makes its API reject export requests.
+
 ## Integration settings
 
 Integration settings include the read-only MCP controls used to connect external AI tools. MCP setup is documented in [MCP For AI Tools](/docs/user/mcp/).
+
+## Browser update notice
+
+The **Update notice** switch takes effect immediately and survives reload in this browser; it does not require **Save settings** and does not change PostgreSQL settings. A card appears only if your operator has also enabled the server's optional GitHub release check and a newer release is available. Turning off this browser's card does not disable the server's outbound check.
+
+Use **View release** to read release notes. Dismiss hides that exact release in this browser; a different newer release can appear later. This notice does not install updates. Operator configuration is covered in [Updating LIME](/docs/reference/deployment/updates/).
 `,
   },
   {
@@ -594,6 +636,7 @@ Use these docs when you are changing code, reviewing architecture, extending API
 5. Read [API](/docs/developer/api/) for how the public API reference is maintained.
 6. Use the full [API Reference](/api/) when integrating with Shopkeeper endpoints.
 7. Read [MCP For AI Tools](/docs/user/mcp/) when preparing AI-tool connectivity for the MCP endpoint.
+8. Use [Verification And Handoff](/docs/reference/verification/) for the existing-feature matrix, isolated checks, and the current project baseline before adding features.
 
 ## Engineering rules
 
@@ -627,6 +670,8 @@ make start-all
 
 - Run \`make build\` before opening a release-facing PR.
 - Run focused Go or frontend tests for the code you changed.
+- Run \`make verify-app\` for dashboard, API, scan lifecycle, report, settings, or screenshot changes. It uses a disposable production stack and deterministic local pages.
+- Run \`make docs-verify\` for marketing and documentation layout/navigation changes.
 - Keep database migrations forward-only.
 - Mirror schema changes in both Shopkeeper migrations and the dashboard Drizzle schema.
 - Update docs for every user-facing change.
@@ -687,6 +732,7 @@ The canonical technical handoff doc is [Docs Site](/docs/reference/docs-site/). 
 make docs-run    # build and serve static docs locally
 make docs-dev    # docs hot reload server
 make docs-build  # static docs build
+make docs-verify # build and browser-check desktop/mobile docs and interactions
 make docs        # isolated demo scans, screenshots, static build
 \`\`\`
 

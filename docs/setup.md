@@ -8,6 +8,8 @@ This document describes how to set up the LIME accessibility scanner for local d
 - **Go 1.25+** (for Shopkeeper backend development)
 - **Node.js 23+** and **npm** (for NextJS frontend development)
 
+Docker-only application startup does not require Go or Node on the host. Native development needs the language runtimes and installed packages: run `npm --prefix lime ci` for the dashboard and `npm --prefix docs-site ci` for the marketing/docs app. Browser verification also needs Playwright Chromium: `cd docs-site && npx playwright install chromium`.
+
 ## Environment Variables
 
 All environment configuration is managed through `.env` files:
@@ -21,6 +23,11 @@ All environment configuration is managed through `.env` files:
 | `SHOPKEEPER_URL` | `http://localhost:8080` | Runtime proxy target used by the Next server in native local development |
 | `LIME_API_PORT` | `8080` | Public host port for the Go backend API |
 | `LIME_UI_PORT` | `3000` | Public host port for the NextJS UI |
+| `LIME_DB_PORT` | `5432` | Public host port for the bundled PostgreSQL container |
+| `LIME_DOCS_PORT` | `3001` | Local marketing website and documentation port |
+| `LIME_UPDATE_CHECK` | `false` | Operator opt-in for the UI's outbound GitHub release check; the per-browser Update notice preference only controls card visibility |
+| `LIME_GITHUB_REPO` | `sumanbasuli/lime` | Repository used by the optional release check |
+| `LIME_VERSION` | build/runtime dependent | Version compared by the release check; source Compose defaults to `0.0.0`, release images include their build version |
 | `ACT_RULES_PATH` | auto-resolved | Optional explicit path to `data/act-rules.json` for Shopkeeper and Next |
 
 ### File Locations
@@ -89,6 +96,21 @@ make logs-db
 make logs-shopkeeper
 make logs-ui
 ```
+
+### Marketing Website And Docs
+
+```bash
+npm --prefix docs-site ci
+make docs-dev          # website and docs with hot reload on localhost:3001
+make docs-run          # build and serve the production static export
+make docs-verify       # build, validate links/assets, and verify browser interactions
+```
+
+Open `http://localhost:3001/` for the complete website and `http://localhost:3001/docs/` for documentation. This app is separate from the product dashboard on port 3000 and does not need the database to serve its built pages. See [Docs Site](docs-site.md) for screenshot refresh and publishing.
+
+### Verify Existing Features
+
+Run `make verify-app` to exercise the product against deterministic local pages in an isolated production Docker stack. It uses its own database and screenshot volumes, so the checks can create, triage, retry, export, and delete test scans without changing the normal local instance. See [Verification And Handoff](verification.md) for coverage, prerequisites, artifacts, and the current evidence. Use focused checks while iterating; run the complete suite before handing off a cross-stack change.
 
 ## Release Workflow
 
@@ -164,18 +186,25 @@ docker compose --env-file .env -f docker-compose.release.yml up -d
 | POST | `/api/scans` | Create a new scan (body: `{"sitemap_url": "...", "scan_type": "sitemap|single", "viewport_preset": "desktop|laptop|tablet|mobile", "tag": "optional"}`) |
 | GET | `/api/scans` | List all scans |
 | POST | `/api/scans/{id}/rescan` | Start a fresh scan using the same target URL/type/tag |
+| POST | `/api/scans/{id}/pause` | Request a cooperative pause for an active scan |
+| POST | `/api/scans/{id}/resume` | Continue pending pages in a paused scan using the same scan ID |
 | POST | `/api/scans/{id}/retry-failed` | Requeue failed pages on a completed partial scan and continue the same scan |
 | GET | `/api/scans/{id}` | Get scan detail by ID |
-| DELETE | `/api/scans/{id}` | Delete a completed/failed scan and its saved assets |
+| DELETE | `/api/scans/{id}` | Delete a completed, paused, or failed scan and its saved assets |
 | GET | `/api/scans/{id}/issues` | Get issues with occurrences for a scan, including ACT rules and suggested fixes |
 | POST | `/api/scans/{id}/issues/{issueId}/false-positive` | Mark an issue as a false positive |
 | DELETE | `/api/scans/{id}/issues/{issueId}/false-positive` | Remove the false-positive mark from an issue |
 
+These routes are served by Shopkeeper and are also reachable through the dashboard's same-origin proxy. Paginated issue reads, application settings, and CSV/LLM exports are owned by Next and must use the dashboard origin. The [public API reference](https://lime.heysuman.com/api/) lists both surfaces. Shopkeeper also serves `/api/version`, `/api/screenshots/{scanId}/{filename}`, and the read-only `/mcp` transport described in [MCP Integration](mcp.md).
+
+Next also owns `GET /_lime/update-check`, which returns HTTP 200 with `enabled: false` when release checking is disabled. See [Updating LIME](deployment/updates.md) for the operator opt-in, immediate browser preference, and release-specific dismissal behavior.
+
 ## Runtime Behavior
 
 - A scan continues running if the user changes pages or closes the scan detail view; only the frontend polling stops.
-- A scan does not survive a dead Shopkeeper process in-memory, but non-terminal scans are now recovered automatically the next time Shopkeeper starts.
-- Recovery resets partial URLs/issues/screenshots for that scan before rerunning it, so the final stored result is clean.
+- **Pause** requests a cooperative stop. Pages already in flight may finish before the scan becomes `paused`; **Resume** continues pending pages with the same scan ID and saved results. Paused scans remain paused across backend restarts.
+- Active background work is lost when Shopkeeper exits, but scans left in `pending`, `profiling`, `scanning`, or `processing` are recovered on its next startup.
+- Interrupted active scans without a saved pause request restart from a clean run: Shopkeeper resets their URL/issue data and progress, removes their screenshot directory, and reruns the same scan ID with its saved target and viewport. A saved pause request is finalized as paused instead; already paused scans remain paused. This restart recovery differs from explicit **Resume**, which keeps completed-page evidence and continues pending pages.
 - Scans now run with an explicit viewport preset instead of Chromium's implicit default. The current presets are Desktop `1440x900`, Laptop `1280x800`, Tablet `768x1024`, and Mobile `390x844`.
 - For long-running scans in local development, prefer Docker or `make start-shopkeeper` over `make dev-shopkeeper`, because hot reload restarts the Go process frequently.
 - Sitemap discovery now retries transient nested sitemap fetch failures. If Shopkeeper still cannot fetch every sitemap listed in a sitemap index, the scan fails rather than scanning a partial subset of URLs.
@@ -189,7 +218,7 @@ docker compose --env-file .env -f docker-compose.release.yml up -d
 - Completed partial scans can now retry only their failed pages in place. That reopens the same scan ID, keeps completed pages intact, and updates the existing report instead of creating a second scan.
 - ACT issue guidance is loaded from the local checked-in catalog at read time. There is no runtime dependency on W3C services and no ACT snapshot stored in Postgres.
 - The issue details page is the main ACT UI surface in this phase. Compact scan summaries remain unchanged.
-- False-positive marking is persisted per issue row and is currently a triage flag only. It does not yet filter issues out of counts, summaries, or scan detail tables.
+- False-positive marking is persisted per scan issue. The issue remains visible as excluded evidence, while dashboard open-issue counts and active scoring exclude it. Marking or unmarking invalidates derived score and issue-summary caches. New scans inherit the latest terminal decision for matching target URL, scan type, and viewport; changing one scan does not retroactively change another scan's saved state.
 
 ## ACT Catalog Maintenance
 
@@ -224,11 +253,14 @@ docker compose logs -f shopkeeper
 
 | Route | Description |
 |-------|-------------|
-| `/` | Dashboard: stats, recent scans, new scan form |
-| `/scans` | All scans list |
+| `/` | Overview: workspace metrics, active scan progress, recent scans, new-scan entry point |
+| `/scans` | All scans list with tag filters and search |
 | `/scans/new` | New scan form |
 | `/scans/[id]` | Scan detail with live progress |
 | `/scans/[id]/issues` | Expandable issues viewer |
+| `/settings` | Persisted reporting, performance, and MCP controls |
+| `/links` | Link checker design preview; no backend checks or saved results |
+| `/reports/scans/[id]/issues` | Printable report document used by PDF generation |
 
 ## Project Structure
 
@@ -251,8 +283,8 @@ lime/                    (project root)
 
 ### Frontend (`/lime`)
 - **Framework**: NextJS with App Router
-- **UI Components**: shadcn/ui (built on Radix UI + TailwindCSS)
-- **Database ORM**: Drizzle ORM (read-only access to shared PostgreSQL)
+- **UI Components**: shadcn/ui-style components using Base UI primitives and TailwindCSS
+- **Database ORM**: Drizzle ORM (scan reads plus UI-owned settings and derived read caches)
 - **Styling**: TailwindCSS v4
 
 ### Backend (`/shopkeeper`)
@@ -271,4 +303,4 @@ lime/                    (project root)
 
 Migrations are managed by the Go backend using `golang-migrate`. They run automatically when Shopkeeper starts. Migration files live in `shopkeeper/migrations/`.
 
-The Drizzle schema in `lime/src/db/schema.ts` must be kept in sync with the SQL migrations manually. All schema changes should originate in the Go migrations (since Shopkeeper owns writes), then be reflected in the Drizzle schema.
+The Drizzle schema in `lime/src/db/schema.ts` must be kept in sync with the SQL migrations manually. All schema changes should originate in the Go migrations (Shopkeeper owns migration execution), then be reflected in the Drizzle schema. This includes UI-owned settings and derived cache tables as well as scan results.

@@ -5,6 +5,7 @@ LIME is a self-hosted accessibility scanner powered by axe-core, Chromium, Postg
 ## Start Here
 
 * **[Local Development Setup](setup.md)**: Run LIME locally with Docker or native processes, including environment variables and common commands.
+* **[Verification And Handoff](verification.md)**: Existing-feature matrix, isolated end-to-end checks, project ownership, evidence, and the workflow for future changes.
 * **[Docker & Release Pipeline](deployment/docker.md)**: Local Docker workflow, production build targets, GHCR release publishing, and release bundle format.
 * **[Deploy to Fly.io](deployment/fly.md)**: Two-app Fly setup with private networking, managed/external Postgres, screenshot storage, and rolling updates.
 * **[Deploy with Docker](deployment/docker.md)**: Docker workflows, production images, and release bundles.
@@ -28,6 +29,7 @@ LIME is a self-hosted accessibility scanner powered by axe-core, Chromium, Postg
 * **[Performance And Caching Strategy](performance.md)**: PostgreSQL-first optimization plan for large scans and reports.
 * **[Docs Site](docs-site.md)**: How the public docs site is built, searched, screenshotted, and deployed.
 * **[MCP Integration](mcp.md)**: Read-only MCP transport, authentication, client configuration, and capability model.
+* **[Verification And Handoff](verification.md)**: Reproducible feature checks and the current verified baseline before new features.
 
 Operational notes for scan lifecycle behavior are documented primarily in:
 - `docs/architecture/shopkeeper.md` for backend ownership, deletion/rescan rules, and restart recovery

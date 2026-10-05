@@ -57,8 +57,28 @@ type PageInput struct {
 	URL   string
 }
 
-// ProgressCallback is called after each page is scanned.
+// ProgressCallback reports the number of scanned pages as workers finish.
 type ProgressCallback func(scannedCount int)
+
+// synchronizedProgress prevents concurrent worker callbacks from persisting an
+// older count after a newer one. Each scan run gets its own tracker so deliberate
+// progress resets, such as retrying failed pages, remain possible.
+func synchronizedProgress(callback ProgressCallback) ProgressCallback {
+	if callback == nil {
+		return nil
+	}
+	var mu sync.Mutex
+	latest := 0
+	return func(count int) {
+		mu.Lock()
+		defer mu.Unlock()
+		if count <= latest {
+			return
+		}
+		latest = count
+		callback(count)
+	}
+}
 
 type elementBounds struct {
 	X              float64 `json:"x"`
@@ -159,6 +179,7 @@ func ScanPages(ctx context.Context, allocCtx context.Context, pages []PageInput,
 	if len(pages) == 0 {
 		return []RawResult{}, nil
 	}
+	onProgress = synchronizedProgress(onProgress)
 
 	// Create screenshot directory for this scan
 	screenshotDir := screenshots.ScanDir(scanID)

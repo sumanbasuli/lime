@@ -9,6 +9,9 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function parsePositiveInt(value: string | null, fallback: number): number {
+  if (value === null || value.trim() === "") {
+    return fallback;
+  }
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) {
     return fallback;

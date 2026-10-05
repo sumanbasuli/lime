@@ -1,36 +1,35 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LIME Dashboard
 
-## Getting Started
+This directory contains LIME's Next.js App Router dashboard. The Go backend in `../shopkeeper/` owns scan lifecycle and audit results; both services share PostgreSQL. The separate marketing website and documentation app lives in `../docs-site/`.
 
-First, run the development server:
+## Run Locally
+
+From the repository root:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env       # only for a new checkout; keep existing configuration
+make start-all            # production Docker stack at http://localhost:3000
+make start-dev            # Docker stack with dashboard hot reload
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+For native dashboard development, install dependencies once with `npm --prefix lime ci`, start the database and Shopkeeper with `make start-db` and `make start-shopkeeper`, then run `make dev-ui`. Root Make targets load `.env`; running `npm run dev` directly here requires a `DATABASE_URL` and `SHOPKEEPER_URL` in `lime/.env.local` or the process environment. Avoid running the native and Docker UI on the same port.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Ownership And Main Routes
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Server-rendered dashboard and scan pages read PostgreSQL through Drizzle.
+- Scan creation, pause/resume, retry, rescan, deletion, and false-positive actions use the same-origin API proxy to Shopkeeper.
+- Next route handlers own paginated issue reads, CSV/LLM exports, report controls, and persisted application settings. The UI also maintains derived score and issue-summary caches.
+- Screenshot URLs use `/api/screenshots/...`; preview and expanded image behavior share the existing backend capture path.
+- `/` is the Overview; `/scans` supports tags and search; `/scans/new` starts a scan; `/scans/[id]` shows coverage and actions; `/scans/[id]/issues` supports triage and exports; `/settings` controls reporting, performance, and MCP.
+- `/links` is the Link checker design preview. It does not crawl links or store results.
 
-## Learn More
+The design uses Fraunces headings, Geist body/code fonts, Material Symbols, warm paper surfaces, black controls, and LIME yellow accents. Shared visual rules live in `src/app/globals.css`; shared page chrome lives in `src/components/app-sidebar.tsx` and `app-header.tsx`.
 
-To learn more about Next.js, take a look at the following resources:
+## Verification
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm --prefix lime run lint
+cd lime && npx tsc --noEmit
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+From the repository root, `make verify-app` exercises existing dashboard features in a disposable production stack. `make docs-verify` separately checks the marketing website and documentation. See [Verification And Handoff](../docs/verification.md) for coverage, artifacts, prerequisites, and the latest recorded evidence. See [UI Architecture](../docs/architecture/ui.md) for data flow and component ownership.

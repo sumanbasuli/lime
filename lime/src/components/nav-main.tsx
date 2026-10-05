@@ -18,6 +18,7 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { MaterialSymbol } from "@/components/material-symbol"
 
@@ -37,6 +38,7 @@ export function NavMain({
 }) {
   const pathname = usePathname()
   const [openItems, setOpenItems] = useState<Record<string, boolean>>({})
+  const { setOpenMobile } = useSidebar()
 
   const isCurrentPath = (url: string) => {
     if (url === "/") {
@@ -72,6 +74,7 @@ export function NavMain({
                     <Link
                       href={item.url}
                       aria-current={isItemActive ? "page" : undefined}
+                      onClick={() => setOpenMobile(false)}
                     />
                   }
                 >
@@ -107,7 +110,7 @@ export function NavMain({
               <SidebarMenuButton
                 tooltip={item.title}
                 isActive={isItemActive}
-                render={<Link href={item.url} />}
+                render={<Link href={item.url} onClick={() => setOpenMobile(false)} />}
               >
                 {item.icon}
                 <span>{item.title}</span>
@@ -131,7 +134,7 @@ export function NavMain({
                           <SidebarMenuSubItem key={subItem.title}>
                             <SidebarMenuSubButton
                               isActive={isSubItemActive}
-                              render={<Link href={subItem.url} />}
+                              render={<Link href={subItem.url} onClick={() => setOpenMobile(false)} />}
                             >
                               <span>{subItem.title}</span>
                             </SidebarMenuSubButton>

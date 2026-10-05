@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 )
 
@@ -132,7 +133,7 @@ func (s *Server) dispatch(ctx context.Context, request rpcRequest) (any, *rpcErr
 			},
 			"serverInfo": map[string]any{
 				"name":    "lime",
-				"version": "0.1.0",
+				"version": buildinfo.Version,
 			},
 		}, nil
 	case "ping":

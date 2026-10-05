@@ -415,6 +415,22 @@ async function loadCachedIssueSummaries(
   );
 
   await db.transaction(async (tx) => {
+    // Serialize replacements across requests and UI processes, including when
+    // the cache is empty. Locking cache rows alone cannot protect an empty cache.
+    const [currentScan] = await tx
+      .select({ updatedAt: scans.updatedAt })
+      .from(scans)
+      .where(eq(scans.id, scanId))
+      .for("update");
+    if (
+      !currentScan ||
+      currentScan.updatedAt.getTime() !== scan.updatedAt.getTime()
+    ) {
+      // The summaries were computed before a scan update/deletion. Do not let
+      // that obsolete snapshot replace newer cache data.
+      return;
+    }
+
     await tx
       .delete(scanIssueSummaryCache)
       .where(eq(scanIssueSummaryCache.scanId, scanId));

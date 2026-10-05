@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MaterialSymbol } from "@/components/material-symbol";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -569,6 +569,8 @@ function IssueCard({
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingMoreOccurrences, setLoadingMoreOccurrences] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailRetryAttempt, setDetailRetryAttempt] = useState(0);
+  const detailKey = summary.kind === "failed" ? summary.issueId : summary.ruleId;
 
   useEffect(() => {
     setSummary(item);
@@ -577,18 +579,21 @@ function IssueCard({
   const loadDetail = useCallback(async ({
     occurrenceOffset,
     append,
+    signal,
   }: {
     occurrenceOffset: number;
     append: boolean;
+    signal?: AbortSignal;
   }) => {
     const params = new URLSearchParams({
       kind: summary.kind,
-      key: summary.kind === "failed" ? summary.issueId : summary.ruleId,
+      key: detailKey,
       occurrenceOffset: String(occurrenceOffset),
       occurrenceLimit: String(ISSUE_OCCURRENCES_PAGE_SIZE),
     });
     const response = await fetch(`/api/scans/${scanId}/issues/details?${params}`, {
       cache: "no-store",
+      signal,
     });
 
     if (!response.ok) {
@@ -611,35 +616,35 @@ function IssueCard({
         ],
       };
     });
-  }, [scanId, summary]);
+  }, [scanId, summary.kind, detailKey]);
 
   useEffect(() => {
-    if (!open || detail || loadingDetail) {
+    if (!open || detail) {
       return;
     }
 
-    let cancelled = false;
+    const controller = new AbortController();
     setLoadingDetail(true);
     setDetailError(null);
 
-    loadDetail({ occurrenceOffset: 0, append: false })
+    loadDetail({ occurrenceOffset: 0, append: false, signal: controller.signal })
       .catch((error) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setDetailError(
             error instanceof Error ? error.message : "Failed to load issue details"
           );
         }
       })
       .finally(() => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setLoadingDetail(false);
         }
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [detail, loadDetail, loadingDetail, open]);
+  }, [detail, loadDetail, open, detailRetryAttempt]);
 
   const handleLoadMoreOccurrences = async () => {
     if (!detail || loadingMoreOccurrences) {
@@ -676,11 +681,11 @@ function IssueCard({
   const headerPaddingClass =
     summary.kind === "failed"
       ? exportActionsEnabled
-        ? "pr-56 sm:pr-72"
-        : "pr-16 sm:pr-20"
+        ? "lg:pr-72"
+        : "lg:pr-20"
       : exportActionsEnabled
-        ? "pr-16"
-        : "pr-4";
+        ? "lg:pr-16"
+        : "";
 
   return (
     <Collapsible open={open} onOpenChange={setOpen}>
@@ -770,7 +775,7 @@ function IssueCard({
             </div>
           </div>
 
-          <div className="absolute right-4 top-4 z-20 flex items-start gap-2">
+          <div className="relative z-20 flex flex-wrap items-start gap-2 px-5 pb-4 lg:absolute lg:right-4 lg:top-4 lg:p-0">
             <IssueCardReportDownloadButton
               scanId={scanId}
               scope={{
@@ -799,6 +804,14 @@ function IssueCard({
               <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4 text-sm text-destructive">
                 {detailError}
               </div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDetailRetryAttempt((attempt) => attempt + 1)}
+              >
+                <MaterialSymbol name="refresh" size={16} />
+                Retry loading details
+              </Button>
             </div>
           ) : detail ? (
             <div className="space-y-4 border-t border-black/[0.07] px-5 pb-5 pt-4">
@@ -912,8 +925,67 @@ export function IssueDetailsFeed({
   const [items, setItems] = useState(initialItems);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const chunkRequestRef = useRef<AbortController | null>(null);
+  const needsPrefixReloadRef = useRef(false);
 
   const hasMore = items.length < totalItemCount;
+
+  useEffect(() => () => {
+    chunkRequestRef.current?.abort();
+    chunkRequestRef.current = null;
+  }, [scanId]);
+
+  const loadIssuePage = useCallback(async (offset: number, append: boolean) => {
+    chunkRequestRef.current?.abort();
+    const controller = new AbortController();
+    chunkRequestRef.current = controller;
+
+    setIsLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const params = new URLSearchParams({
+        offset: String(offset),
+        limit: String(ISSUE_SUMMARIES_PAGE_SIZE),
+      });
+      const response = await fetch(`/api/scans/${scanId}/issues/chunks?${params}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "Failed to load more issues");
+      }
+
+      const payload = (await response.json()) as {
+        items: IssueSummaryItem[];
+      };
+      if (controller.signal.aborted) return;
+
+      if (!append) needsPrefixReloadRef.current = false;
+      setItems((currentItems) => append ? [
+        ...currentItems,
+        ...payload.items.filter(
+          (nextItem) =>
+            !currentItems.some(
+              (currentItem) =>
+                currentItem.kind === nextItem.kind &&
+                currentItem.key === nextItem.key
+            )
+        ),
+      ].sort(compareIssueSummaryItems) : payload.items);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setLoadMoreError(
+          error instanceof Error ? error.message : "Failed to load issue groups"
+        );
+      }
+    } finally {
+      if (chunkRequestRef.current === controller) {
+        chunkRequestRef.current = null;
+        setIsLoadingMore(false);
+      }
+    }
+  }, [scanId]);
 
   const handleFalsePositiveChange = useCallback(
     (issueId: string, isFalsePositive: boolean) => {
@@ -926,53 +998,20 @@ export function IssueDetailsFeed({
           )
           .sort(compareIssueSummaryItems)
       );
+      if (items.length < totalItemCount) {
+        // Triage changes server ordering, so the old prefix offset is invalid.
+        needsPrefixReloadRef.current = true;
+        void loadIssuePage(0, false);
+      }
     },
-    []
+    [items.length, loadIssuePage, totalItemCount]
   );
 
   const loadMore = useCallback(async () => {
-    if (isLoadingMore || !hasMore) {
-      return;
-    }
-
-    setIsLoadingMore(true);
-    setLoadMoreError(null);
-    try {
-      const params = new URLSearchParams({
-        offset: String(items.length),
-        limit: String(ISSUE_SUMMARIES_PAGE_SIZE),
-      });
-      const response = await fetch(`/api/scans/${scanId}/issues/chunks?${params}`, {
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({}));
-        throw new Error(error.error || "Failed to load more issues");
-      }
-
-      const payload = (await response.json()) as {
-        items: IssueSummaryItem[];
-      };
-
-      setItems((currentItems) => [
-        ...currentItems,
-        ...payload.items.filter(
-          (nextItem) =>
-            !currentItems.some(
-              (currentItem) =>
-                currentItem.kind === nextItem.kind &&
-                currentItem.key === nextItem.key
-            )
-        ),
-      ].sort(compareIssueSummaryItems));
-    } catch (error) {
-      setLoadMoreError(
-        error instanceof Error ? error.message : "Failed to load more issues"
-      );
-    } finally {
-      setIsLoadingMore(false);
-    }
-  }, [hasMore, isLoadingMore, items.length, scanId]);
+    if (isLoadingMore || chunkRequestRef.current || !hasMore) return;
+    const reloadPrefix = needsPrefixReloadRef.current;
+    await loadIssuePage(reloadPrefix ? 0 : items.length, !reloadPrefix);
+  }, [hasMore, isLoadingMore, items.length, loadIssuePage]);
 
   return (
     <div className="space-y-3">

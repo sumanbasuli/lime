@@ -1,11 +1,13 @@
 # Updating LIME
 
-Every deploy target has a matching update script. They all follow the same shape:
+Every deploy target has a matching update script. The operational sequence is:
 
 1. back up the database
 2. pull or rebuild the new version
 3. apply migrations
 4. rolling restart of the services
+
+The Fly script does not create a database backup automatically; take one with your database provider before deploying. Backup behavior for each target is listed below.
 
 ## Update channels
 
@@ -18,11 +20,16 @@ Every deploy target has a matching update script. They all follow the same shape
 
 ## Update notice in the sidebar
 
-Set `LIME_UPDATE_CHECK=true` on the UI service and the sidebar will fetch the latest release from GitHub (`LIME_GITHUB_REPO`, default `sumanbasuli/lime`). When a newer semver tag is detected the sidebar shows an "Update available" card with a link to the release notes. Dismissing the card hides it until the next release.
+The notice has two controls:
 
-- The check is opt-in because it calls out to `api.github.com`.
-- Pre-releases and drafts are ignored.
-- The card only appears when the UI's baked `LIME_VERSION` is older than the latest release.
+1. The operator enables outbound release checks with `LIME_UPDATE_CHECK=true` on the UI service. The default is off. `LIME_GITHUB_REPO` selects the repository, defaulting to `sumanbasuli/lime`.
+2. Each browser can show or hide the sidebar card using **Settings > Update notice**. This browser preference defaults to on and takes effect immediately, without **Save settings**. It does not change server-wide settings or disable the operator's outbound check.
+
+The Next-owned `GET /_lime/update-check` endpoint returns `{ "enabled": false }` when the server check is disabled. When enabled, it checks `api.github.com` with a five-second timeout and compares the latest release against the UI process's `LIME_VERSION` (the release image supplies a build version; runtime configuration can override it). Drafts, prereleases, and best-effort failures produce no update card. The card links to release notes; it never installs an update.
+
+The display preference is stored as `lime.updateNotice.enabled` in browser local storage. Dismissing a card stores its exact release tag as `lime.updateNotice.dismissed`, so the same release stays hidden after reload while a different newer release can appear. These choices belong to that browser and origin, not PostgreSQL or an account.
+
+The route source is `lime/src/app/%5Flime/update-check/route.ts`. The escaped folder preserves the public `/_lime/update-check` URL without making it a Next private folder. Do not rename it to `_lime`: that removes the endpoint from routing and causes a 404. See [Verification And Handoff](../verification.md) for the deterministic notice checks and the limits of live GitHub coverage.
 
 ## Manual release notifications
 

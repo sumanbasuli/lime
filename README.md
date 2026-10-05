@@ -32,6 +32,7 @@ Built to be cheap to run on a small server, straightforward to push to Fly.io, a
 - **Reports** - PDF, CSV, and compact LLM-ready exports per scan or issue.
 - **False-positive triage** flag per issue.
 - **Partial scan retry** - retry failed pages inside the same scan without creating a second scan.
+- **Pause and resume** - cooperatively pause an active scan and continue pending pages on the same scan.
 - **Scan recovery** - non-terminal scans resume after Shopkeeper restarts.
 - **Update notice** - opt-in sidebar banner when a new GitHub release is available.
 - **Three deploy targets** - Fly.io, Docker, and Debian systemd.
@@ -41,7 +42,7 @@ Built to be cheap to run on a small server, straightforward to push to Fly.io, a
 ![LIME architecture](assets/img/arch.png)
 
 - **[Shopkeeper](shopkeeper/)** - Go backend. Chi router, pgx, golang-migrate. Owns scan lifecycle, API routes, migrations, screenshots, PDFs, and the internal scan pipeline.
-- **[UI](lime/)** - NextJS App Router, shadcn/ui, Drizzle ORM. Reads Postgres directly for server-rendered pages, proxies `/api/...` to Shopkeeper at runtime so the image stays generic.
+- **[UI](lime/)** - NextJS App Router, shadcn/ui, Drizzle ORM. Reads Postgres for server-rendered pages, owns settings and derived read caches, and proxies scan actions to Shopkeeper at runtime so the image stays generic.
 - **Database** - PostgreSQL 17 shared by both services.
 
 Shopkeeper pipeline:
@@ -122,7 +123,7 @@ Runtime configuration lives in `.env` (root) or deploy-specific env files.
 | `LIME_IMAGE_REGISTRY` | release only | GHCR namespace for published images, e.g. `ghcr.io/sumanbasuli`. |
 | `LIME_IMAGE_TAG` | release only | GHCR image tag, e.g. `v0.1.0`. |
 | `LIME_API_PORT` / `LIME_UI_PORT` | optional | Published ports (defaults 8080 / 3000). |
-| `LIME_UPDATE_CHECK` | optional | `true` shows a sidebar card when a newer release is on GitHub. Off by default. |
+| `LIME_UPDATE_CHECK` | optional | `true` enables the server's best-effort GitHub release check. Off by default; Settings also controls each browser's card visibility. |
 | `LIME_GITHUB_REPO` | optional | Override the update-check repo (default `sumanbasuli/lime`). |
 | `ACT_RULES_PATH` | optional | Override the bundled ACT catalog path. |
 
@@ -149,6 +150,8 @@ make dev-ui              # NextJS with hot reload
 | `make docs` | Refresh the static docs site with isolated heysuman.com demo screenshots |
 | `make docs-run` | Build and serve the static docs site locally |
 | `make docs-dev` | Run the docs site with NextJS hot reload |
+| `make docs-verify` | Build and browser-check the marketing website and docs |
+| `make verify-app` | Verify existing dashboard features against an isolated Docker stack and deterministic local pages |
 | `make backup-db` | Dump the bundled Postgres to `dist/backups/` |
 | `make update TAG=vX.Y.Z` | Rebuild from a tag and rolling-restart |
 | `make clean` | Stop the stack and remove volumes |
@@ -164,7 +167,11 @@ make dev-ui              # NextJS with hot reload
 
 Public docs are published at [lime.heysuman.com/docs](https://lime.heysuman.com/docs/). The repo-local Markdown in [docs/](docs/) remains the source content and contributor fallback.
 
+To review the complete marketing website and docs locally, install the docs dependencies with `npm --prefix docs-site ci`, then run `make docs-dev`. Open [http://localhost:3001](http://localhost:3001) for the website or [http://localhost:3001/docs/](http://localhost:3001/docs/) for documentation. `LIME_DOCS_PORT` overrides that port. The product dashboard runs separately at [http://localhost:3000](http://localhost:3000).
+
 `make docs` refreshes the docs site locally. It uses a separate `lime-docs` Docker Compose project, separate Postgres and screenshot volumes, non-default ports, and fresh single-page demo scans for `https://heysuman.com`, `https://www.fake-university.com/`, and `https://overlaysdontwork.com/` so it never screenshots current private/local scans.
+
+For the project handoff, feature verification matrix, isolated test workflow, and current verification evidence, see [Verification And Handoff](docs/verification.md). The **Link checker** screen is a design preview; backend checks and persisted results are not available yet.
 
 ## Contributing
 

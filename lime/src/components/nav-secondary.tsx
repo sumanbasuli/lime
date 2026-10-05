@@ -8,6 +8,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar"
 
 export function NavSecondary({
@@ -20,6 +21,8 @@ export function NavSecondary({
     icon: React.ReactNode
   }[]
 } & React.ComponentPropsWithoutRef<typeof SidebarGroup>) {
+  const { setOpenMobile } = useSidebar()
+
   return (
     <SidebarGroup {...props}>
       <SidebarGroupContent>
@@ -34,6 +37,7 @@ export function NavSecondary({
                     href={item.url}
                     target={item.url.startsWith("http") ? "_blank" : undefined}
                     rel={item.url.startsWith("http") ? "noreferrer" : undefined}
+                    onClick={() => setOpenMobile(false)}
                   />
                 }
               >

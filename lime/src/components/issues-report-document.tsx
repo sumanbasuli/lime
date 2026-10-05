@@ -1606,7 +1606,7 @@ export function IssuesReportDocument({
   return (
     <div data-report-page="true" data-report-ready="true">
       <style>{reportStyles}</style>
-      <main className="report-root" aria-label={`Lime issue report for ${extractHost(data.scan.sitemapUrl)}`}>
+      <article className="report-root" aria-label={`Lime issue report for ${extractHost(data.scan.sitemapUrl)}`}>
         <CoverPage
           data={data}
           reportScope={reportScope}
@@ -1697,7 +1697,7 @@ export function IssuesReportDocument({
             </div>
           </section>
         )}
-      </main>
+      </article>
     </div>
   );
 }

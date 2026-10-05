@@ -30,6 +30,8 @@ lime-v*-release.tar.gz
 /screenshots/
 
 # Local tool and build caches
+.artifacts/
 .cache/
 **/.cache/
+*.tsbuildinfo
 .claude/

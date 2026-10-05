@@ -74,6 +74,7 @@ export function NewScanForm() {
           <button
             type="button"
             onClick={() => setScanType("sitemap")}
+            disabled={loading}
             aria-pressed={scanType === "sitemap"}
             className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
               scanType === "sitemap"
@@ -87,6 +88,7 @@ export function NewScanForm() {
           <button
             type="button"
             onClick={() => setScanType("single")}
+            disabled={loading}
             aria-pressed={scanType === "single"}
             className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
               scanType === "single"

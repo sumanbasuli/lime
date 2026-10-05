@@ -59,6 +59,7 @@ export async function GET(): Promise<NextResponse<DisabledPayload | EnabledPaylo
 
   try {
     const response = await fetch(endpoint, {
+      signal: AbortSignal.timeout(5_000),
       next: { revalidate: 1800 },
       headers: {
         Accept: "application/vnd.github+json",

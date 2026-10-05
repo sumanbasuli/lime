@@ -5,6 +5,14 @@ section matching `VERSION` to populate GitHub Release notes.
 
 ## [Unreleased]
 
+- Fixed issue-detail request cancellation and added visible retry recovery; improved mobile search, drawer navigation, issue actions, viewport icons, and the main landmark without changing spotlight screenshot behavior. Dashboard skip navigation is excluded from printed reports.
+- Fixed concurrent scan progress updates that could leave a completed scan's count below its audited page count; MCP initialization now advertises the actual backend build version.
+- Fixed omitted issue-read pagination limits so group and occurrence APIs use their documented defaults instead of returning empty pages.
+- Fixed issue-group pagination after false-positive changes by refreshing the loaded issue order before fetching later groups.
+- Serialized issue-summary cache replacement with a parent scan-row lock and source-timestamp check so concurrent reads cannot create duplicate keys or persist obsolete/deleted scan snapshots.
+- Fixed long scan targets overflowing narrow mobile headers while keeping the complete hostname and URL readable.
+- Restored the optional release-notice endpoint by escaping the App Router's private-folder prefix, and bounded its best-effort GitHub request to five seconds while preserving browser visibility and release-dismissal preferences.
+- Added isolated existing-feature end-to-end verification and a project handoff guide covering ownership, setup, lifecycle, reports, settings, MCP, and reproducible checks.
 - Redesigned the public marketing and documentation site to match the dashboard visual system, with responsive Material Symbol navigation, improved documentation reading layouts, and consistent product, API, screenshot, roadmap, and onboarding pages.
 - Added the Link Checker preview to the public product documentation and reproducible screenshot set, while clearly documenting that backend link validation is planned for a later release.
 - Hardened the docs refresh pipeline with deterministic dependency installs, preflight linting and target validation, automatic isolated-stack cleanup, browser/runtime error checks, screenshot integrity checks, and post-build internal-link and asset validation.

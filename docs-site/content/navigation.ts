@@ -27,6 +27,7 @@ function docsForCategory(category: ProductDoc["category"]) {
 
 const referenceItems = [
   { title: "Setup", href: "/docs/reference/setup", description: "Install and run LIME from the repo docs." },
+  { title: "Verification And Handoff", href: "/docs/reference/verification", description: "Run isolated feature checks and understand the verified project baseline." },
   { title: "Docs Site", href: "/docs/reference/docs-site", description: "Static docs architecture, screenshots, search, and GitHub Pages." },
   { title: "MCP Integration", href: "/docs/reference/mcp", description: "Connect AI tools to LIME through the read-only MCP interface." },
   { title: "Database", href: "/docs/reference/database", description: "PostgreSQL schema and migration notes." },
