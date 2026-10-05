@@ -50,7 +50,7 @@ export function DocsBreadcrumb() {
 
   const showGroup =
     itemMatch && itemMatch.group !== "Product" && itemMatch.item.href !== "/docs";
-  const pageTitle = groupMatch?.title ?? itemMatch?.item.title ?? titleFromPath(pathname);
+  const pageTitle = itemMatch?.item.title ?? groupMatch?.title ?? titleFromPath(pathname);
 
   return (
     <Breadcrumb className="min-w-0">

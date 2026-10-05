@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
   trailingSlash: true,
   basePath,
   assetPrefix: basePath || undefined,
+  // Public URL configuration must be identical in server and browser helpers.
+  env: {
+    LIME_DOCS_BASE_PATH: basePath,
+  },
   turbopack: {
     root: docsSiteRoot,
   },

@@ -92,7 +92,7 @@
 
   html {
     scroll-behavior: smooth;
-    scroll-padding-top: 6rem;
+    scroll-padding-top: 8.5rem;
   }
 
   body {
@@ -266,21 +266,15 @@
     overflow-wrap: normal;
   }
 
+  .markdown-table-wrap {
+    @apply my-6 overflow-x-auto rounded-xl border border-black/10;
+  }
+
   .docs-prose table {
-    @apply my-6 block w-full overflow-x-auto rounded-xl border border-black/10 bg-white text-sm;
+    @apply w-full bg-white text-sm;
+    min-width: 32rem;
     border-collapse: collapse;
     border-spacing: 0;
-  }
-
-  .docs-prose thead,
-  .docs-prose tbody {
-    display: table;
-    min-width: 42rem;
-    width: 100%;
-  }
-
-  .docs-prose tr {
-    display: table-row;
   }
 
   .docs-prose th,

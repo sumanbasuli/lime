@@ -11,7 +11,7 @@ function normalizePath(path: string) {
 
 export function DocsSidebar() {
   const pathname = normalizePath(usePathname());
-  const groups = navigationGroups.filter((group) => group.title !== "Product" && group.title !== "API");
+  const groups = navigationGroups.filter((group) => group.title !== "Product");
 
   return (
     <aside className="sticky top-[68px] hidden h-[calc(100vh-68px)] overflow-y-auto border-r border-black/8 px-8 py-8 lg:block">
@@ -23,7 +23,7 @@ export function DocsSidebar() {
             </a>
             <div className="mt-3 space-y-0.5">
               {group.items.map((item) => {
-                const href = normalizePath(withBasePath(item.href));
+                const href = normalizePath(item.href);
                 const isActive = pathname === href;
                 return (
                   <a

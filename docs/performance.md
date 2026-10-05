@@ -1,6 +1,6 @@
 # Performance And Caching Strategy
 
-LIME's `v1.0` performance strategy is PostgreSQL-first. The goal is to make large scans fast to inspect and export without adding another required service for self-hosted operators.
+LIME uses PostgreSQL-backed score and issue summaries to reduce repeated aggregation without adding another required service. This page distinguishes the implemented caches from reserved infrastructure; it is not a performance benchmark or a guarantee for a particular scan size.
 
 ## Priorities
 
@@ -16,25 +16,29 @@ Scan throughput remains important, but it comes after the large-report read path
 
 ## Cache Model
 
-Use PostgreSQL as the durable cache/read-model layer for `v1.0`.
+PostgreSQL is the durable cache/read-model layer.
 
 Derived data:
 
 - per-scan score and coverage summaries
 - per-scan issue-card summaries for failed and needs-review checks
-- report-input metadata keyed by scan, scope, format, and settings fingerprint
+- score cache rows written by the existing Next scorer, also read by direct Shopkeeper MCP when fresh
 
-Use in-process caches only for low-churn shared data:
+`scan_report_data_cache` has a migration and Drizzle table definition, but there is currently no report-loader/route using it. Report data is queried and files generated on demand. `reportDataCacheTtlSeconds` is stored/exposed for that reserved cache, not an effective report-response TTL today.
+
+Low-churn data also has process/request-local caching:
 
 - ACT catalog
 - axe rule metadata
 - server-wide settings
 
+Settings are cached for five seconds per UI process. Saving through the settings route invalidates that process's copy; another UI process can observe the change after its local TTL. Catalog loaders use React's `cache`; do not assume an operator-edited JSON file will refresh every running process immediately. Restart/redeploy after replacing catalogs.
+
 Redis is intentionally deferred until profiling proves a concrete need that PostgreSQL read models and indexes cannot satisfy.
 
 ## Invalidation
 
-Derived data must refresh or invalidate when:
+Score and issue summary reads compare the saved scan timestamp and cache age against the current scan and configured TTL. Backend lifecycle/progress updates touch the scan timestamp; triage also explicitly deletes the score and issue caches. Derived data must remain consistent when:
 
 - a scan completes
 - a failed-page retry finishes
@@ -42,7 +46,9 @@ Derived data must refresh or invalidate when:
 - report-shaping settings change
 - a scan is deleted
 
-Occurrence detail queries should remain live and paginated. The UI should not rebuild a full issue list in memory just to serve the first page of issue cards.
+Scan deletion cascades to derived cache rows. Report-shaping settings are read by the relevant report routes/loaders; there is no cached report file to invalidate.
+
+Occurrence detail queries are live and paginated (default 25 per request); the issue feed requests 12 groups by default. Current summary loading still assembles the scan's group summaries and slices that list for a page, and a cache hit loads the cached group rows. It avoids loading every node occurrence but is not a fully SQL-paginated group-list implementation. Keep this distinction when diagnosing very large scans.
 
 ## Concurrent Cache Replacement
 
@@ -54,13 +60,19 @@ Keep the scan-row lock and source-timestamp guard together when changing this pa
 
 ## Settings
 
-Performance settings should stay minimal:
+Settings are persisted through the dashboard:
 
-- summary cache TTL
-- report-data cache TTL
-- report generation concurrency cap
+| Setting | Default | Current behavior |
+|---------|---------|------------------|
+| Summary cache TTL | 60 seconds | Score/issue cache age limit; accepted UI range 5–86400 seconds |
+| Report-data cache TTL | 300 seconds | Reserved; no active report-data cache consumer |
+| Report generation concurrency | 1 | Bounds PDF upstream generation per UI process; accepted range 1–10 |
 
-Defaults should work for a small self-hosted server without operator tuning.
+The PDF limiter is not a database-wide semaphore. Multiple UI processes each have their own limit, and direct Shopkeeper PDF requests bypass the Next settings/limiter. CSV/LLM generation does not use this PDF limiter. Use dashboard report endpoints for the documented controls.
+
+Full PDF occurrence sampling defaults to 30 per group, scoped PDF to 2000, small CSV to 5, and LLM to 3. Limits are report samples, not scan-time limits and not deletion of saved evidence. Full CSV streams all occurrences in keyset-paged batches of 5000 rather than loading every occurrence into one array; it still performs work proportional to the full export and can be expensive for a large scan.
+
+Juicer's five workers, 30-second page deadline, and 500ms politeness delay are code constants, not dashboard performance settings. Five workers applies per scan run, not a global server-wide cap across simultaneous scans. Increasing report concurrency or submitting many scans together can compete for Chromium CPU/memory.
 
 ## Verification
 
@@ -74,6 +86,16 @@ Before and after optimization work, measure:
 - full PDF generation time
 - scoped issue PDF generation time
 
-Large-scan checks should use an existing scan with thousands of pages and high occurrence counts.
+Measure with a disposable representative scan/fixture or an authorized read-only production sample, and record scan/page/group/occurrence counts, hardware, runtime versions, warm/cold cache state, and concurrency. Do not generate destructive test data in the normal operator database. The deterministic `make verify-app` suite checks correctness; it is not a thousands-of-pages load test.
 
-Set `LIME_PERF_LOG=true` on the UI process to log every instrumented hot-path timing. Without that flag, development builds log only slow hot-path operations above their route-specific threshold.
+Set `LIME_PERF_LOG=true` on the UI process to log every instrumented hot-path timing as `[perf] <label> <milliseconds>`. With no flag, non-production builds log only slow operations above their route threshold (750ms by default); production stays quiet. `LIME_PERF_LOG=false` explicitly suppresses these timings. This is application timing, not PostgreSQL query tracing or browser navigation timing.
+
+## Implementation References
+
+- `lime/src/lib/scan-score-data.ts`: score cache reads/upserts and aggregate audit queries
+- `lime/src/lib/scan-issues.ts`: summary cache replacement, group slicing, occurrence queries
+- `lime/src/lib/report-settings.ts`: five-second settings cache and accepted ranges
+- `lime/src/lib/report-generation-limiter.ts` and `app/api/scans/[id]/issues/report.pdf/route.ts`: PDF limiter scope
+- `lime/src/lib/issues-report-data.ts`: live report input loading
+- `lime/src/lib/performance-logging.ts`: timing/log thresholds
+- `shopkeeper/migrations/000010…000012`: read-path indexes and cache schema

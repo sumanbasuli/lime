@@ -53,7 +53,14 @@ function slugify(value: string): string {
 }
 
 function rewriteLink(href: string, currentSlug: string[]): string {
-  if (/^(https?:|mailto:|#)/.test(href)) {
+  if (/^https?:/.test(href)) {
+    const url = new URL(href);
+    if (url.origin === new URL(siteConfig.docsUrl).origin) {
+      return withBasePath(`${url.pathname}${url.search}${url.hash}`);
+    }
+    return href;
+  }
+  if (/^(mailto:|#)/.test(href)) {
     return href;
   }
 
@@ -82,26 +89,30 @@ function rewriteLink(href: string, currentSlug: string[]): string {
     const docsPath = repoPath
       .replace(/^docs\//, "")
       .replace(/\.md$/, "")
-      .replace(/\/index$/, "");
+      .replace(/(^|\/)index$/, "");
     const docsPrefix = currentSlug[0] === "reference" ? "/docs/reference" : "/docs";
-    return withBasePath(`${docsPrefix}/${docsPath}${anchor}`);
+    return withBasePath(`${docsPrefix}${docsPath ? `/${docsPath}` : ""}${anchor}`);
   }
 
   return `${siteConfig.repoUrl}/blob/main/${repoPath}${anchor}`;
 }
 
 function renderInline(value: string, currentSlug: string[]): string {
-  let html = escapeHtml(value);
-
-  html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
-  html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    (_, label: string, href: string) =>
-      `<a href="${escapeHtml(rewriteLink(href, currentSlug))}">${label}</a>`
-  );
-
-  return html;
+  const tokens = /`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*/g;
+  let html = "";
+  let offset = 0;
+  for (const match of value.matchAll(tokens)) {
+    html += escapeHtml(value.slice(offset, match.index));
+    if (match[1] !== undefined) {
+      html += `<code>${escapeHtml(match[1])}</code>`;
+    } else if (match[2] !== undefined) {
+      html += `<a href="${escapeHtml(rewriteLink(match[3], currentSlug))}">${renderInline(match[2], currentSlug)}</a>`;
+    } else {
+      html += `<strong>${escapeHtml(match[4])}</strong>`;
+    }
+    offset = match.index + match[0].length;
+  }
+  return html + escapeHtml(value.slice(offset));
 }
 
 function renderImage(alt: string, rawHref: string, caption: string, currentSlug: string[]): string {
@@ -139,9 +150,33 @@ function renderTable(lines: string[], currentSlug: string[]): string {
     .join("")}</tbody></table></div>`;
 }
 
+function renderList(lines: string[], start: number, currentSlug: string[]): { html: string; next: number } {
+  const pattern = /^(\s*)([-*]|\d+\.)\s+(.+)$/;
+  const first = lines[start].match(pattern)!;
+  const indent = first[1].length;
+  const tag = /\d/.test(first[2]) ? "ol" : "ul";
+  const items: string[] = [];
+  let next = start;
+  while (next < lines.length) {
+    const item = lines[next].match(pattern);
+    if (!item || item[1].length < indent) break;
+    if (item[1].length > indent && items.length) {
+      const nested = renderList(lines, next, currentSlug);
+      items[items.length - 1] += nested.html;
+      next = nested.next;
+      continue;
+    }
+    if ((/\d/.test(item[2]) ? "ol" : "ul") !== tag) break;
+    items.push(renderInline(item[3], currentSlug));
+    next += 1;
+  }
+  return { html: `<${tag}>${items.map((item) => `<li>${item}</li>`).join("")}</${tag}>`, next };
+}
+
 export function renderMarkdown(markdown: string, currentSlug: string[] = []): string {
   const lines = markdown.replace(/\r\n/g, "\n").split("\n");
   const html: string[] = [];
+  const headingIds = new Set<string>();
   let index = 0;
 
   while (index < lines.length) {
@@ -180,8 +215,16 @@ export function renderMarkdown(markdown: string, currentSlug: string[] = []): st
     if (heading) {
       const level = heading[1].length;
       const title = heading[2].trim();
+      const baseId = slugify(title);
+      let id = baseId;
+      let occurrence = 1;
+      while (headingIds.has(id)) {
+        occurrence += 1;
+        id = `${baseId}-${occurrence}`;
+      }
+      headingIds.add(id);
       html.push(
-        `<h${level} id="${slugify(title)}">${renderInline(title, currentSlug)}</h${level}>`
+        `<h${level} id="${id}">${renderInline(title, currentSlug)}</h${level}>`
       );
       index += 1;
       continue;
@@ -202,23 +245,10 @@ export function renderMarkdown(markdown: string, currentSlug: string[] = []): st
       continue;
     }
 
-    if (/^\s*[-*]\s+/.test(line)) {
-      const items: string[] = [];
-      while (index < lines.length && /^\s*[-*]\s+/.test(lines[index])) {
-        items.push(lines[index].replace(/^\s*[-*]\s+/, ""));
-        index += 1;
-      }
-      html.push(`<ul>${items.map((item) => `<li>${renderInline(item, currentSlug)}</li>`).join("")}</ul>`);
-      continue;
-    }
-
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const items: string[] = [];
-      while (index < lines.length && /^\s*\d+\.\s+/.test(lines[index])) {
-        items.push(lines[index].replace(/^\s*\d+\.\s+/, ""));
-        index += 1;
-      }
-      html.push(`<ol>${items.map((item) => `<li>${renderInline(item, currentSlug)}</li>`).join("")}</ol>`);
+    if (/^\s*(?:[-*]|\d+\.)\s+/.test(line)) {
+      const list = renderList(lines, index, currentSlug);
+      html.push(list.html);
+      index = list.next;
       continue;
     }
 

@@ -20,9 +20,9 @@ Scan sitemaps, capture screenshots, review issues in a dashboard.
 
 ## What is LIME?
 
-LIME is a batteries-included accessibility scanner you host yourself. Point it at a sitemap or a URL, it walks the pages with a headless Chromium, runs the full axe-core ruleset (WCAG A/AA, Lighthouse-aligned), captures focused screenshots of each violation, and groups the results into reviewable issues with ACT rule guidance.
+LIME is an accessibility scanner you host yourself. Point it at a sitemap or a URL: it visits eligible pages with headless Chromium, runs configured WCAG A/AA axe-core checks with Lighthouse-aligned overrides, captures focused screenshots, and groups findings into reviewable issues with ACT rule guidance. Automated findings support review; they do not establish accessibility conformance on their own.
 
-Built to be cheap to run on a small server, straightforward to push to Fly.io, and safe to leave alone. Migrations apply on boot, interrupted scans recover on restart, and updates are one command.
+Migrations apply on boot, interrupted scans recover on restart, and deployment helpers support Docker, Fly.io, and Debian systemd. Scan cost and report size depend on the target site and configured limits.
 
 ## Features
 
@@ -58,6 +58,8 @@ Full architecture docs: [lime.heysuman.com/docs/reference/architecture/shopkeepe
 
 ## Quick start
 
+Install Git, Make, and Docker with the Compose plugin. From a new checkout:
+
 ```bash
 git clone https://github.com/sumanbasuli/lime.git
 cd lime
@@ -70,15 +72,17 @@ Open:
 - **UI** - <http://localhost:3000>
 - **API** - <http://localhost:8080/api/health>
 
-Stop: `make stop-all`. Reset volumes: `make clean`.
+`make stop-all` stops this project's stack and preserves its data. `make clean` deletes its database/screenshot volumes and local build artifacts; use it only for an intentional reset. Do not overwrite an existing `.env` when updating a checkout.
+
+See [Setup](docs/setup.md) for prerequisites, native development, port overrides, and troubleshooting. The dashboard and ordinary HTTP API have no built-in user authentication; protect any remotely reachable instance with an appropriate access layer. The MCP bearer key protects MCP requests, not the rest of the dashboard.
 
 ## Deploy
 
-LIME publishes versioned Docker images to GHCR from the main-branch release workflow. Use the release tag you want to deploy, for example `v1.0.4`.
+LIME publishes versioned Docker images to GHCR from the main-branch release workflow. Choose the release you intend to deploy and replace `vX.Y.Z` below with its tag; it is a placeholder, not an instruction to install an older version.
 
 | Target | One-liner | Guide |
 |--------|-----------|-------|
-| **Fly.io** | `./scripts/fly-deploy.sh v1.0.4` | [Fly.io guide](https://lime.heysuman.com/docs/reference/deployment/fly/) |
+| **Fly.io** | `./scripts/fly-deploy.sh vX.Y.Z` | [Fly.io guide](https://lime.heysuman.com/docs/reference/deployment/fly/) |
 | **Docker** | `docker compose -f docker-compose.release.yml up -d` | [Docker guide](https://lime.heysuman.com/docs/reference/deployment/docker/) |
 | **Debian systemd** | `make debian-install` | [Debian guide](https://lime.heysuman.com/docs/reference/deployment/debian/) |
 
@@ -96,22 +100,22 @@ Use either an external PostgreSQL URL:
 
 ```bash
 export DATABASE_URL='postgresql://...'
-./scripts/fly-deploy.sh v1.0.4
+./scripts/fly-deploy.sh vX.Y.Z
 ```
 
 Or attach Fly Managed Postgres to both apps first; the helper will reuse existing `DATABASE_URL` Fly secrets. Details: [Fly.io deployment docs](https://lime.heysuman.com/docs/reference/deployment/fly/).
 
 ### Updating
 
-Every deploy target ships an update command that backs up the database, pulls the new version, migrates, and rolling-restarts the services.
+Back up the database and screenshots before updating. The update helpers differ by deployment target; do not assume each command creates a backup automatically. In particular, Fly.io database backups must be managed separately. Check the target's guide for prerequisites, migration behavior, and rollback limits.
 
 ```bash
-./scripts/fly-update.sh v1.0.4            # Fly.io
-make update-release TAG=v1.0.4            # Docker (release bundle)
-sudo ./scripts/debian-update.sh v1.0.4    # Debian systemd
+./scripts/fly-update.sh vX.Y.Z            # Fly.io
+make update-release TAG=vX.Y.Z            # published Docker images (repository helper)
+sudo ./scripts/debian-update.sh vX.Y.Z    # Debian systemd
 ```
 
-Details and rollback: [update docs](https://lime.heysuman.com/docs/reference/deployment/updates/).
+For a source-built Docker stack, preserve `.env` and volumes, check out the intended source revision, then use `make start-all` to build that source. The legacy `make update` helper does not reliably select those rebuilt images or validate its backup; do not use its success message as upgrade evidence. Details and rollback: [update docs](https://lime.heysuman.com/docs/reference/deployment/updates/).
 
 ## Configuration
 
@@ -122,7 +126,7 @@ Runtime configuration lives in `.env` (root) or deploy-specific env files.
 | `DATABASE_URL` | yes | PostgreSQL connection string, shared by UI and Shopkeeper. |
 | `SHOPKEEPER_URL` | yes | Runtime backend URL for the UI's `/api/...` and `/mcp` proxies. |
 | `LIME_IMAGE_REGISTRY` | release only | GHCR namespace for published images, e.g. `ghcr.io/sumanbasuli`. |
-| `LIME_IMAGE_TAG` | release only | GHCR image tag, e.g. `v0.1.0`. |
+| `LIME_IMAGE_TAG` | release only | Pinned GHCR release tag selected for deployment. |
 | `LIME_API_PORT` / `LIME_UI_PORT` | optional | Published ports (defaults 8080 / 3000). |
 | `LIME_UPDATE_CHECK` | optional | Best-effort GitHub release checks are enabled by default. Set `false` to disable outbound checks; Settings also controls each browser's card visibility. |
 | `LIME_GITHUB_REPO` | optional | Override the update-check repo (default `sumanbasuli/lime`). |
@@ -132,11 +136,13 @@ See the [setup docs](https://lime.heysuman.com/docs/reference/setup/) for the fu
 
 ## Development
 
+Use the Docker development stack for dashboard hot reload, or run the native services in separate terminals. Native development also needs Go, Node.js, installed dashboard dependencies, and Chromium; follow [Setup](docs/setup.md) rather than mixing the two workflows.
+
 ```bash
 make start-dev           # full Docker stack with UI hot reload
-make start-db            # only Postgres
-make dev-shopkeeper      # Go backend with Air hot reload
-make dev-ui              # NextJS with hot reload
+make start-db            # native workflow: only Postgres
+SHOPKEEPER_SCREENSHOT_DIR="$PWD/.artifacts/native-screenshots" make dev-shopkeeper
+make dev-ui              # native workflow: NextJS with hot reload
 ```
 
 | Command | Description |
@@ -154,8 +160,8 @@ make dev-ui              # NextJS with hot reload
 | `make docs-verify` | Build and browser-check the marketing website and docs |
 | `make verify-app` | Verify existing dashboard features against an isolated Docker stack and deterministic local pages |
 | `make backup-db` | Dump the bundled Postgres to `dist/backups/` |
-| `make update TAG=vX.Y.Z` | Rebuild from a tag and rolling-restart |
-| `make clean` | Stop the stack and remove volumes |
+| `make update TAG=vX.Y.Z` | Legacy helper; not a verified source-stack upgrade path. Follow the update guide instead |
+| `make clean` | Stop the stack and delete its data volumes and local build artifacts |
 
 ## Tech stack
 
@@ -166,7 +172,7 @@ make dev-ui              # NextJS with hot reload
 
 ## Docs
 
-Public docs are published at [lime.heysuman.com/docs](https://lime.heysuman.com/docs/). The repo-local Markdown in [docs/](docs/) remains the source content and contributor fallback.
+Public docs are published at [lime.heysuman.com/docs](https://lime.heysuman.com/docs/). User workflow guides live in `docs-site/content/product-docs.ts`; repository reference Markdown lives in [docs/](docs/). [docs/index.md](docs/index.md) maps the reference guides, and [Docs Site](docs/docs-site.md) explains how both sources are published.
 
 To review the complete marketing website and docs locally, install the docs dependencies with `npm --prefix docs-site ci`, then run `make docs-dev`. Open [http://localhost:3001](http://localhost:3001) for the website or [http://localhost:3001/docs/](http://localhost:3001/docs/) for documentation. `LIME_DOCS_PORT` overrides that port. The product dashboard runs separately at [http://localhost:3000](http://localhost:3000).
 
@@ -182,9 +188,9 @@ Use the dashboard's `http://localhost:3000/mcp` locally, or its reachable HTTPS 
 
 Issues and pull requests welcome. Before opening a PR:
 
-1. Run `make build`; it must succeed.
-2. Keep migrations forward-only and mirror any schema change in [`lime/src/db/schema.ts`](lime/src/db/schema.ts).
-3. Document new features in `docs/` first; [`docs/index.md`](docs/index.md) is the source of truth.
+1. Run the focused checks for changed files and the integrated verification appropriate to the behavior; use `make build` for release or cross-stack changes.
+2. Add new numbered migrations rather than editing applied migrations, and mirror schema changes in [`lime/src/db/schema.ts`](lime/src/db/schema.ts).
+3. Update affected user guides, repository reference docs, and the API manifest alongside behavior changes.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, checks, and PR expectations.
 

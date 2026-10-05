@@ -1,74 +1,54 @@
-# LIME Documentation
+# Documentation Reference
 
-LIME is a self-hosted accessibility scanner powered by axe-core, Chromium, PostgreSQL, and a NextJS dashboard. These docs cover local development, architecture, production deployment, updates, and release operations.
+Use this reference to run, maintain, or contribute to LIME. If you want to scan a website and review its results, start with the [user guides](https://lime.heysuman.com/docs/user/) instead.
 
-## Start Here
+LIME is a self-hosted accessibility scanner built with axe-core, Chromium, PostgreSQL, a Go backend, and a Next.js dashboard. Automated findings are a starting point for accessibility review, not proof that a website meets every accessibility requirement.
 
-* **[Local Development Setup](setup.md)**: Run LIME locally with Docker or native processes, including environment variables and common commands.
-* **[Verification And Handoff](verification.md)**: Existing-feature matrix, isolated end-to-end checks, project ownership, evidence, and the workflow for future changes.
-* **[Docker & Release Pipeline](deployment/docker.md)**: Local Docker workflow, production build targets, GHCR release publishing, and release bundle format.
-* **[Deploy to Fly.io](deployment/fly.md)**: Two-app Fly setup with private networking, managed/external Postgres, screenshot storage, and rolling updates.
-* **[Deploy with Docker](deployment/docker.md)**: Docker workflows, production images, and release bundles.
-* **[Deploy on Debian without Docker](deployment/debian.md)**: Native systemd install for operators who cannot run Docker.
-* **[Updating LIME](deployment/updates.md)**: Update commands per target, backups, rollback notes, and the sidebar update notice.
-* **[Docs Site](docs-site.md)**: Static docs architecture, screenshot refresh pipeline, search, GitHub Pages, and handoff checklist.
-* **[Product Roadmap](roadmap.md)**: `v1.0` optimization and public-release plan, plus MCP hardening and future integration work.
-* **[MCP Integration](mcp.md)**: Current read-only MCP endpoint, AI client configuration, smoke tests, and security requirements.
+## Choose your path
 
-## Architecture
+| I want to… | Start here | Continue with |
+| --- | --- | --- |
+| Try LIME on my computer | [Local setup](setup.md) | [Create your first scan](https://lime.heysuman.com/docs/user/first-scan/) |
+| Host an instance for a team | [Docker deployment](deployment/docker.md), [Debian](deployment/debian.md), or [Fly.io](deployment/fly.md) | [Backups and restore](deployment/backup-restore.md), then [updates](deployment/updates.md) |
+| Fix an installation or scan problem | [Operator troubleshooting](deployment/troubleshooting.md) | [Setup diagnostics](setup.md) |
+| Connect an AI tool | [User MCP guide](https://lime.heysuman.com/docs/user/mcp/) | [MCP protocol and integration reference](mcp.md) |
+| Change the code | [Contributing](../CONTRIBUTING.md) | [Architecture](architecture/shopkeeper.md) and [verification](verification.md) |
+| Improve the website or guides | [Docs site](docs-site.md) | [Verification and handoff](verification.md) |
 
-1. **[Shopkeeper (Main Backend & Orchestrator)](architecture/shopkeeper.md)**: The core Go application that manages the entire lifecycle of a scan.
-2. **[Profiler](architecture/profiler.md)**: Module responsible for recursively extracting URLs from a sitemap (including sitemap indexes).
-3. **[Juicer](architecture/juicer.md)**: Module responsible for scanning individual URLs using axe-core, capturing screenshots, and processing pages in a controlled, multi-threaded manner.
-4. **[Sweetner](architecture/sweetner.md)**: Module responsible for refining, batching, and aggregating scan results to prevent duplicate issue reporting.
-5. **[User Interface (NextJS)](architecture/ui.md)**: The frontend application residing in the `lime` folder, interacting with the Shopkeeper API.
+## For operators
 
-## Reference
+- [Local setup](setup.md): prerequisites, ports, environment variables, and Docker or native development.
+- [Docker deployment](deployment/docker.md): release bundles, pinned images, persistence, and reverse proxies.
+- [Debian deployment](deployment/debian.md): native Linux services and installation paths.
+- [Fly.io deployment](deployment/fly.md): separate backend and UI apps, private networking, and persistent screenshots.
+- [Backups and restore](deployment/backup-restore.md): protect both PostgreSQL data and screenshot evidence before changes.
+- [Updating LIME](deployment/updates.md): upgrade choices, migration and rollback limits, and the update notice.
+- [Operator troubleshooting](deployment/troubleshooting.md): work from symptoms to service, database, Chromium, and report checks.
 
-* **[Database Architecture](database.md)**: Details regarding the chosen database schema, technologies (PostgreSQL, Drizzle), and the Go backend DB strategy.
-* **[Performance And Caching Strategy](performance.md)**: PostgreSQL-first optimization plan for large scans and reports.
-* **[Docs Site](docs-site.md)**: How the public docs site is built, searched, screenshotted, and deployed.
-* **[MCP Integration](mcp.md)**: Read-only MCP transport, authentication, client configuration, and capability model.
-* **[Verification And Handoff](verification.md)**: Reproducible feature checks and the current verified baseline before new features.
+## For contributors
 
-Operational notes for scan lifecycle behavior are documented primarily in:
-- `docs/architecture/shopkeeper.md` for backend ownership, deletion/rescan rules, and restart recovery
-- `docs/architecture/ui.md` for polling and page-navigation behavior
-- `docs/setup.md` for runtime and debugging commands
+- [Contributing](../CONTRIBUTING.md): development workflow and pull request expectations.
+- [Verification and handoff](verification.md): reproducible checks, recorded evidence, and known boundaries.
+- [Docs site](docs-site.md): content sources, local preview, search, screenshots, and publishing.
+- [Roadmap](roadmap.md): shipped foundations versus proposed work. A roadmap item is not an available feature.
 
-ACT enrichment notes are documented primarily in:
-- `docs/architecture/shopkeeper.md` for the shared catalog, resolver behavior, and API enrichment model
-- `docs/architecture/sweetner.md` for how Sweetner's canonical axe rule IDs feed ACT lookups later
-- `docs/architecture/ui.md` for where ACT guidance appears in the interface
-- `docs/setup.md` for ACT catalog refresh and runtime path resolution
+## Technical reference
 
-Release and production build notes are documented primarily in:
-- `docs/deployment/docker.md` for GHCR publishing, release bundles, and production Docker usage
-- `docs/deployment/debian.md` for native Debian-family systemd installs and updates
-- `docs/setup.md` for `make build`, `make build-docker`, native local env expectations, and release runtime env requirements
-- `README.md` for the quick-start release workflow
+| Component | Responsibility |
+| --- | --- |
+| [Shopkeeper](architecture/shopkeeper.md) | HTTP API, scan orchestration, persistence, and lifecycle recovery |
+| [Profiler](architecture/profiler.md) | Sitemap discovery and URL collection |
+| [Juicer](architecture/juicer.md) | Chromium workers, axe-core audits, and screenshot capture |
+| [Sweetner](architecture/sweetner.md) | Normalize and group audit evidence |
+| [Dashboard](architecture/ui.md) | Results, scoring, triage, reports, settings, and same-origin proxy routes |
 
-Docs-site notes are documented primarily in:
-- `docs/docs-site.md` for static export behavior, content sources, search, screenshot refresh, GitHub Pages, and handoff rules
-- `docs-site/content/product-docs.ts` for curated user/developer docs shown on the public site
-- `scripts/docs-refresh.sh` for isolated docs-demo scan and screenshot generation
-- `docs-site/scripts/validate-static-export.mjs` for post-build route, internal-link, asset, and screenshot validation
+- [Database](database.md): schema, migrations, and data ownership.
+- [Performance and caching](performance.md): read models, cache invalidation, and report costs.
+- [MCP integration](mcp.md): read-only tools, authentication, client examples, and transport limits.
+- [API reference](https://lime.heysuman.com/api/): endpoint ownership, request examples, and responses.
 
-Performance and `v1.0` optimization notes are documented primarily in:
-- `docs/performance.md` for the PostgreSQL-first cache/read-model strategy
-- `docs/roadmap.md` for milestone sequencing and exit criteria
+## Keep the docs trustworthy
 
-MCP integration notes are documented primarily in:
-- `docs-site/content/product-docs.ts` for the user-facing `/docs/user/mcp/` AI-tool setup guide
-- `docs/mcp.md` for transport, authentication, AI client connection examples, and read-only capabilities
-- `docs/roadmap.md` for MCP hardening and future integration milestones
+User guides explain the dashboard workflow; this reference explains how it works and how to operate it. Keep both in sync when behavior changes. Document defaults, prerequisites, destructive operations, and known limitations alongside the relevant instructions. Add or update verification evidence before claiming a feature is tested.
 
-Runtime proxy notes are documented primarily in:
-- `docs/architecture/ui.md` for the same-origin `/api/...` proxy behavior and screenshot delivery model
-- `docs/deployment/docker.md` for `SHOPKEEPER_URL`, external-DB release usage, and reverse-proxy deployment behavior
-
-## Guidelines For Contributing
-
-* Read `../CONTRIBUTING.md` before opening a pull request.
-* Ensure new features, deployment changes, and schema changes are documented before release.
-* Keep `docs/index.md` as the map of the documentation set.
+The public website and dashboard are separate applications. The documentation URL is [lime.heysuman.com/docs/](https://lime.heysuman.com/docs/); the full website also includes the API reference, screenshots, and roadmap. Local preview instructions are in [Docs site](docs-site.md).

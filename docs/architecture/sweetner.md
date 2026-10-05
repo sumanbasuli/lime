@@ -45,6 +45,10 @@ for each RawResult:
 
 This means if "color-contrast" appears on 50 pages with 3 nodes each, we get 1 Issue record and 150 IssueOccurrence records.
 
+The grouping map is per scan and seeded on resume/retry; this is not cross-scan deduplication. Needs-review grouping happens later in the read layer: when a failed group exists for a rule, the UI/reports/MCP suppress a duplicate needs-review card for that rule while keeping its incomplete audit evidence in storage.
+
+`Process` is not one transaction for the entire scan. Audit writes can return an error to the scanner, while individual issue/occurrence insertion errors are logged and the loop continues. Do not infer from a terminal scan status alone that every possible evidence row was written; check logs and occurrence counts when investigating persistence failures. Restart recovery of interrupted active scans clears their partial evidence and reruns them, while explicit resume/retry preserves already completed evidence.
+
 ### Relationship to ACT Enrichment
 
 - Sweetner does not persist ACT metadata.
@@ -58,3 +62,7 @@ All data is persisted directly to the database via the repository layer. The Swe
 - `issue_occurrences` table — One row per affected URL+node combination
 - `url_audits` table — Rule outcome rows for completed pages
 - `url_audit_occurrences` table — Incomplete outcome evidence for needs-review groups
+
+## Developer Checks
+
+Run backend tests from `shopkeeper/` with `go test ./...`. Keep rule grouping, severity mapping, stored screenshot paths, and triage inheritance aligned with `repository.GetInheritedFalsePositiveStates` and the corresponding tests. A fresh rescan must not retroactively modify its source scan's decision, and an unmark is an explicit inherited decision rather than absence of history.

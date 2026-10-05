@@ -1,6 +1,6 @@
 # Docs Site
 
-The public LIME docs site lives in `docs-site/`. It is a static Next export designed for GitHub Pages and for the future `lime.heysuman.com` custom domain. It is separate from the dashboard app in `lime/` and has no runtime database dependency after it is built.
+The public LIME website and docs live in `docs-site/` and are published at [lime.heysuman.com](https://lime.heysuman.com/) and [lime.heysuman.com/docs](https://lime.heysuman.com/docs/). They are a static Next export deployed through GitHub Pages. This app is separate from the dashboard in `lime/` and has no runtime database dependency after it is built.
 
 ## What It Publishes
 
@@ -15,12 +15,15 @@ The public docs build is a static export. CI builds the site and uploads `docs-s
 
 ## Commands
 
+From the repository root, install the locked dependencies with `npm --prefix docs-site ci`. The docs CI uses Node 24; use a supported Node version compatible with the lockfile. Keep Bash on `PATH`: every production build and `test:docs-content` run uses `bash -n` to syntax-check shell examples without executing them. Browser checks also need Playwright Chromium (`cd docs-site && npx playwright install chromium`). Screenshot refresh and product verification additionally need Docker with Compose and curl; ordinary content development/building does not need the scan stack.
+
 ```bash
 make docs-dev      # hot-reload docs development server on LIME_DOCS_PORT, default 3001
 make docs-build    # build the static docs site into docs-site/out
 make docs-run      # build and serve docs-site/out locally
 make docs-verify   # build, validate, and browser-check desktop/mobile routes and interactions
 make docs          # refresh isolated demo screenshots, then build the static site
+npm --prefix docs-site run test:docs-content  # navigation, reading order, and renderer regressions
 ```
 
 Use `make docs` before release-facing docs changes when screenshots may be stale. Use `make docs-build` for fast validation when content or layout changed but screenshots did not. Use `make docs-verify` for the complete local static-export and browser verification pass. Use `make docs-run` for GitHub Pages parity: it builds the static export first, then serves `docs-site/out` instead of running the Next development server.
@@ -35,10 +38,12 @@ The docs site is a normal Next app with static export enabled in `docs-site/next
 - `NEXT_PUBLIC_LIME_DOCS_URL` controls canonical metadata and public docs links.
 - `docs-site/scripts/prepare-assets.mjs` copies shared brand assets into `docs-site/public/brand/` before build.
 - `npm run dev` prepares shared brand assets before starting, so the local site does not render broken logos.
-- `make docs-build` checks for untracked or ignored docs source files before building so local-only files cannot make `make docs-run` look correct while CI deploys a missing route.
-- Every production build runs `docs-site/scripts/validate-static-export.mjs` after export. It fails on missing required routes, internal links, assets, or undersized product screenshots.
+- `make docs-build` checks for untracked or ignored CSS/JavaScript/TypeScript sources under the docs app, components, content, library, and scripts before building. This catches local-only source files that could make `make docs-run` look correct while CI deploys a missing route; it is not a check that all documentation edits have been committed.
+- Every production build runs `docs-site/scripts/verify-content.mjs` and `validate-static-export.mjs` after export. Content checks cover complete navigation, audience reading order, and renderer regressions; static-export checks cover required routes, internal links and section anchors, unique heading IDs/titles, assets, and product screenshot sizes.
 
 For the custom domain, keep `LIME_DOCS_BASE_PATH` empty and publish `docs-site/public/CNAME`. For a GitHub Pages project URL such as `https://sumanbasuli.github.io/lime/`, set `LIME_DOCS_BASE_PATH=/lime`.
+
+To preview a project-path export locally, run `LIME_DOCS_BASE_PATH=/lime make docs-run` and open `http://localhost:3001/lime/`. Use the same environment value for build, serve, and `make docs-verify`. Rebuild with the variable unset to return to the normal root-path preview.
 
 ## Content Model
 
@@ -60,26 +65,28 @@ Choose the content path based on the audience:
 
 1. Use `docs-site/content/product-docs.ts` for user-facing or developer-facing pages that need careful ordering, screenshots, source references, and product copy.
 2. Use a Markdown file under `docs/` for repository reference material, architecture notes, deployment details, and contributor handoff docs.
-3. Update `docs-site/content/navigation.ts` when the page should appear explicitly in the public sidebar.
+3. Register every guide in `docs-site/content/navigation.ts` under the right audience. The build rejects guides missing from navigation.
 4. Update `docs/index.md` when the page should appear in the repository documentation map.
-5. Run `npm --prefix docs-site run lint` and `make docs-build` for content-only changes.
+5. Run `npm --prefix docs-site run lint`, `(cd docs-site && npx tsc --noEmit)`, and `make docs-build` for content-only changes. Use `make docs-verify` for rendered navigation, search, and responsive checks.
 
 For curated pages in `docs-site/content/product-docs.ts`:
 
 1. Add a `ProductDoc` entry with `slug`, `title`, `description`, `category`, optional `screenshots`, optional `sourceFiles`, and `markdown`.
 2. Keep user workflow pages under `slug: ["user", "..."]`.
 3. Keep contributor pages under `slug: ["developer", "..."]`.
-4. Add screenshot IDs to the page's `screenshots` field when the right rail should reference them.
-5. Add Markdown images directly in the body when the screenshot is part of the step-by-step instructions.
+4. Keep related screenshot IDs in the page's optional `screenshots` metadata. The current page renderer does not display this metadata in the right rail.
+5. Add Markdown images directly in the body to display screenshots in the step-by-step instructions. The right rail displays headings and source references.
 
 For repo Markdown pages under `docs/`:
 
 1. Add the Markdown file in the correct folder.
 2. Use a single `#` heading because the docs site uses it as the page title.
-3. Add the page to `docs-site/content/navigation.ts` if it belongs in the public reference sidebar.
+3. Register the page in `docs-site/content/navigation.ts` under the appropriate operator, developer, or technical-reference group.
 4. Link it from `docs/index.md` so contributors can discover it without the static site.
 
 Search is automatic for both curated docs and repo Markdown docs because `docs-site/lib/docs-search.ts` reads the full docs page list at build time.
+
+The repository renderer supports headings, paragraphs, links, images, lists, tables, and fenced code blocks. It is not an MDX renderer: raw HTML is escaped rather than executed, so do not use HTML disclosure widgets or interactive components inside Markdown. Keep long implementation records after reader-facing instructions and link to their section headings.
 
 ## API Reference
 
@@ -87,8 +94,8 @@ The public API page is generated from the typed manifest in `docs-site/content/a
 
 When API behavior changes:
 
-1. Update the Shopkeeper route/handler.
-2. Update any dashboard proxy or client code.
+1. Update the owning route/handler: Shopkeeper owns scan actions and MCP tools; the dashboard owns settings, issue pagination, export controls, and the canonical MCP proxy.
+2. Update any affected dashboard proxy or client code.
 3. Update `docs-site/content/api.ts`.
 4. Run `make docs-build`.
 
@@ -207,7 +214,9 @@ The workflow:
 5. Uploads `docs-site/out`.
 6. Deploys through GitHub Pages actions.
 
-The workflow intentionally does not run `make docs`. Screenshots should be refreshed locally and committed.
+The build includes content and static-export validation. The workflow intentionally does not run `make docs` or the browser verification suite. Screenshots should be refreshed locally and committed; run lint/type checks and `make docs-verify` locally before handing off changes.
+
+The local browser verifier enumerates exported documentation routes and the main website pages at desktop/mobile widths. It also checks user-guide reading order, search, mobile navigation/table of contents, and screenshot gallery interactions. Results and representative screenshots are written under the ignored `.artifacts/verification/` directory. A new route or guide changes the coverage count; record the count from a completed run rather than copying an older verification record.
 
 ## Handoff Checklist
 

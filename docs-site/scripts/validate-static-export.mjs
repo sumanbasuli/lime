@@ -50,6 +50,20 @@ for (const route of requiredRoutes) {
 }
 
 const htmlFiles = walk(outDir, ".html");
+const idsByFile = new Map();
+for (const htmlFile of htmlFiles) {
+  const html = readFileSync(htmlFile, "utf8");
+  idsByFile.set(htmlFile, new Set([...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1])));
+  if (path.relative(outDir, htmlFile).startsWith("docs" + path.sep)) {
+    if ([...html.matchAll(/<h1(?:\s|>)/g)].length !== 1) {
+      failures.push(path.relative(outDir, htmlFile) + " must have exactly one page title");
+    }
+    const headingIds = [...html.matchAll(/<h[1-4]\b[^>]*\bid="([^"]+)"/g)].map((match) => match[1]);
+    if (headingIds.length !== new Set(headingIds).size) {
+      failures.push(path.relative(outDir, htmlFile) + " has duplicate heading anchors");
+    }
+  }
+}
 for (const htmlFile of htmlFiles) {
   const html = readFileSync(htmlFile, "utf8");
   const relativeHtml = path.relative(outDir, htmlFile);
@@ -60,8 +74,8 @@ for (const htmlFile of htmlFiles) {
   const attributes = html.matchAll(/\b(?:href|src)="([^"]+)"/g);
 
   for (const match of attributes) {
-    const value = match[1];
-    if (!value || /^(?:https?:|mailto:|tel:|data:|javascript:|#)/.test(value)) {
+    const value = match[1].replaceAll("&amp;", "&");
+    if (!value || /^(?:https?:|mailto:|tel:|data:|javascript:)/.test(value)) {
       continue;
     }
     const resolved = new URL(value, pageUrl);
@@ -71,6 +85,11 @@ for (const htmlFile of htmlFiles) {
     const target = targetFileForPathname(resolved.pathname);
     if (!existsSync(target)) {
       failures.push(relativeHtml + " -> missing " + value);
+    } else if (resolved.hash && idsByFile.has(target)) {
+      const anchor = decodeURIComponent(resolved.hash.slice(1));
+      if (!idsByFile.get(target).has(anchor)) {
+        failures.push(relativeHtml + " -> missing section " + value);
+      }
     }
   }
 }
@@ -105,4 +124,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("Static export validated: " + htmlFiles.length + " HTML pages, internal assets, and product screenshots.");
+console.log("Static export validated: " + htmlFiles.length + " HTML pages, internal links/section anchors, titles, assets, and product screenshots.");

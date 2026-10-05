@@ -1,183 +1,85 @@
 # LIME Product Roadmap
 
-This roadmap tracks the work needed to move LIME from the current stable self-hosted scanner to a public `v1.0` release, then harden MCP and future integrations after release.
+This roadmap separates the shipped 1.x product from work that still needs validation or implementation. It is not a release schedule or a claim that every deployment, client, public website, or large scan has been verified. See [Verification And Handoff](verification.md) for the tested baseline and its limits, and [CHANGELOG](../CHANGELOG.md) for release history.
 
-## Current Baseline
+## Current Shipped Baseline
 
-LIME already has the core product shape in place:
+The existing product includes:
 
-- sitemap and single-page scans
-- strict same-host profiling for new scans
-- viewport-aware axe-core execution through Shopkeeper
-- focused screenshots, issue grouping, ACT guidance, and false-positive triage
-- partial-scan failed-page retry inside the same scan
-- full-scan and per-issue PDF, CSV, and LLM exports
-- server-wide Settings for report limits and export feature flags
-- read-only MCP endpoint with generated bearer key auth
-- Docker, Fly.io, GHCR images, release bundles, and update scripts
+- Sitemap and single-page scans with same-host profiling and viewport presets.
+- Configured WCAG A/AA axe-core checks, issue grouping, local ACT guidance, focused yellow-highlight screenshots, and distinct preview/full-image review.
+- Pause/resume, startup recovery, failed-page retry within the same partial scan, and full rescans.
+- False-positive triage, score/cache updates, and inherited decisions for matching future scans.
+- Scan-level and issue-scoped PDF, CSV, and LLM exports, with reporting limits and export flags.
+- Server-wide Reporting, Performance, and Integrations settings stored in PostgreSQL.
+- PostgreSQL score/issue-summary read caches, paginated occurrence reads, request timing, and a dashboard PDF-generation concurrency cap.
+- A redesigned dashboard, static marketing website/docs, and a Link checker design preview.
+- A read-only MCP endpoint, one generated instance key, and six bounded tools for saved data.
+- Source-built Docker development, published images/release bundles, and Docker, Fly.io, and Debian deployment/update helpers.
+- Contributor/security guidance and release publishing tied to `VERSION` and `CHANGELOG.md`.
 
-The remaining work before `v1.0` is primarily performance hardening, release polish, and public project hygiene.
+The deterministic verification suite covers existing dashboard/API/data workflows in an isolated production stack. MCP checks include pinned official SDK v1/v2 clients and a pinned local stdio bridge. These checks do not establish that every installed AI application or remote deployment has connected.
 
-## V1.0: Optimization And Public Release
+## Next Validation And Hardening Priorities
 
-### Goal
+### Repeatable Large-Site Measurement
 
-Make large scans feel fast and predictable for operators, especially when viewing issue details and generating reports, while keeping the deployment simple enough for self-hosted users.
+The performance foundations are implemented; larger workloads still need measured evidence. Add a repeatable benchmark that records data size, configured limits, hardware, concurrency, and timings for:
 
-### Defaults
+- Dashboard and scan score/coverage summaries.
+- Issue-page first render, summary chunks, and occurrence detail.
+- Full and scoped PDF, CSV, and LLM exports.
+- Concurrent reads and triage/report cache invalidation.
 
-- Use PostgreSQL-first caching and read models for `v1.0`.
-- Do not add Redis as a required dependency for `v1.0`.
-- Revisit Redis only after profiling shows a problem that PostgreSQL read models, indexes, and bounded in-process caches do not solve.
-- Keep performance controls minimal in Settings.
+Use the existing request timing and PostgreSQL read models first. Keep occurrence reads paginated and report generation bounded. The report-cache table and TTL setting are reserved infrastructure; current report loaders do not consume them. Implement and measure any report-input cache before describing it as active. Do not add Redis or distributed workers without measurements showing a problem the current architecture cannot address. See [Performance](performance.md).
 
-### Priority Hot Paths
+### Deployment And Release Validation
 
-Optimize these paths first:
+Document target-specific fresh install, upgrade, backup, restore, and rollback checks. A local production-stack pass is not a Fly.io or Debian deployment pass, nor does a fresh disposable database prove an upgrade from an older release.
 
-- dashboard recent scans and score summaries
-- scan detail score and coverage summaries
-- `/scans/[id]/issues` first render
-- issue chunk and issue detail loading
-- full and scoped report-data loading
-- PDF, CSV, and LLM export startup latency
+Before claiming a target is verified:
 
-### Workstream 1: Measurement
+1. Record its release versions and configuration.
+2. Test migrations against representative existing data as well as a fresh database.
+3. Verify persisted scans, screenshots, settings, report generation, and MCP after upgrade.
+4. Exercise a recoverable backup/restore path; do not assume every update helper performs a backup.
+5. Record dependency/security review results and unresolved findings separately from functional tests.
 
-- Add lightweight request timing around hot NextJS routes and Shopkeeper report routes.
-- Add repeatable large-scan benchmark notes for dashboard, issues page, issue chunks, issue detail, full PDF, and scoped PDF.
-- Capture baseline numbers before changing the data model.
-- Add slow-query visibility for development and Docker verification.
+See [Setup](setup.md), the [operator guides](index.md#for-operators), and [Verification And Handoff](verification.md).
 
-Exit criteria:
+### Client Interoperability And Diagnostics
 
-- A large-scan benchmark can be repeated locally.
-- The slowest queries for the issues page and report generation are identifiable.
+Current MCP behavior is stateless Streamable HTTP with JSON `POST` responses. A `GET` response of 405 and the absence of session IDs are intentional, not by themselves a compatibility defect.
 
-### Workstream 2: PostgreSQL Read Models And Indexes
+Collect evidence from real client/deployment combinations before extending the protocol. Possible follow-up work includes clearer connection diagnostics, configurable origin policies for non-local browser clients, and session/streaming support if a justified client workflow needs it. OAuth and scoped keys remain deferred; they are not part of the current static bearer-key contract. See [MCP Integration](mcp.md).
 
-- Add composite indexes for the real hot predicates and ordering patterns used by issue pages, score summaries, exports, and retry/delete flows.
-- Add persisted read models or cache tables for per-scan score, coverage, and issue-card summaries.
-- Keep occurrence detail queries live and paginated.
-- Avoid rebuilding a full in-memory issue list just to serve the first issue-page chunk.
-- Refresh or invalidate derived data when scans complete, failed-page retries finish, false-positive state changes, report-shaping settings change, or scans are deleted.
+## Future Product Work
 
-Exit criteria:
+### Link Checker
 
-- The issues page loads bounded initial data for large scans.
-- Dashboard and scan score summaries do not repeatedly aggregate the full audit tables.
-- False-positive toggles update summary state correctly.
+The current screen is a design preview with a disabled run action. Link checking, persisted runs/results, progress, retries, and exports need a backend workflow and end-to-end verification before the feature can be described as available. Add user instructions and API/reference documentation alongside that implementation, not ahead of it.
 
-### Workstream 3: Report Generation
+### Integration Boundaries
 
-- Reuse the same read models for PDF, CSV, and LLM report inputs.
-- Keep full reports bounded by Settings limits.
-- Keep issue-specific CSV as the full occurrence export path.
-- Preserve screenshots in PDFs while keeping repeated context deduplicated by reference.
-- Add a report-generation concurrency cap in Settings.
-- Cache report-input metadata by scan, scope, format, and settings fingerprint where it avoids repeated expensive reads.
+The current MCP tools read saved scans, scores, issue groups/details, report availability, and non-secret settings. They do not create scans, pause/resume/retry/delete/rescan, change false-positive state, mutate settings, or generate reports automatically.
 
-Exit criteria:
+Preserve these boundaries when refining the integration:
 
-- Full and scoped PDF generation starts with immediate UI feedback.
-- Report generation does not require a full recomputation of all issue summaries on every request.
-- Existing export feature flags continue to gate PDF, CSV, and LLM routes.
+- Disabling MCP rejects new requests; rotating the instance key revokes the previous key.
+- Keep key material out of responses, shared configuration, logs, and screenshots except the one-time generation response shown to the operator.
+- Keep issue/group/occurrence pagination bounded.
+- Authenticate before dashboard score enrichment.
+- Return report/screenshot paths using the existing serving routes; do not imply that those ordinary HTTP routes inherit MCP authentication.
 
-### Workstream 4: Settings
-
-Evolve Settings into three sections:
-
-- Reporting: existing PDF, CSV, and LLM limits and feature flags.
-- Performance: summary cache TTL, report-data cache TTL, and report concurrency cap.
-- Integrations: MCP enablement and key generation controls.
-
-Exit criteria:
-
-- Existing report settings migrate safely.
-- New performance defaults work without operator changes.
-- Settings remain server-wide and stored in PostgreSQL.
-
-### Workstream 5: Public Open-Source Release
-
-- Add contributor, security, issue, and PR documentation.
-- Make `README.md` and `docs/index.md` point users to support, security, deployment, updates, performance, and roadmap docs.
-- Keep release publishing tied to `VERSION`, `CHANGELOG.md`, Docker images, and GitHub Releases.
-- Verify fresh installs and upgrades through Docker and Fly.io paths.
-
-Exit criteria:
-
-- `make build` passes.
-- Fresh database migrations pass.
-- Existing database migrations pass.
-- Docker and Fly.io smoke checks are documented.
-- Public docs are sufficient for a self-hosted operator to install, update, report issues, and contribute.
-
-## V2.0: MCP Hardening And Integration Polish
-
-### Goal
-
-Harden the existing read-only MCP integration so more third-party AI tools can inspect scans and reports from outside the LIME dashboard.
-
-### Current Baseline
-
-LIME already:
-
-- Exposes `POST /mcp` on the existing Shopkeeper HTTP service.
-- Controls MCP runtime availability from Settings.
-- Allows users to generate and regenerate an MCP key in Settings.
-- Stores only a hash of the MCP key.
-- Shows the raw key only at generation or regeneration time.
-- Requires `Authorization: Bearer <mcp-key>` on MCP requests.
-- Exposes read-only tools for scans, issue summaries, issue details, report metadata, and visible settings.
-
-### Planned Hardening
-
-- Add configurable origin allowlisting for non-local browser-based MCP clients.
-- Improve compatibility with clients that expect full Streamable HTTP session behavior.
-- Add clearer runtime diagnostics for disabled MCP, missing keys, and rejected origins.
-- Leave OAuth-based MCP authorization for a later version.
-
-### Current MCP Capability Set
-
-The current MCP endpoint is read-only.
-
-Expose tools or resources for:
-
-- listing scans
-- reading scan status, progress, score, coverage, and metadata
-- listing issue groups for a scan
-- reading issue details with paginated occurrences
-- reading report availability and export metadata
-- reading relevant reporting and performance settings
-
-Do not expose:
-
-- scan creation
-- scan pause, resume, retry, delete, or rescan
-- false-positive mutation
-- Settings mutation
-- destructive admin actions
-
-### MCP Safety Requirements
-
-- Disabling MCP in Settings immediately rejects new MCP requests.
-- Regenerating the key revokes the old key.
-- MCP responses must use bounded pagination for large scans.
-- MCP must not expose screenshot files outside the existing authenticated request model.
-- MCP must not trigger report generation automatically.
-
-Exit criteria:
-
-- Common third-party MCP clients can connect over HTTP with the generated key.
-- Unauthorized requests return `401`.
-- Disabled MCP returns a clear unavailable response.
-- Rejected origins are understandable and configurable.
-- Read-only scan and issue inspection works against large scans.
+The dashboard, ordinary HTTP APIs, reports, and saved screenshot routes do not have built-in user authentication. Protect a remotely reachable deployment externally. Adding multi-tenant identity or authorization would be a separate product/security design, not a consequence of enabling MCP.
 
 ## Deferred
 
 - Redis as a required production dependency.
-- Full OAuth 2.1 MCP authorization.
-- MCP write/admin tools.
 - Distributed scan workers.
+- OAuth-based MCP authorization and scoped instance keys.
+- MCP write/admin tools.
 - Multi-tenant authentication and authorization.
+- Profile/account management behind the sidebar identity display.
+
+Work step by step: establish the existing baseline, make one scoped change, verify the browser/API/data flow, and update the relevant user and developer guides before moving on.

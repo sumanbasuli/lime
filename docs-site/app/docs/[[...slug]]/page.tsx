@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { MaterialSymbol } from "@/components/material-symbol";
-import { getAllDocPages, getDocPage } from "@/lib/docs";
+import { getAdjacentDocPages, getAllDocPages, getDocPage } from "@/lib/docs";
 import { withBasePath } from "@/lib/site";
 
 interface DocsPageProps {
@@ -62,10 +62,7 @@ export default async function DocsPage({ params }: DocsPageProps) {
   }
 
   const headings = getPageHeadings(page.html);
-  const allPages = getAllDocPages();
-  const pageIndex = allPages.findIndex((candidate) => candidate.href === page.href);
-  const previousPage = pageIndex > 0 ? allPages[pageIndex - 1] : null;
-  const nextPage = pageIndex >= 0 && pageIndex < allPages.length - 1 ? allPages[pageIndex + 1] : null;
+  const { previousPage, nextPage } = getAdjacentDocPages(page);
 
   return (
     <main className="mx-auto grid w-full max-w-[1180px] gap-10 px-5 py-10 sm:px-7 lg:px-10 lg:py-14 xl:grid-cols-[minmax(0,820px)_220px] xl:gap-14">
@@ -73,6 +70,18 @@ export default async function DocsPage({ params }: DocsPageProps) {
         <div className="mb-5 inline-flex rounded-full border border-black/15 bg-white px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-black/58">
           {page.category ?? "Reference"}
         </div>
+        {headings.length ? (
+          <details className="mb-7 rounded-xl border border-black/10 bg-white p-4 xl:hidden">
+            <summary className="cursor-pointer text-sm font-semibold">On this page</summary>
+            <nav className="mt-3 grid gap-2" aria-label="On this page">
+              {headings.map((heading) => (
+                <a key={heading.id} href={`#${heading.id}`} className={`text-sm text-black/65 underline decoration-[#FFED00] underline-offset-4 ${heading.level > 2 ? "ml-3" : ""}`}>
+                  {heading.title}
+                </a>
+              ))}
+            </nav>
+          </details>
+        ) : null}
         <div
           className="docs-prose"
           dangerouslySetInnerHTML={{ __html: page.html }}

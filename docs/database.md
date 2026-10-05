@@ -1,6 +1,6 @@
 # Database Architecture
 
-LIME uses PostgreSQL as the shared durable store for scan configuration, scan progress, issue data, audit outcomes, report settings, and future read-model caches.
+LIME uses PostgreSQL as the shared durable store for scan configuration, progress, findings, audit outcomes, settings, and derived score/issue summaries. Screenshot pixels live on a separate filesystem volume, not in PostgreSQL.
 
 ## Engine And Access Model
 
@@ -8,6 +8,20 @@ LIME uses PostgreSQL as the shared durable store for scan configuration, scan pr
 - **Backend access**: Shopkeeper uses `pgxpool` and owns scan lifecycle writes, scan results, screenshots metadata, migrations, and cleanup.
 - **UI access**: the NextJS app uses Drizzle ORM for server-rendered reads and UI-owned settings routes.
 - **Migrations**: SQL migrations live in `shopkeeper/migrations/`; matching Drizzle table definitions live in `lime/src/db/schema.ts`.
+
+Both services must connect to the same database. Shopkeeper's pool uses a maximum of 10 connections and minimum of 2; the UI creates a separate `pg.Pool`. Account for both services and maintenance clients in the database's connection budget. There is no distributed scan queue or backend ownership lease: run only one Shopkeeper against a database.
+
+## Relationships And Ownership
+
+```text
+scans ── urls ── url_audits / url_audit_occurrences
+  │         └── issue_occurrences ── issues
+  ├── issues
+  └── scan_score_summary_cache / scan_issue_summary_cache / scan_report_data_cache
+app_settings (one server-wide row, key = 'global')
+```
+
+Scan, URL, and issue foreign keys use `ON DELETE CASCADE`. Shopkeeper's delete handler additionally removes the scan screenshot directory. Deleting a row manually does not perform that filesystem cleanup. Use the application lifecycle routes rather than editing scan/result rows during normal operation.
 
 ## Core Tables
 
@@ -21,6 +35,8 @@ Key fields:
 - status and pause-request state
 - total and scanned URL counters
 - created and updated timestamps
+
+Statuses are `pending`, `profiling`, `scanning`, `processing`, `paused`, `completed`, and `failed`. `scanned_urls` counts processed page attempts, including real failures; it is not the number of successfully audited pages. Use URL status counts/coverage for that distinction. A completed scan can still have failed pages and partial coverage.
 
 ### `urls`
 
@@ -100,17 +116,23 @@ Current fields include:
 
 The raw MCP key is never stored; only its hash and display hint are persisted.
 
+Defaults and input normalization are defined in `lime/src/lib/report-settings-config.ts` and `report-settings.ts`. MCP defaults to disabled; PDF/CSV/LLM exports default to enabled. Browser-only update-card preferences are stored in local storage, not this table. The raw MCP key cannot be recovered from a database backup; clients need a retained key or a newly generated one.
+
 ### `scan_score_summary_cache`
 
 Per-scan score, coverage, and audit-count read model used to avoid repeated full audit aggregation on dashboard and report reads.
+
+The Next scorer writes this cache. Direct Shopkeeper MCP reads accept only a matching scan timestamp/status within the configured TTL, and return null for a cold/stale cache. The canonical dashboard `/mcp` endpoint uses the existing Next scorer to supply fresh summaries.
 
 ### `scan_issue_summary_cache`
 
 Per-scan failed and needs-review issue-card read model used by the issues page. Occurrence details remain live and paginated.
 
+Next serializes replacement by locking the parent scan row and checking its timestamp before persisting. Triage updates clear score/issue caches and touch the scan timestamp. See [Performance And Caching](performance.md).
+
 ### `scan_report_data_cache`
 
-Bounded report metadata cache keyed by scan, scope, format, and settings fingerprint. The cache stores metadata only; generated report files are still produced on demand.
+Reserved report-metadata cache schema keyed by scan, scope, format, and settings fingerprint. The migration and Drizzle definition exist, but current report routes/loaders do not read or populate this table. The corresponding report-data TTL setting is persisted but is not yet an active report cache. PDF, CSV, and LLM files are generated on demand.
 
 ## Index Strategy
 
@@ -135,3 +157,23 @@ Current read-path indexes include:
 - Keep migrations forward-only in release history.
 - Do not let NextJS become the writer for scan lifecycle or scan result tables.
 - Document materialized read models or cache tables when they are added.
+
+## Migration Operations
+
+Shopkeeper runs `database.RunMigrations` before connecting its runtime pool or starting HTTP. It uses `file://migrations`, relative to the process working directory. Run native commands from `shopkeeper/`, or use the packaged binary with its bundled `migrations/` directory and correct working directory. Docker and systemd set this up already.
+
+`make migrate-all` targets the bundled local Compose database and can build a one-off Shopkeeper image. It is not a generic command for an external production database. For published images, use the release Compose command documented in [Updating LIME](deployment/updates.md).
+
+The migration runner maintains `schema_migrations`. Down files exist, but application startup only runs `Up`; a previous binary/image does not downgrade the database. If a migration fails or leaves a dirty version, capture the error and inspect the version read-only before any repair. Do not force a version or rerun down migrations without understanding the partially applied SQL and having a tested backup.
+
+```sql
+SELECT version, dirty FROM schema_migrations;
+SELECT status, count(*) FROM scans GROUP BY status ORDER BY status;
+SELECT status, count(*) FROM urls GROUP BY status ORDER BY status;
+```
+
+These are diagnostic reads, not recovery operations. SQL migrations currently run through `000012_add_report_data_cache`; inspect the checked-out release's files rather than assuming a fixed version forever.
+
+## Backup Boundary
+
+A usable recovery set contains the database, the screenshot root, protected runtime configuration, and the matching application/catalog version. Database-only backups preserve findings and settings but cannot recreate image evidence. See [Backup And Restore](deployment/backup-restore.md) for a maintenance-window procedure and a restore rehearsal into a separate empty database.

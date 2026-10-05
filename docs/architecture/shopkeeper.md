@@ -25,6 +25,7 @@ shopkeeper/
 │   ├── models/models.go            — Domain structs: Scan, URL, Issue, IssueOccurrence, Stats
 │   ├── repository/repository.go    — All DB CRUD operations via pgx
 │   ├── handler/handler.go          — HTTP handlers with ScanRunner interface
+│   ├── mcp/server.go               — Authenticated read-only JSON-RPC transport and tools
 │   ├── router/router.go            — Chi router with CORS, middleware, all routes
 │   ├── scanner/scanner.go          — Async scan pipeline orchestrator
 │   ├── viewport/presets.go         — Scan viewport preset validation + stored dimensions
@@ -36,8 +37,7 @@ shopkeeper/
 │   │   └── axe.min.js              — axe-core 4.10.2
 │   └── sweetner/sweetner.go        — Result deduplication + DB persistence
 └── migrations/
-    ├── 000001_init_schema.up.sql
-    └── 000001_init_schema.down.sql
+    └── 000001…000012_*.sql         — Versioned schema migrations (inspect the current checkout)
 
 repo root
 ├── data/act-rules.json             — Shared checked-in ACT catalog used by Go + Next at read time
@@ -63,6 +63,7 @@ repo root
 | POST | `/api/scans/{id}/issues/{issueId}/false-positive` | MarkIssueFalsePositive | Mark a scan issue as a false positive |
 | DELETE | `/api/scans/{id}/issues/{issueId}/false-positive` | UnmarkIssueFalsePositive | Remove the false-positive mark from a scan issue |
 | GET | `/api/screenshots/{scanId}/{filename}` | ServeScreenshot | Serve a saved screenshot |
+| GET | `/api/scans/{id}/issues/report.pdf` | DownloadIssueReport | Render the dashboard report document using Chromium |
 
 Shopkeeper owns the read-only `/mcp` transport, bearer-key authentication, 2025 protocol negotiation, tool schemas, and paginated repository reads. Clients should use the dashboard's canonical `/mcp` proxy: after an authenticated `get_scan` read, Next adds fresh scores using its existing scorer. Direct Shopkeeper calls return only a valid saved score cache, or null when it is cold or stale. Report metadata includes per-format availability and paths explicitly relative to the dashboard origin. Paginated issue-detail REST routes, settings, and CSV/LLM exports belong to Next and must use that origin. See [MCP Integration](../mcp.md) for enablement, client capabilities, and the read-only SDK smoke test. Stateless JSON POST results and GET 405 are intentional; no OAuth, scoped keys, or mutation tools are implemented.
 
@@ -87,7 +88,7 @@ The `scanner.Scanner` implements this interface. The handler launches scans asyn
 4. Pipeline updates status to `profiling`, calls Profiler to discover URLs.
 5. Profiler must finish full sitemap discovery before scanning starts. If any nested sitemap still fails after retries, the scan fails instead of continuing with a partial URL set.
 6. Discovered URLs are bulk-inserted into the DB; status moves to `scanning`.
-7. Juicer scans pages with 5-concurrent workers using the scan's persisted viewport dimensions; progress updates in real-time. Its accessibility execution is now aligned more closely with Lighthouse’s accessibility gatherer, using WCAG A/AA tags, curated rule overrides, node references, failure summaries, and scroll reset behavior before screenshot work begins. If a late page-settle wait times out after the document is already usable, Juicer still continues into rule execution instead of dropping that page immediately.
+7. Juicer scans pages with up to 5 workers per scan using the persisted viewport dimensions; progress counts processed attempts, including genuine failures. Its accessibility execution is aligned more closely with Lighthouse’s accessibility gatherer, using WCAG A/AA tags, curated rule overrides, node references, failure summaries, and scroll reset behavior before screenshot work begins. If a late page-settle wait times out after the document is already usable, Juicer still continues into rule execution instead of dropping that page immediately.
 8. Status moves to `processing`; Sweetner deduplicates and stores issues from successfully scanned pages.
 9. Status is set to `completed` when at least one page scanned successfully. If every page errors, or a pipeline step fails, status is set to `failed`.
 10. If a completed scan still has failed URL rows, `POST /api/scans/{id}/retry-failed` can reset only those failed rows to `pending`, reset `scanned_urls` to the completed-page count, and relaunch the same scan ID through the normal resume path.
@@ -96,7 +97,7 @@ The async execution is backend-owned. Browser navigation only affects UI polling
 
 ### Progress Ordering
 
-Juicer audits pages concurrently, but completed-page progress callbacks must be serialized in counter order. This keeps `scanned_urls` monotonic within a run: a slower callback for page 7 must not overwrite the saved count after page 8 finishes. Resumes and failed-page retries add the persisted processed-page count to the new callback count. The verification suite checks final coverage against the stored scan counter; callback ordering also has a deterministic backend regression check.
+Juicer audits pages concurrently, but its synchronized per-run progress callback serializes updates and skips any older count arriving after a newer one. This keeps `scanned_urls` monotonic within a run: a slower callback for page 7 must not overwrite the saved count after page 8 finishes. Resumes and failed-page retries add the persisted processed-page count to the new callback count. The verification suite checks final coverage against the stored scan counter; callback ordering also has a deterministic backend regression check.
 
 ## ACT Enrichment Model
 
@@ -140,6 +141,18 @@ Juicer audits pages concurrently, but completed-page progress callbacks must be 
 - Recovery is process-start based, not queue based. If the Shopkeeper process exits while a scan is running, the scan resumes the next time Shopkeeper starts.
 - Recovery keeps the same scan ID so the existing UI route and DB record remain valid.
 - Recovery intentionally discards partial per-scan artifacts before rerunning so the final data set is consistent.
+
+Run only one Shopkeeper against a database. The cancel map and scan execution are process-local, and startup recovery assumes the previous process is gone; there is no distributed lease distinguishing another backend's active scan. Starting a second backend can reset work still running in the first. A shared database/volume alone does not make backend replication safe.
+
+## Runtime And Report Configuration
+
+`cmd/shopkeeper/main.go` applies migrations before HTTP startup and supports `--migrate` to apply them and exit without scan recovery or a server. Migrations are loaded relative to the current working directory. Runtime DB access uses a pgx pool capped at 10 connections.
+
+`internal/config/config.go` reads `DATABASE_URL`, `SHOPKEEPER_PORT` (default 8080), and `REPORT_BASE_URL` (default `http://localhost:3000`). `REPORT_BASE_URL` must be reachable from Shopkeeper's Chromium: source Compose supplies `http://ui:3000`; split-host/container deployments need an explicit internal UI URL. The UI also needs the reverse `SHOPKEEPER_URL` for browser API proxying. These are opposite directions and neither is a browser build-time public URL.
+
+PDF rendering loads `/reports/scans/{id}/issues`, waits for the ready marker and assets, and prints through Chromium. It has a four-minute render deadline. Direct backend report requests do not apply Next's export toggle or per-UI-process limiter; use dashboard report URLs for operator-facing controls. The health endpoint reports HTTP service liveness, not a full database/browser/report readiness check.
+
+See [Docker deployment](../deployment/docker.md), [Backup And Restore](../deployment/backup-restore.md), and [Operational Troubleshooting](../deployment/troubleshooting.md) before changing live process or storage configuration.
 
 ## Verification
 

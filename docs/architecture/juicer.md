@@ -20,9 +20,9 @@ func ScanPages(ctx, allocCtx context.Context, pages []PageInput, scanID string, 
 
 * **Axe-Core Execution**: Injects axe-core 4.10.2 into each page via `chromedp.Evaluate()` and runs a Lighthouse-aligned accessibility configuration: `elementRef: true`, `runOnly` on `wcag2a`/`wcag2aa`, `resultTypes` including `violations` and `inapplicable`, curated rule overrides, and `noHtml: true` with custom node serialization.
 * **Screenshot Capturing**: Takes full-page PNG screenshots and per-element screenshots saved under the Shopkeeper screenshot directory. Docker/Fly use `/app/screenshots/{scanID}/`; native installs set `SHOPKEEPER_SCREENSHOT_DIR` while stored DB paths remain `/app/screenshots/...` for stable UI/report URLs.
-* **Concurrency Management**: Worker pool using a buffered channel semaphore of size 5.
+* **Concurrency Management**: Worker pool using a buffered channel semaphore of size 5 per scan run; simultaneous scans can each start their own workers.
 * **Politeness**: 500ms delay between requests, interruptible when the parent scan run is canceled.
-* **Progress Reporting**: Calls `onProgress(scannedCount)` after each page, enabling real-time scan progress in the UI. Completion callbacks are serialized in counter order so concurrent workers cannot persist a lower count after a higher one.
+* **Progress Reporting**: Reports processed page attempts, including genuine failures, through `onProgress(scannedCount)`. A per-run synchronized callback prevents a lower count from overwriting a newer count; callbacks that arrive behind an already reported count are skipped. Resume/retry adds the existing processed-page count separately.
 * **Viewport Control**: Applies the scan's persisted viewport width/height before navigation so layout, screenshots, and rule evaluation all use the same deterministic rendering width.
 * **Visual Stabilization**: Uses a fuller settle wait before screenshots and as a best-effort step before rule execution, without treating every late-loading asset as a hard scan failure.
 * **Focused Issue Screenshots**: Juicer now saves two focused screenshot assets per capturable occurrence: a visible-viewport spotlight image for expanded viewing and a smaller preview cropped from that exact focused screenshot for inline issue cards.
@@ -32,10 +32,10 @@ func ScanPages(ctx, allocCtx context.Context, pages []PageInput, scanID string, 
 
 ## System Constraints
 
-* **Maximum Concurrency**: 5 pages at a time (semaphore channel of size 5).
+* **Maximum Concurrency**: 5 pages per scan at a time (semaphore channel of size 5), not a server-wide limit.
 * **Page Timeout**: 30 seconds per page.
 * **Delay**: 500ms between requests.
-* **Docker Requirement**: `shm_size: 2gb` in docker-compose for Chromium stability.
+* **Docker Allocation**: Compose allocates `shm_size: 2gb`; total CPU/RAM needs still depend on simultaneous scans, page complexity, and PDF generation.
 * **Chrome Flags**: `--no-sandbox`, `--disable-gpu`, `--disable-dev-shm-usage` for Docker compatibility.
 * **Viewport Presets**: Shopkeeper currently resolves four presets before Juicer runs: Desktop `1440x900`, Laptop `1280x800`, Tablet `768x1024`, and Mobile `390x844`.
 
@@ -71,6 +71,8 @@ Returns `[]RawResult`, each containing:
 - `ScreenshotPath` — Path to the saved full-page screenshot
 - `Error` — Error message if the page failed to scan
 
+An interrupted page is excluded from returned results rather than turned into a failed URL. The scanner saves URL status and successful results after the batch ends; the live progress counter can therefore advance before those page rows/evidence are persisted. Closing the browser UI does not cancel this work.
+
 ### Screenshot Reliability Notes
 
 - Juicer no longer captures screenshots immediately after `body` becomes available.
@@ -82,3 +84,11 @@ Returns `[]RawResult`, each containing:
 - When the failing selector matches multiple DOM nodes, Juicer resolves a best-effort exact match using the node HTML and selector order before it attempts screenshots.
 - When the failing node is initially hidden but a visible ancestor can expose it, Juicer tries a bounded `focus + hover` preparation pass before deciding that no focused screenshot is available.
 - Juicer still does not click/open interactive widgets during capture, so pseudo-elements, click-open menus, canvas-only controls, and similar cases can still end up with no focused screenshot.
+
+## Operational Boundaries
+
+Chromium must be discoverable by the native process and the physical screenshot root must be writable. `screenshots.BaseDir()` accepts `SHOPKEEPER_SCREENSHOT_DIR` (or the legacy `LIME_SCREENSHOT_DIR`) and defaults to `/app/screenshots`; `StoredPath()` deliberately keeps `/app/screenshots/{scanId}/…` in database payloads even for native installs. Clients should use `/api/screenshots/{scanId}/{filename}`, not those storage paths as browser URLs.
+
+The axe engine and ACT metadata are local, but scanned pages still require network access and may load third-party assets. Authentication-required pages, consent dialogs, delayed widgets, and blocked resources can affect the rendered page and findings. Automated output is evidence for review, not a complete accessibility conformance certification.
+
+See [Operational Troubleshooting](../deployment/troubleshooting.md) for browser startup, memory, screenshot, and PDF checks. Capture changes require both Juicer unit tests and the isolated browser/scan/screenshot flow, since a valid PNG alone does not prove the preview and expanded spotlight show the same node.

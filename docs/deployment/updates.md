@@ -1,22 +1,54 @@
 # Updating LIME
 
-Every deploy target has a matching update script. The operational sequence is:
+Version changes are operator actions, not something the sidebar card installs. Before a planned update:
 
-1. back up the database
-2. pull or rebuild the new version
-3. apply migrations
-4. rolling restart of the services
+1. record the running version, Compose project/volume names or native paths, and deployment configuration
+2. let scans finish, or request **Pause** and wait for `paused`; prevent new writes during the maintenance window
+3. back up PostgreSQL, screenshots, and protected configuration, then verify the recovery set
+4. pull/rebuild the selected release and apply its migrations
+5. start Shopkeeper, verify startup, then start the UI and check the full scan/report flow
 
-The Fly script does not create a database backup automatically; take one with your database provider before deploying. Backup behavior for each target is listed below.
+An unpaused active scan is reset and rerun on backend startup, losing partial evidence. A paused scan remains paused and can resume later. Run one Shopkeeper per database; rolling/replicated infrastructure does not supply distributed scan ownership.
 
 ## Update channels
 
 | Target | Command | Backup location |
 |--------|---------|-----------------|
-| Fly.io | `./scripts/fly-update.sh <tag>` | none automatic; use `flyctl mpg backup create <cluster-id>` or your provider's tooling before running |
-| Docker (release bundle) | `./scripts/docker-update.sh <tag>` or `make update-release TAG=<tag>` | `dist/backups/lime-pre-<tag>-<timestamp>.sql.gz` |
-| Docker (from source) | `make update TAG=<tag>` | same as above |
+| Fly.io | `./scripts/fly-update.sh <tag>` | none automatic; use the database provider's backup mechanism |
+| Docker (published images, repository helper) | `./scripts/docker-update.sh <tag>` or `make update-release TAG=<tag>` | `dist/backups/lime-pre-<tag>-<timestamp>.sql.gz` if bundled DB or host `pg_dump` is available; otherwise prompts to continue without a backup |
+| Docker (from source) | clean checkout + `make start-all`, described below | take a manual recovery set first |
 | Debian systemd | `sudo ./scripts/debian-update.sh <tag>` or `make debian-update TAG=<tag>` | `/var/backups/lime/lime-pre-<tag>-<timestamp>.sql.gz` |
+
+These helper backups cover PostgreSQL only, not screenshot pixels, config, retention, encryption, or off-host storage. Fly does not create a backup in its update helper. See [Backup And Restore](backup-restore.md); for MPG, consult the current [backup command reference](https://fly.io/docs/flyctl/mpg-backup-create/) and installed CLI help rather than assuming a backup completed just because it was requested.
+
+## Published Images
+
+`scripts/docker-update.sh` is available in a repository checkout, not in the extracted release archive. It resolves its default `.env`, Compose file, and backups relative to the repository root. To operate another deployment, explicitly select its env/Compose paths and keep the same Compose project identity; confirm the selected containers/volumes before running. Its `COMPOSE_FILE` accepts one file, not a list of overrides.
+
+The helper sources the env file as shell code, changes `LIME_IMAGE_TAG`, pulls images, runs a migration-only container, recreates Shopkeeper, polls its liveness endpoint, then recreates UI. Use only a trusted, shell-compatible env file. It does not validate UI readiness or undo the changed tag/schema if an intermediate step fails. Preserve the previous tag/config and inspect the failing step before retrying. Its interactive no-backup branch uses Bash 4+ syntax; do not rely on that branch with macOS's older system Bash.
+
+For a bundle-only deployment, use a maintenance window in the extracted directory. First take a recovery set, edit `.env` to the intended published `LIME_IMAGE_TAG`, and ensure the deployment's Shopkeeper `REPORT_BASE_URL` is configured as described in [Docker deployment](docker.md#published-image-deployment). Then:
+
+```bash
+docker compose --env-file .env -f docker-compose.release.yml config --quiet
+docker compose --env-file .env -f docker-compose.release.yml stop ui shopkeeper
+docker compose --env-file .env -f docker-compose.release.yml pull shopkeeper ui
+docker compose --env-file .env -f docker-compose.release.yml run --rm --no-deps shopkeeper ./shopkeeper --migrate
+docker compose --env-file .env -f docker-compose.release.yml up -d --no-deps shopkeeper
+docker compose --env-file .env -f docker-compose.release.yml logs --tail=100 shopkeeper
+# After confirming migrations/startup and backend health:
+docker compose --env-file .env -f docker-compose.release.yml up -d --no-deps ui
+```
+
+Include your actual project name/overrides consistently if you use them. Do not use `down -v`; it destroys screenshot volumes. Check the UI-origin health route, database-backed pages, an existing screenshot, and all enabled exports. This is reviewed operational guidance, not an automated rollback or a provider-specific deployment test.
+
+## Source Docker Checkout
+
+The existing `make update TAG=…` target is not recommended as unattended update automation: it builds `lime-shopkeeper:v…`/`lime-ui:v…`, while source Compose has `build:` entries without those image names, and the target then starts services without rebuilding the Compose-selected images. Its `backup-db` pipeline also does not fail on a `pg_dump` error if gzip succeeds. Do not treat its success message as proof of an update or valid backup.
+
+Instead, record a clean checkout (`git status --short`), pause/finish scans, take the recovery set, stop the application services without removing volumes, switch to the intended existing release tag, and rebuild with `make start-all`. Review tag-specific configuration changes before startup. Shopkeeper applies migrations on boot. Keep local/uncommitted work safe; do not reset or overwrite it as part of an update.
+
+Native Debian rebuilds similarly require the selected release's npm dependencies and compatible toolchains; the updater runs `make build`, not `npm ci`. See [Debian deployment](debian.md).
 
 ## Update notice in the sidebar
 
@@ -42,16 +74,16 @@ Prefer no outbound release calls? Set `LIME_UPDATE_CHECK=false` and watch the Gi
 
 GitHub will email you when a new tag is published.
 
-## Rolling update safety
+## Restart Safety And Readiness
 
-The scripts share the same contract:
+The helpers invoke Shopkeeper before UI, but their readiness guarantees differ: Docker polls `/api/health` after migration/recreation; Fly relies on its configured deploy health checks; Debian waits three seconds and does not gate UI restart on a successful migration/readiness check. None of these is a complete browser/database/screenshot/export test.
 
-- Shopkeeper is updated first so migrations run before the UI talks to the new schema.
-- The UI is updated second.
-- Health checks gate the transition on Docker and Fly.
-
-Even with rolling restarts, a single-machine deployment will flicker for a few seconds while Shopkeeper restarts. For true zero downtime, run at least two machines per app (Fly scale, Docker Compose replicas, or two Debian hosts behind a load balancer).
+Expect an interruption for the single backend. Do not run two Shopkeepers against one database to attempt zero downtime: recovery assumes the other process is gone, and filesystem evidence/cancellation state are not distributed. UI replicas do not change this backend constraint, and PDF limits are per UI process.
 
 ## Migrations
 
 Migrations are forward-only and run automatically when Shopkeeper starts (`database.RunMigrations`). Always keep the backup produced by the update script until you have confirmed the new version works.
+
+The binary's `--migrate` mode applies migrations and exits without starting scans or HTTP. The migration directory is relative to its working directory. If migration fails, stop and preserve the logs/version state; do not force the schema version or blindly execute down files.
+
+Selecting a previous image/tag is not a database rollback. Confirm schema compatibility first; otherwise restore a matched pre-update database/screenshot/config set into an isolated environment, verify it with the matching application version, and plan a deliberate cutover. Post-backup scans and settings changes will not exist in that restored set.

@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 export const metadata = {
   title: "Roadmap",
   description:
-    "From LIME's current self-hosted scanner to the public v1.0 release and MCP hardening.",
+    "LIME's shipped 1.x features, validation priorities, and proposed future work.",
 };
 
 const milestones = [
@@ -16,32 +16,32 @@ const milestones = [
       "Sitemap and single-page scans with viewport-aware axe-core execution",
       "Focused screenshots, issue grouping, ACT guidance, and false-positive triage",
       "Partial-scan failed-page retry inside the same scan",
+      "Cooperative pause, same-scan resume, and startup recovery",
       "Full-scan and per-issue PDF, CSV, and LLM exports",
       "Read-only MCP endpoint with generated bearer-key auth",
+      "Reporting, performance, and integration settings",
       "Docker, Fly.io, GHCR images, release bundles, and update scripts",
     ],
   },
   {
-    tag: "In progress",
+    tag: "Next priorities",
     tone: "yellow",
-    title: "v1.0 — Optimization and public release",
+    title: "Validation and hardening",
     items: [
-      "Request timing and repeatable large-scan benchmarks",
-      "PostgreSQL read models and composite indexes for hot paths",
-      "Bounded report generation reusing the same read models",
-      "Settings split into Reporting, Performance, and Integrations",
-      "Contributor, security, and release documentation for public open source",
+      "Repeatable large-site benchmarks and report-memory measurements",
+      "Real deployment, update, backup, and restore validation per target",
+      "Dependency and security review before broader production claims",
+      "MCP client feedback and interoperability beyond the tested setup",
     ],
   },
   {
     tag: "Planned",
     tone: "outline",
-    title: "v2.0 — MCP hardening and integration polish",
+    title: "Future product work",
     items: [
-      "Configurable origin allowlisting for browser-based MCP clients",
-      "Better Streamable HTTP session compatibility",
-      "Clearer runtime diagnostics for disabled MCP, missing keys, rejected origins",
-      "Deferred: Redis dependency, OAuth 2.1 MCP auth, MCP write tools, multi-tenant auth",
+      "Link Checker backend validation and saved results — the current screen is a preview",
+      "MCP diagnostics, origin policies, or session support when client needs justify them",
+      "Deferred: OAuth, scoped keys, write tools, and multi-user authentication",
     ],
   },
 ] as const;
@@ -64,8 +64,9 @@ export default function RoadmapPage() {
             Roadmap
           </h1>
           <p className="mt-4 max-w-[600px] text-base leading-[1.6] text-black/65">
-            From the current stable self-hosted scanner to a public v1.0 release,
-            then MCP hardening and integration polish.
+            What is available in the current 1.x codebase, what still needs
+            validation, and what we may build next. Planned items are not
+            available features or release-date promises.
           </p>
 
           <div className="mt-11 flex flex-col gap-4">

@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { MaterialSymbol } from "@/components/material-symbol";
 import type { DocsSearchEntry } from "@/lib/docs-search";
@@ -62,6 +62,10 @@ function searchEntries(entries: DocsSearchEntry[], query: string): SearchResult[
   }
 
   return entries
+    .filter((entry) => {
+      const searchable = normalize([entry.title, entry.category, entry.excerpt, entry.content].join(" "));
+      return terms.every((term) => searchable.includes(term));
+    })
     .map((entry) => ({
       ...entry,
       score: scoreEntry(entry, terms),
@@ -95,6 +99,8 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const deferredQuery = useDeferredValue(query);
   const results = searchEntries(entries, deferredQuery);
 
@@ -102,6 +108,12 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
     function handleKeyDown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        if (dialogRef.current) {
+          inputRef.current?.focus();
+          return;
+        }
+        if (document.querySelector('[aria-modal="true"]')) return;
+        returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         setOpen(true);
       }
     }
@@ -116,7 +128,18 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
     }
 
     inputRef.current?.focus();
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      returnFocusRef.current?.focus();
+    };
   }, [open]);
+
+  function openSearch(event: ReactMouseEvent<HTMLButtonElement>) {
+    returnFocusRef.current = event.currentTarget;
+    setOpen(true);
+  }
 
   function closeSearch() {
     setOpen(false);
@@ -134,6 +157,21 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
       closeSearch();
       return;
     }
+    if (event.key === "Tab") {
+      const controls = dialogRef.current?.querySelectorAll<HTMLElement>("input, button, a[href]");
+      const first = controls?.[0];
+      const last = controls?.[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+      return;
+    }
+    // Links and buttons keep their native Enter/arrow behavior.
+    if (event.target !== inputRef.current) return;
 
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -160,6 +198,7 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
         onClick={closeSearch}
       >
         <div
+          ref={dialogRef}
           role="dialog"
           aria-modal="true"
           aria-label="Search docs"
@@ -171,6 +210,7 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
             <MaterialSymbol name="search" size={20} className="text-black/45" />
             <Input
               ref={inputRef}
+              aria-label="Search documentation"
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
@@ -254,7 +294,7 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
         variant="outline"
         size="sm"
         className="hidden min-w-48 justify-between border-border/80 bg-background/70 text-muted-foreground md:inline-flex lg:min-w-64"
-        onClick={() => setOpen(true)}
+        onClick={openSearch}
       >
         <span className="inline-flex items-center gap-2">
           <MaterialSymbol name="search" size={18} />
@@ -269,7 +309,7 @@ export function DocsSearch({ entries }: { entries: DocsSearchEntry[] }) {
         variant="outline"
         size="icon-sm"
         className="md:hidden"
-        onClick={() => setOpen(true)}
+        onClick={openSearch}
         aria-label="Search docs"
       >
         <MaterialSymbol name="search" size={18} />

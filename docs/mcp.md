@@ -4,6 +4,8 @@ LIME includes a read-only MCP endpoint for connecting third-party AI tools to an
 
 This page is both the operator guide and the client-connection guide. It documents the current endpoint, key handling, headers, tools, and client configuration.
 
+For a first connection, [enable MCP](#enable-mcp-in-lime), [choose a connection method](#choose-a-connection-method), then [verify a connection](#verify-a-connection). Client examples are setup instructions; a successful configuration save is not proof that the client has connected. Contributors can use [Verification And Handoff](verification.md) for the isolated integration suite and dated evidence.
+
 ## Status
 
 MCP is available now when it is enabled in **Settings > Integrations** and an MCP key has been generated.
@@ -24,6 +26,8 @@ Current limitations and planned hardening:
 - OAuth and scoped MCP keys are not implemented.
 - Origin validation currently accepts requests with no `Origin` header and localhost origins. Server-to-server clients and local bridges usually omit `Origin`; remote browser-origin clients are not currently supported.
 - MCP remains read-only. It does not create scans, retry scans, mutate settings, or change issue triage state.
+
+The MCP key authenticates MCP requests only. The dashboard, ordinary HTTP APIs, report downloads, and saved screenshot URLs have no built-in user authentication. Protect a remotely reachable instance with an appropriate external access layer; do not treat a generated MCP key as protection for those routes. Report metadata provides existing download paths but does not generate or download a report.
 
 ## Transport
 
@@ -219,6 +223,8 @@ For VS Code's `.vscode/mcp.json` format, use a `servers` object and a secret inp
 ```
 
 Start the server through VS Code's MCP controls, supply the generated key, and verify the six tools are listed. Configuration formats and remote-host rules are documented in the [VS Code MCP reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
+
+This secret-input example applies to VS Code's extension-host configuration. VS Code does not forward servers using interactive `${input:...}` values to Agent Host sessions. Agent Host also supports a separate portable `.mcp.json` format with `mcpServers`; follow the official reference for that workflow rather than assuming this example applies to every VS Code session.
 
 ### Local Bridge Client
 

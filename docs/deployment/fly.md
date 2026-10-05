@@ -2,10 +2,12 @@
 
 LIME runs on Fly.io as two apps:
 
-- **`lime-shopkeeper`** - Go backend + headless Chromium. Internal only.
+- **`lime-shopkeeper`** - Go backend + headless Chromium; keep it private to the UI/operator network.
 - **`lime-ui`** - NextJS dashboard. Public via Fly's shared proxy.
 
 They talk to each other over Fly's private `.internal` network. PostgreSQL is provided separately, either Fly's Managed Postgres (MPG) or an external provider such as Neon or Supabase.
+
+Run one Shopkeeper machine per database. Startup recovery assumes the previous backend is gone and can reset every active scan; there is no distributed worker lease. A second backend plus the same database is not a supported high-availability scan deployment.
 
 ## Prerequisites
 
@@ -54,13 +56,23 @@ The helper:
 1. creates the two apps if they do not already exist
 2. provisions a `lime_screenshots` volume (10 GB by default, override with `LIME_VOLUME_SIZE_GB`)
 3. stores or reuses `DATABASE_URL`, and sets `SHOPKEEPER_URL` plus `LIME_UPDATE_CHECK` as Fly secrets
-4. deploys both apps from published GHCR images with the `rolling` strategy
+4. deploys both apps from published GHCR images with the configured `rolling` strategy
+
+The helper does not configure the backend-to-UI report URL. After provisioning the app shells (or after the initial empty deployment, before verification), set it explicitly:
+
+```bash
+flyctl secrets set -a lime-shopkeeper REPORT_BASE_URL=http://lime-ui.internal:3000
+```
+
+Use your actual UI app name for custom deployments. Shopkeeper's default `http://localhost:3000` cannot reach a different Fly app; PDF downloads fail without the correct internal URL. Changing a secret on an existing deployment can restart machines, so pause/wait for active scans first. The UI's opposite-direction `SHOPKEEPER_URL` is set by the helper.
 
 Custom app names or regions:
 
 ```bash
 ./scripts/fly-deploy.sh v0.1.0 my-shop my-ui fra
 ```
+
+Persist custom regions/app settings in your deployment configuration. `fly-update.sh` accepts app names but no region argument and reads the checked-in TOML files, whose `primary_region` defaults to `iad`; do not assume a one-time `fra` argument permanently changes later updates.
 
 ## Database options
 
@@ -83,7 +95,9 @@ Set `DATABASE_URL` in the environment before running the deploy script. The help
 
 - The browser talks only to the UI origin (`https://lime-ui.fly.dev` or your custom domain).
 - The UI proxies `/api/...` to `http://lime-shopkeeper.internal:8080`.
-- Shopkeeper has no public port. Expose one temporarily for debugging with `flyctl proxy 8080 -a lime-shopkeeper`.
+- For a private operator connection, use `flyctl proxy 8080 -a lime-shopkeeper` rather than publishing the backend.
+
+Verify the actual deployed exposure with `flyctl ips list -a lime-shopkeeper` and the service configuration. The template includes a `services.ports` entry for port 8080; its "internal-only" comment is not proof that a deployment has no public address/service. Fly services can expose internet-facing ports when public IPs are allocated ([configuration reference](https://fly.io/docs/reference/configuration/)). Review/remove unwanted public exposure in your deployment copy. The ordinary API has no application login; do not rely on the MCP key to protect it.
 
 ## Custom domains
 
@@ -99,26 +113,32 @@ flyctl certs check -a lime-ui lime.example.com
 ./scripts/fly-update.sh v1.0.4
 ```
 
+The helper invokes Shopkeeper first, then UI, and `flyctl deploy` uses Fly's configured health checks. It does not back up PostgreSQL, screenshots, or secrets. Take a matching recovery set and read [Updating LIME](updates.md) before deploying.
+
 Rolling update behaviour:
 
 1. Shopkeeper deploys first; migrations run on boot.
 2. UI deploys second.
 
-Each app has `min_machines_running = 1` by default. Scale machines up to avoid any brief interruption during the restart:
-
-```bash
-flyctl scale count 2 -a lime-shopkeeper
-flyctl scale count 2 -a lime-ui
-```
-
-Fly's rolling deploy replaces machines one at a time when more than one machine is running.
+Each app has `min_machines_running = 1` in the primary region. Plan for backend interruption while the single Shopkeeper restarts; do not scale it to two machines to attempt zero downtime. UI replicas can reduce UI interruption, but each has its own settings cache and PDF generation limiter. Pause active scans and wait for `paused`, or let them finish, before a planned backend update so completed evidence is preserved.
 
 ## Screenshots storage
 
-Screenshots are stored on the volume mounted at `/app/screenshots` inside Shopkeeper. A single volume is pinned to one Fly machine. If you scale Shopkeeper to multiple machines, each machine will have its own screenshot disk. For v1 run a single Shopkeeper machine; a scale-out story will be documented in a later release.
+Screenshots are stored on the volume mounted at `/app/screenshots` inside Shopkeeper. Preserve the existing volume when updating and keep a backup separate from PostgreSQL. A fresh volume can leave database findings intact but screenshot URLs missing. Confirm machine/volume attachment after deployment with `flyctl status -a lime-shopkeeper` and `flyctl volumes list -a lime-shopkeeper`.
 
 ## Notes and caveats
 
-- Chromium needs memory. `shared-cpu-2x@2048MB` is the minimum that reliably completes multi-page scans. Bump to `performance-2x@4096MB` for large sites.
-- Autoscale is off on Shopkeeper to keep scans and the screenshot volume on a known machine. The UI auto-stops when idle.
+- The template allocates Shopkeeper 2 GB and the UI 512 MB. These are configuration defaults, not measured capacity guarantees; concurrent scans/PDFs and complex pages can require more. Check logs and memory before tuning resources.
+- Shopkeeper automatic stopping is disabled. UI auto-stop is configured, but `min_machines_running = 1` keeps one UI machine running in the primary region; only excess machines are eligible there.
 - GitHub release checks are enabled by default. Set `LIME_UPDATE_CHECK=false` on the UI app to opt out; explicit false values remain disabled. The sidebar card also respects each browser's visibility and release-dismissal preferences; see [Updating LIME](updates.md).
+
+## Verify The Deployment
+
+```bash
+flyctl status -a lime-shopkeeper
+flyctl status -a lime-ui
+flyctl checks list -a lime-shopkeeper
+flyctl logs -a lime-shopkeeper
+```
+
+Check UI-origin `/api/health`, load a database-backed dashboard page, finish a small scan, open its saved screenshot, and generate PDF/CSV/LLM reports. Validate `/mcp` from the UI origin if enabled; localhost remote-client limitations still apply. Do not paste secrets or signed database URLs into issue reports. This Fly path is source/config-reviewed guidance, not a claim that the local Docker verification deployed Fly resources. See [Operational Troubleshooting](troubleshooting.md).

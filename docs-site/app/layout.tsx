@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { GeistMono } from "geist/font/mono";
 import { GeistSans } from "geist/font/sans";
 import "./globals.css";
-import { siteConfig } from "@/lib/site";
+import { siteConfig, withBasePath } from "@/lib/site";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export const metadata: Metadata = {
@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   description: siteConfig.description,
   metadataBase: new URL(siteConfig.docsUrl),
   icons: {
-    icon: "/brand/lime.png",
+    icon: withBasePath("/brand/lime.png"),
   },
   openGraph: {
     title: siteConfig.title,

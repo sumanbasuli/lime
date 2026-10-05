@@ -5,14 +5,31 @@ This document describes how to set up the LIME accessibility scanner for local d
 ## Prerequisites
 
 - **Docker** and **Docker Compose** (for running PostgreSQL and full stack)
-- **Go 1.25+** (for Shopkeeper backend development)
+- **Go 1.25.1+** (the minimum in `shopkeeper/go.mod`, for backend development)
 - **Node.js 23+** and **npm** (for NextJS frontend development)
 
 Docker-only application startup does not require Go or Node on the host. Native development needs the language runtimes and installed packages: run `npm --prefix lime ci` for the dashboard and `npm --prefix docs-site ci` for the marketing/docs app. Browser verification also needs Playwright Chromium: `cd docs-site && npx playwright install chromium`.
 
+Native Shopkeeper also needs a working Chrome/Chromium installation and a writable screenshot directory. Docker supplies Chromium. For new native installs, choose a currently supported Node release satisfying the 23+ requirement, rather than installing the old Node 23 release line; see [Node's release status](https://nodejs.org/en/about/previous-releases). The repository Dockerfile and release workflow currently pin Node 23; changing that pin is a separate tested runtime upgrade.
+
+## First Startup
+
+From the repository root:
+
+```bash
+cp .env.example .env   # only for a new checkout; do not overwrite an existing .env
+make start-all
+docker compose ps
+curl -fsS http://localhost:3000/api/health
+```
+
+Open `http://localhost:3000/` for the dashboard. The health request goes through the UI to Shopkeeper; it does not verify PostgreSQL reads, Chromium, screenshots, or exports. Run one single-page scan and inspect its issues/screenshots before relying on a new deployment. [Verification And Handoff](verification.md) describes the complete isolated suite.
+
+The defaults are for local development, not public hosting: PostgreSQL, API, and UI ports are published on the host, and the database uses a development password. Review [Docker deployment](deployment/docker.md) before exposing the instance. Run one Shopkeeper per database; scan recovery is not coordinated across multiple backend processes.
+
 ## Environment Variables
 
-All environment configuration is managed through `.env` files:
+The Makefile loads and exports the root `.env`; Compose reads it for interpolation. A manually launched Go process does not load this file itself. Next loads its own `.env.local` when launched from `lime/`. Keep credentials out of Git and use the deployment's environment/secret mechanism outside local development.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -22,6 +39,7 @@ All environment configuration is managed through `.env` files:
 | `DATABASE_URL` | `postgresql://lime:lime_dev_password@localhost:5432/lime_db?sslmode=disable` | Application-level database connection string used by Shopkeeper and the UI in native local development |
 | `SHOPKEEPER_URL` | `http://localhost:8080` | Runtime proxy target used by the Next server in native local development |
 | `LIME_API_PORT` | `8080` | Public host port for the Go backend API |
+| `SHOPKEEPER_PORT` | `8080` | Port listened on by a native Shopkeeper process; Compose fixes its internal port to 8080 |
 | `LIME_UI_PORT` | `3000` | Public host port for the NextJS UI |
 | `LIME_DB_PORT` | `5432` | Public host port for the bundled PostgreSQL container |
 | `LIME_DOCS_PORT` | `3001` | Local marketing website and documentation port |
@@ -29,6 +47,10 @@ All environment configuration is managed through `.env` files:
 | `LIME_GITHUB_REPO` | `sumanbasuli/lime` | Repository used by the optional release check |
 | `LIME_VERSION` | packaged dashboard version | Nonblank runtime/release-build version overrides remain authoritative for release comparison; when unset or blank, the UI uses its package version |
 | `ACT_RULES_PATH` | auto-resolved | Optional explicit path to `data/act-rules.json` for Shopkeeper and Next |
+| `REPORT_BASE_URL` | `http://localhost:3000` | Shopkeeper-to-dashboard URL for Chromium PDF rendering; local Compose supplies `http://ui:3000` |
+| `SHOPKEEPER_SCREENSHOT_DIR` | `/app/screenshots` | Physical writable screenshot root; set a local directory for native development |
+
+Changing `LIME_DB_PORT` requires updating the native `DATABASE_URL` port as well. Changing native API/UI ports also requires `SHOPKEEPER_PORT`, `SHOPKEEPER_URL`, and `REPORT_BASE_URL` to agree. Host port mappings do not change container-internal ports.
 
 ### File Locations
 
@@ -48,8 +70,9 @@ make start-all      # Build and start production-style services
 make start-dev      # Build and start services with UI hot reload
 make migrate-all    # Apply DB migrations without stopping services
 make stop-all       # Stop all services
-make clean          # Stop and remove all data volumes
 ```
+
+`make stop-all` removes this Compose stack's containers/network but preserves its database and screenshot volumes; it does not stop unrelated Docker containers. `make clean` is destructive: it removes the stack's volumes and all of `dist/`, including backups stored there. Do not use it for routine shutdown or before copying backups off-host.
 
 ### Production Build Outputs
 
@@ -68,9 +91,11 @@ For faster iteration, run only the database in Docker and the apps natively:
 ```bash
 make start-db          # Start PostgreSQL in Docker
 make migrate-all       # Apply DB migrations in a one-off Shopkeeper container
-make dev-shopkeeper    # Go backend with Air hot reload (in a new terminal)
+SHOPKEEPER_SCREENSHOT_DIR="$PWD/.artifacts/native-screenshots" make dev-shopkeeper
 make dev-ui            # NextJS with hot reload (in a new terminal)
 ```
+
+Use separate terminals for the two development processes. The Air executable must be on `PATH` after `go install`; `go env GOPATH` identifies its usual `bin` directory. With the default ports, Shopkeeper renders PDFs through the native UI at `http://localhost:3000`. For a custom native UI port, explicitly set `REPORT_BASE_URL` on the backend.
 
 `make dev-ui` automatically points the Next proxy at `http://localhost:<LIME_API_PORT>`, so native UI development stays aligned with the local Go backend even though the Dockerized UI container talks to `http://shopkeeper:8080` internally.
 
@@ -114,7 +139,7 @@ Run `make verify-app` to exercise the product against deterministic local pages 
 
 ## Release Workflow
 
-- Pushes to `main` trigger Docker package publishing and GitHub Release creation.
+- Pushes to `main` that change `VERSION`, or a manual `workflow_dispatch`, trigger `.github/workflows/release-docker.yml`; ordinary code-only pushes do not publish a release.
 - The workflow reads `VERSION` and creates the `v<VERSION>` release tag, for example:
   - `VERSION`: `0.1.0`
   - Git tag / GitHub Release: `v0.1.0`
@@ -140,13 +165,15 @@ Users can run the published stack from the extracted bundle with:
 docker compose --env-file .env -f docker-compose.release.yml up -d
 ```
 
+First copy the bundle's `.env.example` to `.env` and replace its database URL. The bundle does not contain the repository update scripts. The release Compose file also currently omits `REPORT_BASE_URL`; configure an override pointing Shopkeeper at `http://ui:3000` before using PDF exports. See [Docker deployment](deployment/docker.md#published-image-deployment) for the override and update instructions.
+
 The release `.env` file is the source of truth for:
 - image registry
 - published image tag
 - `DATABASE_URL`
 - `SHOPKEEPER_URL`
 - public UI/API ports
-- optional direct Shopkeeper exposure on `LIME_API_PORT`
+- Shopkeeper exposure on `LIME_API_PORT` (published by default; remove or restrict that mapping for private backend access)
 
 The browser still talks to the UI origin only. The Next server proxies `/api/...` requests to `SHOPKEEPER_URL` at runtime, so release images stay generic and reverse-proxy friendly.
 

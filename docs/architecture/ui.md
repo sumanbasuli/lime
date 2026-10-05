@@ -1,6 +1,6 @@
 # User Interface (NextJS)
 
-The frontend for the accessibility scanner is a strictly decoupled **NextJS** application residing in the root `lime` folder.
+The dashboard is a separate NextJS application in the repository's `lime/` directory. It is not an API-only client: its server reads the shared PostgreSQL database and writes UI-owned settings/derived caches.
 
 ## Tech Stack
 
@@ -56,7 +56,7 @@ The frontend for the accessibility scanner is a strictly decoupled **NextJS** ap
 
 ### Live Progress
 
-The `ScanProgress` client component polls `GET /api/scans/{id}` every 3 seconds. When the scan status or progress changes, it calls `router.refresh()` to trigger a Server Component re-render with fresh DB data. Polling auto-stops when status is `completed`, `paused`, or `failed`. `ActiveScansRefresh` keeps the Overview and scan list current while visible scans are active.
+The `ScanProgress` client component polls `GET /api/scans/{id}` every 3 seconds and refreshes Server Component data after each successful poll (with an additional status-change refresh). Polling auto-stops when status is `completed`, `paused`, or `failed`. `ActiveScansRefresh` keeps the Overview and scan list current while visible scans are active.
 
 Important behavior:
 - Navigating away from the scan detail page stops UI polling because the client component unmounts.
@@ -177,6 +177,10 @@ False-positive state is stored on each scan's failed issue. When new matching sc
 ### Printable Reports
 
 The `/reports/scans/[id]/issues` document is rendered by Shopkeeper's Chromium PDF flow. Report content uses an article inside the application's single main landmark. Its UI must remain usable in the browser and clean in print; the global skip-to-content link is keyboard accessible on screen and hidden in print so it does not appear on the PDF's first page. Inspect a rendered PDF when changing shared page chrome or print styles, in addition to checking that the download is a valid PDF file.
+
+Two internal URLs are required for split deployments: UI `SHOPKEEPER_URL` points to the backend, while backend `REPORT_BASE_URL` points to the dashboard document renderer. Protecting the public UI with an external login gateway must not prevent Shopkeeper from loading its configured internal report URL. There is no application login/tenant boundary for ordinary dashboard/API routes; MCP's bearer key protects `/mcp`, not the whole dashboard. Operators must choose appropriate network/reverse-proxy access controls.
+
+The PDF concurrency limiter is per UI process and only applies through the Next PDF endpoint. CSV full mode streams occurrences in 5000-row batches; small CSV, PDF, and LLM use configured samples. `scan_report_data_cache` and its TTL setting currently have no runtime consumer. See [Performance And Caching](../performance.md) for the implemented bounds.
 
 ### Visual Conventions
 

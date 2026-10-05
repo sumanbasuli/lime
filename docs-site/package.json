@@ -8,11 +8,12 @@
     "prepare-assets": "node scripts/prepare-assets.mjs",
     "prebuild": "npm run prepare-assets",
     "build": "next build --webpack",
-    "postbuild": "node scripts/validate-static-export.mjs",
+    "postbuild": "node scripts/verify-content.mjs && node scripts/validate-static-export.mjs",
     "serve": "node scripts/serve-static.mjs",
     "lint": "eslint",
     "docs:screenshots": "node scripts/capture-screenshots.mjs",
     "verify:browser": "node scripts/verify-browser.mjs",
+    "test:docs-content": "node scripts/verify-content.mjs",
     "verify:mcp": "node scripts/verify-mcp.mjs",
     "validate": "npm run lint && npm run build"
   },

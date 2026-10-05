@@ -14,6 +14,8 @@ const port =
   Number(portArgIndex >= 0 ? args[portArgIndex + 1] : process.env.PORT) || 3001;
 const host =
   (hostArgIndex >= 0 ? args[hostArgIndex + 1] : process.env.HOST) || "127.0.0.1";
+const configuredBasePath = (process.env.LIME_DOCS_BASE_PATH || "").trim().replace(/\/$/, "");
+const basePath = configuredBasePath === "/" ? "" : configuredBasePath;
 
 const contentTypes = new Map([
   [".css", "text/css; charset=utf-8"],
@@ -32,7 +34,12 @@ const contentTypes = new Map([
 ]);
 
 function resolveStaticPath(urlPath) {
-  const decodedPath = decodeURIComponent(urlPath.split("?")[0] || "/");
+  let decodedPath = decodeURIComponent(urlPath.split("?")[0] || "/");
+  if (basePath) {
+    if (decodedPath === basePath) decodedPath = "/";
+    else if (decodedPath.startsWith(basePath + "/")) decodedPath = decodedPath.slice(basePath.length);
+    else return null;
+  }
   const normalizedPath = normalize(decodedPath).replace(/^(\.\.[/\\])+/, "");
   const cleanPath = normalizedPath === "/" ? "/index.html" : normalizedPath;
   const directPath = resolve(join(outDir, cleanPath));

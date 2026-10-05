@@ -59,15 +59,15 @@ export const productScreenshots: ProductScreenshot[] = [
   {
     id: "settings",
     title: "Settings",
-    caption: "Server-wide report limits, feature toggles, and performance knobs.",
+    caption: "Instance-wide report and integration controls, plus a browser-only update notice preference.",
     alt: "LIME settings page with reporting and performance controls.",
     src: "/product-screenshots/settings.png",
   },
   {
     id: "link-checker",
     title: "Link Checker Preview",
-    caption: "The redesigned link-check workflow, ready for backend validation in a later release.",
-    alt: "LIME link checker preview with URL input, run action, and planned result states.",
+    caption: "Design preview only: link validation and saved results are not implemented.",
+    alt: "LIME link checker design preview, not a working link scan.",
     src: "/product-screenshots/link-checker.png",
   },
 ];

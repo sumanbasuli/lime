@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { navigationGroups } from "@/content/navigation";
 import { MaterialSymbol } from "@/components/material-symbol";
@@ -17,10 +17,43 @@ const primaryLinks = [
 
 export function MobileNav() {
   const [open, setOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+      } else if (event.key === "Tab") {
+        const controls = panelRef.current?.querySelectorAll<HTMLElement>("a[href], button");
+        const first = controls?.[0];
+        const last = controls?.[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previousFocus?.focus();
+    };
+  }, [open]);
   const menu =
     open && typeof document !== "undefined"
       ? createPortal(
           <div
+            ref={panelRef}
             className="fixed inset-0 z-[120] bg-[#fdfcf8] text-black"
             role="dialog"
             aria-modal="true"
@@ -36,6 +69,7 @@ export function MobileNav() {
                   <Image src={withBasePath("/brand/lime.svg")} alt="LIME" width={108} height={48} className="h-9 w-auto" />
                 </a>
                 <button
+                  ref={closeRef}
                   type="button"
                   className="grid size-10 place-items-center rounded-full border border-black/15 bg-white"
                   onClick={() => setOpen(false)}

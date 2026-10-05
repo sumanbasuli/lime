@@ -5,6 +5,8 @@ section matching `VERSION` to populate GitHub Release notes.
 
 ## [Unreleased]
 
+- Refined all user, operator, and contributor documentation against current behavior; added troubleshooting/FAQ and backup/restore guides, audience-specific reading paths, and clearer operational and MCP limitations.
+- Improved docs Markdown rendering, mobile section navigation, search keyboard behavior, and project-path hydration; added complete content/example, internal-anchor, and desktop/mobile route verification.
 - Enabled the sidebar release check by default, with `LIME_UPDATE_CHECK=false` as the server opt-out; preserved browser-off/release-dismissal preferences and explicitly disabled checks in the isolated docs/verification stack.
 - Corrected release comparison to use the packaged dashboard version when no nonblank build/runtime override is supplied, preventing default development placeholders from announcing false updates.
 - Hardened the shared dashboard proxy used by MCP with body/fetch deadlines, cancellation and controlled error handling, and corrected decoded-compression headers; added actual-source transport regressions without changing authentication or scoring rules.

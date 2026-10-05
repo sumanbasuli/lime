@@ -1,6 +1,7 @@
 import { MaterialSymbol } from "@/components/material-symbol";
 import { apiGroups, type ApiEndpoint } from "@/content/api";
 import { SiteShell } from "@/components/site-shell";
+import { withBasePath } from "@/lib/site";
 import {
   Card,
   CardContent,
@@ -94,11 +95,30 @@ export default function ApiReferencePage() {
           occurrence. MCP requests use <code>LIME_MCP_KEY</code>, returned when
           generating a key in Settings.
         </p>
+        <nav className="mt-5 flex flex-wrap gap-2" aria-label="API methods">
+          {endpointsByMethod.map((group) => (
+            <a key={group.method} href={`#${group.method.toLowerCase()}`} className="rounded-full border border-black/15 bg-white px-4 py-2 font-mono text-xs font-semibold no-underline hover:bg-[#FFED00]/30">
+              {group.method} · {group.endpoints.length}
+            </a>
+          ))}
+        </nav>
       </section>
+
+      <aside className="mb-10 max-w-4xl rounded-xl border border-black/15 bg-[#FFED00]/15 p-5 text-sm leading-7">
+        <p>
+          <strong>Use a test instance for write examples.</strong> REST endpoints
+          do not provide built-in user authentication; protect the deployment
+          with your own access controls. Creating scans contacts target websites.
+          Deletion removes saved evidence; a rescan creates another scan while
+          preserving the original. MCP bearer authentication
+          protects only MCP, not the rest of the API.
+        </p>
+        <a href={withBasePath("/docs/reference/mcp/")} className="mt-2 inline-block font-semibold underline">MCP setup, initialization, and transport reference</a>
+      </aside>
 
       <div className="space-y-14">
         {endpointsByMethod.map((group) => (
-          <section key={group.method}>
+          <section key={group.method} id={group.method.toLowerCase()}>
             <div className="mb-5">
               <div className="flex flex-wrap items-center gap-3">
                 <span

@@ -2,6 +2,15 @@
 
 Use this guide when reviewing the redesign, reproducing a regression, or preparing to add a feature. Existing behavior should have a reproducible passing baseline before a new feature is added. Record what was actually exercised; a successful build alone does not prove scan lifecycle, screenshots, settings, or exports work together.
 
+## Start Here
+
+- Running LIME: [Run The Project](#run-the-project), then [Setup](setup.md).
+- Changing behavior: [Ownership Map](#ownership-map), [Verification Commands](#verification-commands), and [Workflow For Future Changes](#workflow-for-future-changes).
+- Reproducing a regression: [Isolated Product Verification](#isolated-product-verification) and [Debugging A Failed Check](#debugging-a-failed-check).
+- Checking a coverage claim: [Existing Feature Matrix](#existing-feature-matrix) and the [dated verification history](#dated-verification-history).
+
+The latest recorded full product run passed 18 workflows at `2026-10-05T08:52:44.921Z`. The final installed-version fallback change was checked afterward with eight actual-source release-notice tests and corrected production HTTP/browser reads, not a later full-suite run. One earlier React hydration warning remains unreproduced; no cause or hydration fix is claimed. The history below retains those distinctions and the limits of each check.
+
 ## Run The Project
 
 For a new checkout, copy `.env.example` to `.env`, then run:
@@ -42,13 +51,13 @@ Shopkeeper owns writes to scan/audit results. Next owns application settings and
 
 ```bash
 npm --prefix lime run lint
-cd lime && npx tsc --noEmit
+(cd lime && npx tsc --noEmit)
 ```
 
 From the repository root:
 
 ```bash
-cd shopkeeper && go test ./...
+(cd shopkeeper && go test ./...)
 ```
 
 Run the integrated checks from the repository root:
@@ -84,7 +93,7 @@ npm --prefix docs-site run verify:mcp
 
 It never generates keys or changes settings. Optional `LIME_MCP_SCAN_ID` selects a saved scan; otherwise the latest returned scan is used. The `checked` output identifies the tools actually called: an empty instance only supplies list/settings data, and an instance without an issue group cannot exercise issue detail. It defaults to pinned official SDK v1 `1.32.0`; set `LIME_MCP_SDK=v2` for the pinned `@modelcontextprotocol/client@2.3.0` in legacy `2025-11-25` mode. That does not upgrade LIME to modern 2026 discovery/capabilities. The sanitized transport trace excludes authorization headers and response bodies. See [MCP Integration](mcp.md) before connecting an AI client. This smoke check is not proof that an installed desktop/web client or a remote deployment has connected.
 
-The browser checks use Playwright from `docs-site`. Install its dependencies with `npm --prefix docs-site ci` and its browser with `cd docs-site && npx playwright install chromium` if the local browser cache is missing. Docker and Compose must be available for `make verify-app`. A first build may need network access to pull base images and install locked dependencies.
+The browser checks use Playwright from `docs-site`. Install its dependencies with `npm --prefix docs-site ci` and its browser with `(cd docs-site && npx playwright install chromium)` if the local browser cache is missing. Bash must be on `PATH` for build-time documentation shell-example checks. Docker with the Compose plugin and curl must be available for `make verify-app`. A first build may need network access to pull base images and install locked dependencies. The real stdio-bridge check invokes pinned `mcp-remote@0.14.3` through npx and may also need package-download/cache access; it uses an ephemeral key and private temporary state.
 
 ## Isolated Product Verification
 
@@ -109,7 +118,7 @@ LIME_VERIFY_UI_PORT=14001 LIME_VERIFY_FIXTURE_PORT=19091 make verify-app
 
 When overriding the fixture origin as well as its port, keep both values aligned.
 
-The runner cleans up its own Compose project and volumes on completion or failure. Verification screenshots, exports, and result evidence live under the ignored `.artifacts/verification/` directory. `results.json` records completed workflows and browser errors; a failed browser check also saves `failure.png`, and the shell runner captures `docker.log` after a stack failure. Keep the normal stack running for local review; do not use `make clean` to reset verification data.
+The runner cleans up its own Compose project and volumes on completion or failure. Copy evidence you need to retain before another run; generated artifact paths are reused and are not an immutable archive. Verification screenshots, exports, and result evidence live under the ignored `.artifacts/verification/` directory. `results.json` records completed workflows and browser errors; a failed browser check also saves `failure.png`, and the shell runner captures `docker.log` after a stack failure. Keep the normal stack running for local review; do not use `make clean` to reset verification data.
 
 ## Existing Feature Matrix
 
@@ -133,14 +142,46 @@ The required evidence below describes the product baseline. Runtime results must
 | Reports | Scan-level and issue-scoped PDF, small/full CSV, and LLM exports contain the expected scan/rule data |
 | Settings | Reporting/performance/integration values persist after reload; disabled formats reject exports; values can be restored |
 | Optional release notice | Default-enabled server branch and explicit opt-out; disabled endpoint returns 200 without outbound calls; mocked newer release renders a card; browser visibility persists immediately; exact-tag dismissal survives reload |
-| MCP | Real SDK initialization/notification/protocol headers and all six tools; canonical cold/triaged scores, direct stale-cache behavior, group/occurrence pagination, screenshot/report paths and format gates, schema/errors, read-only capability, UI copy/settings/key rotation/disable |
+| MCP | Pinned official SDK v1/v2 and real stdio-bridge initialization/tool reads; canonical cold/triaged scores, direct stale-cache behavior, group/occurrence pagination, screenshot/report paths and format gates, schema/errors, read-only capability, UI copy/settings/key rotation/disable |
 | Responsive redesign | Desktop and mobile routes are usable; navigation, forms, dialogs and controls have no unintended horizontal page overflow |
 | Marketing and documentation | Static routes/assets/internal links pass; search, mobile navigation, gallery and roadmap render and interact correctly |
 | Link checker preview | Navigation and target-entry design render; run action remains disabled; no check/result storage is claimed |
 
 A small deterministic suite cannot establish behavior for every public site, very large report, browser/OS combination, or deployment target. Add a targeted reproduction when a regression depends on those conditions. See [Performance](performance.md) for large-scan concerns and deployment guides for release-specific checks.
 
-## Completed Redesign Verification Record
+## Workflow For Future Changes
+
+1. Locate the owning service and reproduce the current behavior before editing.
+2. Make one behavior or design change at a time; preserve the screenshot highlight and preview/lightbox behavior.
+3. Run focused lint/type/unit checks for the changed area.
+4. Run `make verify-app` for product/API/lifecycle/report/settings changes, or `make docs-verify` for website/docs changes. Use both for a change that spans them.
+5. Update user instructions in `docs-site/content/product-docs.ts`, reference docs under `docs/`, and the API manifest if endpoints change.
+6. Run `make docs` when product screenshots need refreshing. It uses separate public demo scans; it is a documentation pipeline, not the product feature regression suite.
+7. Record evidence and limitations here or in the change handoff. Update `CHANGELOG.md` for release-facing behavior.
+
+The Link checker currently remains a design preview. Complete and verify existing features before adding its backend workflow. There is no profile/account management behind the sidebar identity display.
+
+## Debugging A Failed Check
+
+Use `docker compose ps`, `make logs-shopkeeper`, and `make logs-ui` for the normal stack. For a verifier failure, inspect the reported `.artifacts/verification/` files and the failed step before rerunning. A failed report may depend on the UI-to-Shopkeeper proxy and Shopkeeper-to-UI `REPORT_BASE_URL`; a screenshot failure may depend on stored files as well as database paths. A scan status issue should be traced from the browser request to handler/scanner logs and persisted URL states.
+
+Use the rendered heading and expected controls to establish dashboard readiness. Background progress polling can prevent a `networkidle` wait from completing even when the page is usable; correlate a timeout with rendered content and server logs before treating it as a product failure.
+
+If a scan is completed but its progress count is low, compare `scanned_urls` with the scan's terminal URL rows. Audit workers run concurrently; progress callbacks must remain serialized and monotonic so an older update cannot overwrite a newer count. See [Progress Ordering](architecture/shopkeeper.md#progress-ordering).
+
+If pause/resume leaves unexpected failed URLs, compare browser errors with the parent run's cancellation state. Interrupted Chromium startup errors can omit the cancellation cause; those operations must remain pending instead of being stored as genuine failures. A child page timeout on a still-active run remains a failure. See [Cancellation And Resume](architecture/juicer.md#cancellation-and-resume).
+
+If issue refresh or pagination returns a duplicate-key error after triage, inspect `scan_issue_summary_cache` replacement and the parent scan's source timestamp. Concurrent replacements must hold the scan-row lock through their delete/insert transaction. See [Concurrent Cache Replacement](performance.md#concurrent-cache-replacement).
+
+If `/_lime/update-check` returns 404, check the route's escaped `%5Flime` source directory. Next treats `_lime` as a private folder and will not register it. Server-disabled release checks should return HTTP 200 with `enabled: false`; do not suppress this 404 in browser verification. Notice display additionally depends on the browser preference and dismissed release tag described in [Updating LIME](deployment/updates.md).
+
+If a port is occupied, identify its owner and change the configured port instead of stopping unrelated containers. Keep private scans out of documentation screenshots. See [Docs Site](docs-site.md) for the isolated screenshot refresh policy.
+
+## Dated Verification History
+
+These are completed checks of the source/configuration present at their stated times, not a guarantee for later changes. Ignored artifacts can be replaced by later runs or absent from a fresh checkout. Use the commands above to establish your own baseline; retain commands, timestamps, evidence, and limits when adding a new record.
+
+### Completed Redesign Verification Record
 
 Before the MCP extension, the redesign's October 5, 2026 `make verify-app` run completed successfully with all 16 workflows passed, process exit 0, and no browser errors. Its result recorded completion at `2026-10-05T05:09:20.811Z` (10:39:20 IST), every evidence entry passed, and `browserErrors: []`. Subsequent runs replace `.artifacts/verification/results.json`; the extension record below describes the newer check separately.
 
@@ -170,7 +211,7 @@ Completed documentation checks:
 
 This record establishes the completed local deterministic baseline and records the earlier unreproduced warning. It does not claim every public website, every PDF page, large-site performance, every browser/OS, or each production deployment target was checked. Live GitHub calls and deployment/update scripts were not exercised by the deterministic suite; release-notice browser checks use mocked release metadata. When recording future passes, retain the commands, artifacts, tested viewports, corrected failures, and coverage limits; do not substitute screenshot generation or source inspection for lifecycle/report/settings assertions.
 
-## MCP Integration Extension
+### MCP Integration Extension
 
 The expanded `make verify-app` run passed all 18 workflows with process exit 0 and no browser errors on October 5, 2026, completing at `2026-10-05T06:43:34.650Z` (12:13:34.650 IST) with 18 passed evidence entries and `browserErrors: []`. This is a real SDK/browser/data integration result, separate from the redesign's earlier raw JSON-RPC checks. The disposable Compose project was empty after cleanup. The result artifacts have since been replaced by the refinement run recorded below; this timestamp is retained as historical evidence.
 
@@ -192,7 +233,7 @@ Full docs ESLint and TypeScript checks passed for the MCP changes. `make docs-ve
 
 Neither pinned official MCP client has a finding in the recorded npm audit, but that is not a security-clearance claim for the project. `.artifacts/verification/dependency-audit.json` covers the 711-dependency `docs-site` tree after the v1/v2 additions and records 25 vulnerable dependency entries (3 low, 4 moderate, 17 high, 1 critical), including direct Next, eslint-config-next and shadcn dependencies. These are aggregate package counts, not a count of individual advisories. Broad dependency upgrades are outside this MCP change. Review the critical findings and dependency backlog before a public production deployment; no live deployment or complete production security audit was performed.
 
-## Further MCP Refinement Checks
+### Further MCP Refinement Checks
 
 Additional focused checks found stalled incoming request bodies could outlive the proxy deadline, body-read errors were uncontrolled, malformed backend URLs were not handled, and network errors could expose upstream configuration. The shared proxy now applies cancellation/deadlines while reading the body and fetching, returns controlled errors, and removes stale compression/length headers after Node fetch decodes a response. MCP retains its 1 MiB body limit and 30-second proxy deadline; separate score computation and report generation are not promised within that deadline.
 
@@ -210,7 +251,7 @@ The normal stack was then rebuilt from the refined source without removing its v
 
 Full docs ESLint and TypeScript checks, `git diff --check`, and `make docs-check-source` passed. The refinement's `make docs-verify` production export validated 41 HTML pages and internal assets/links, then checked 12 representative desktop and seven mobile routes, search, navigation, and screenshot-gallery interactions without browser errors or horizontal page overflow. Literal client examples also retained the environment placeholders, pinned bridge version, `.mts` filename, and transport-regression command. These documentation checks do not configure an AI client or run scans.
 
-## Release Notice Default Change
+### Release Notice Default Change
 
 The requested update-card change enables server release checks when `LIME_UPDATE_CHECK` is unset and changes normal/source and release Compose defaults to true. Operators can still set `LIME_UPDATE_CHECK=false`; existing false values, browser-off preferences, and exact-release dismissals remain respected. The browser preference already defaulted on. The isolated docs/verification Compose stack explicitly remains false, so deterministic checks do not depend on live GitHub calls. This changes notice defaults only, not automatic update installation or PostgreSQL settings.
 
@@ -232,30 +273,21 @@ After the default/fallback documentation updates, full docs ESLint/TypeScript, `
 
 The earlier records above describe their respective completed configurations, including disabled endpoint/normal-instance checks before this default changed. Their timestamps remain historical; the current result artifacts now belong to the 08:52 release-default run.
 
-## Workflow For Future Changes
+### Documentation Refinement
 
-1. Locate the owning service and reproduce the current behavior before editing.
-2. Make one behavior or design change at a time; preserve the screenshot highlight and preview/lightbox behavior.
-3. Run focused lint/type/unit checks for the changed area.
-4. Run `make verify-app` for product/API/lifecycle/report/settings changes, or `make docs-verify` for website/docs changes. Use both for a change that spans them.
-5. Update user instructions in `docs-site/content/product-docs.ts`, reference docs under `docs/`, and the API manifest if endpoints change.
-6. Run `make docs` when product screenshots need refreshing. It uses separate public demo scans; it is a documentation pipeline, not the product feature regression suite.
-7. Record evidence and limitations here or in the change handoff. Update `CHANGELOG.md` for release-facing behavior.
+The October 5, 2026 review covered all 17 curated product/contributor guides, 19 repository reference guides, README, CONTRIBUTING, the API manifest, and public onboarding/roadmap copy. User instructions were checked against the current dashboard controls and API/source behavior. The documentation now separates user, operator, and developer reading paths and adds user troubleshooting/FAQ, operational troubleshooting, and backup/restore guidance. It distinguishes score from coverage, saved evidence from live page state, read-only MCP from ordinary unauthenticated HTTP routes, and the Link Checker design preview from working scan features.
 
-The Link checker currently remains a design preview. Complete and verify existing features before adding its backend workflow. There is no profile/account management behind the sidebar identity display.
+Deployment and architecture guidance was source-reviewed, including Compose resolution, script syntax, migration/storage paths, scan recovery, worker concurrency, report limits, and reserved cache settings. Backup, restore, install, update, and provider deployment procedures were not executed against user data or a live provider. Follow each guide's prerequisites and rehearse recovery separately; a documentation check is not production recovery proof.
 
-## Debugging A Failed Check
+Completed documentation evidence:
 
-Use `docker compose ps`, `make logs-shopkeeper`, and `make logs-ui` for the normal stack. For a verifier failure, inspect the reported `.artifacts/verification/` files and the failed step before rerunning. A failed report may depend on the UI-to-Shopkeeper proxy and Shopkeeper-to-UI `REPORT_BASE_URL`; a screenshot failure may depend on stored files as well as database paths. A scan status issue should be traced from the browser request to handler/scanner logs and persisted URL states.
+- Full docs ESLint, TypeScript/build checks, `make docs-check-source`, and `git diff --check` passed.
+- Content validation checked 36 guides and 78 JSON/shell examples, complete navigation registration, audience-specific reading order, source-reference paths, and actual Markdown helper regressions. Shell examples were syntax-checked, not executed.
+- Static export validation checked 44 HTML pages, internal links and section anchors, headings, assets, and all nine committed product screenshots.
+- The root-path browser pass completed at `2026-10-05T10:04:10.295Z`; the subsequent `LIME_DOCS_BASE_PATH=/lime make docs-verify` pass completed at `2026-10-05T10:10:43.342Z`. Each checked all 41 documentation/website routes at 1440×1000 and 390×844: 82 route/viewport checks, no browser errors, and no unintended horizontal page overflow.
+- Reader checks exercised search and native keyboard activation/focus return, all nine user guides in sequence, mobile navigation and section links, visible headings below the sticky header, screenshot gallery open/close, and literal MCP environment/configuration examples. The project-path pass additionally checked the current-guide sidebar state, full breadcrumb title, and prefixed mobile link.
+- The project-path check exposed a reproducible hydration mismatch: browser helpers lacked the public build-time prefix, while breadcrumb/sidebar matching incorrectly added a prefix to Next's already-unprefixed pathname. The corrected build shares the public prefix and compares route identities without it; no hydration errors were suppressed. This is separate from the earlier unreproduced dashboard warning.
+- Visual review sampled the docs home, mobile first-scan guide, backup guide/table, and MCP guide. Evidence files are `.artifacts/verification/docs-{home-desktop,first-scan-mobile,backup-desktop,mcp-desktop}.png`, with readable desktop viewport samples in `docs-backup-viewport.png` and `docs-mcp-viewport.png`. Browser results are in `docs-refinement-results.json`; later runs replace these ignored artifacts.
+- Read-only checks confirmed the normal instance still had 2 scans, 6 issues, and 44 pages, with exactly unchanged reporting/performance/integration settings and MCP still disabled/unconfigured.
 
-Use the rendered heading and expected controls to establish dashboard readiness. Background progress polling can prevent a `networkidle` wait from completing even when the page is usable; correlate a timeout with rendered content and server logs before treating it as a product failure.
-
-If a scan is completed but its progress count is low, compare `scanned_urls` with the scan's terminal URL rows. Audit workers run concurrently; progress callbacks must remain serialized and monotonic so an older update cannot overwrite a newer count. See [Progress Ordering](architecture/shopkeeper.md#progress-ordering).
-
-If pause/resume leaves unexpected failed URLs, compare browser errors with the parent run's cancellation state. Interrupted Chromium startup errors can omit the cancellation cause; those operations must remain pending instead of being stored as genuine failures. A child page timeout on a still-active run remains a failure. See [Cancellation And Resume](architecture/juicer.md#cancellation-and-resume).
-
-If issue refresh or pagination returns a duplicate-key error after triage, inspect `scan_issue_summary_cache` replacement and the parent scan's source timestamp. Concurrent replacements must hold the scan-row lock through their delete/insert transaction. See [Concurrent Cache Replacement](performance.md#concurrent-cache-replacement).
-
-If `/_lime/update-check` returns 404, check the route's escaped `%5Flime` source directory. Next treats `_lime` as a private folder and will not register it. Server-disabled release checks should return HTTP 200 with `enabled: false`; do not suppress this 404 in browser verification. Notice display additionally depends on the browser preference and dismissed release tag described in [Updating LIME](deployment/updates.md).
-
-If a port is occupied, identify its owner and change the configured port instead of stopping unrelated containers. Keep private scans out of documentation screenshots. See [Docs Site](docs-site.md) for the isolated screenshot refresh policy.
+This refinement changes documentation, docs-site presentation/navigation, and documentation verifiers only. It does not change backend/dashboard behavior, refresh product screenshots, configure an AI client, publish the website, or rerun the full product lifecycle suite. The earlier product verification records remain the applicable baseline for application behavior.

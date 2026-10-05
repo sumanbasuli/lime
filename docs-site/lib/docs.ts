@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { productDocs } from "@/content/product-docs";
+import { documentationCategory, documentationSequence, navigationGroups } from "@/content/navigation";
 import { renderMarkdown } from "@/lib/markdown";
 
 const repoRoot = path.resolve(process.cwd(), "..");
@@ -88,14 +89,32 @@ export function getAllDocPages(): DocPage[] {
         sourcePath,
         html: renderMarkdown(markdown, slug),
         excerpt: excerptFromMarkdown(markdown),
-        category: "Reference",
+        category: documentationCategory(hrefForSlug(slug)),
       };
     })
     : [];
 
-  return [...curatedPages, ...repoPages].sort((left, right) =>
-    left.href.localeCompare(right.href)
-  );
+  const order = [...new Set(navigationGroups.flatMap((group) => [group.href, ...group.items.map((item) => item.href)]))];
+  return [...curatedPages, ...repoPages].sort((left, right) => {
+    const leftIndex = order.indexOf(left.href);
+    const rightIndex = order.indexOf(right.href);
+    return (leftIndex < 0 ? order.length : leftIndex) - (rightIndex < 0 ? order.length : rightIndex)
+      || left.href.localeCompare(right.href);
+  });
+}
+
+export function getAdjacentDocPages(page: DocPage) {
+  const sequence = documentationSequence(page.href);
+  const pages = getAllDocPages();
+  const audiencePages = sequence.flatMap((href) => {
+    const candidate = pages.find((item) => item.href === href);
+    return candidate ? [candidate] : [];
+  });
+  const index = audiencePages.findIndex((candidate) => candidate.href === page.href);
+  return {
+    previousPage: index > 0 ? audiencePages[index - 1] : null,
+    nextPage: index >= 0 ? audiencePages[index + 1] ?? null : null,
+  };
 }
 
 export function getDocPage(slug: string[]): DocPage | null {
