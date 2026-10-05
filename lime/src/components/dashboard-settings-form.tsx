@@ -108,7 +108,7 @@ const integrationToggles: ToggleFieldConfig[] = [
   {
     key: "integrations.mcpEnabled",
     label: "Enable MCP",
-    description: "Allow read-only third-party MCP clients to connect.",
+    description: "Allow read-only third-party MCP clients to connect. Save settings to apply this switch.",
   },
 ];
 
@@ -210,10 +210,33 @@ export function DashboardSettingsForm({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [updateNoticeEnabled, setUpdateNoticeEnabled] = useState(true);
+  const [mcpEndpoint, setMcpEndpoint] = useState("");
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const isBusy = saving || generatingKey;
+  const mcpConnectionDetails = [
+    "Transport: Streamable HTTP",
+    `URL: ${mcpEndpoint || "https://your-lime-host/mcp"}`,
+    "Authorization: Bearer <YOUR_MCP_KEY>",
+  ].join("\n");
+  const mcpConfig = [
+    "[mcp_servers.lime]",
+    `url = ${JSON.stringify(mcpEndpoint || "https://your-lime-host/mcp")}`,
+    'bearer_token_env_var = "LIME_MCP_KEY"',
+  ].join("\n");
 
   useEffect(() => {
     setUpdateNoticeEnabled(readUpdateNoticeEnabled());
+    setMcpEndpoint(new URL("/mcp", window.location.origin).href);
   }, []);
+
+  const copyMcpValue = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyFeedback(`${label} copied.`);
+    } catch {
+      setCopyFeedback("Copy failed. Select the displayed text and copy it manually.");
+    }
+  };
 
   const handleNumberChange = (
     key: ReportSettingsNumericKey,
@@ -240,10 +263,17 @@ export function DashboardSettingsForm({
   };
 
   const handleReset = () => {
-    setSettings(DEFAULT_SYSTEM_SETTINGS);
+    setSettings((current) => ({
+      ...DEFAULT_SYSTEM_SETTINGS,
+      integrations: {
+        ...current.integrations,
+        mcpEnabled: DEFAULT_SYSTEM_SETTINGS.integrations.mcpEnabled,
+      },
+    }));
     setUpdateNoticeEnabled(true);
     writeUpdateNoticeEnabled(true);
     setGeneratedMcpKey(null);
+    setCopyFeedback(null);
     setError(null);
     setSuccess(null);
   };
@@ -287,10 +317,21 @@ export function DashboardSettingsForm({
   };
 
   const handleGenerateMcpKey = async () => {
+    if (isBusy) return;
+    if (
+      settings.integrations.mcpConfigured &&
+      !window.confirm(
+        "Rotate the MCP key? The current key will stop working immediately. Update every connected client with the new key."
+      )
+    ) {
+      return;
+    }
+
     setGeneratingKey(true);
     setError(null);
     setSuccess(null);
     setGeneratedMcpKey(null);
+    setCopyFeedback(null);
 
     try {
       const response = await fetch("/api/settings", {
@@ -315,7 +356,13 @@ export function DashboardSettingsForm({
         settings: SystemSettings;
         mcpKey: string;
       };
-      setSettings(payload.settings);
+      setSettings((current) => ({
+        ...current,
+        integrations: {
+          ...current.integrations,
+          ...payload.settings.integrations,
+        },
+      }));
       setGeneratedMcpKey(payload.mcpKey);
       setSuccess("MCP key generated. Store it now; it will not be shown again.");
     } catch (saveError) {
@@ -354,7 +401,7 @@ export function DashboardSettingsForm({
                 min={1}
                 step={1}
                 value={getNumericValue(settings, field.key)}
-                disabled={saving}
+                disabled={isBusy}
                 onChange={(event) =>
                   handleNumberChange(field.key, event.target.value)
                 }
@@ -373,7 +420,7 @@ export function DashboardSettingsForm({
               <input
                 type="checkbox"
                 checked={getBooleanValue(settings, field.key)}
-                disabled={saving}
+                disabled={isBusy}
                 onChange={(event) =>
                   handleToggleChange(field.key, event.target.checked)
                 }
@@ -394,7 +441,7 @@ export function DashboardSettingsForm({
             <input
               type="checkbox"
               checked={updateNoticeEnabled}
-              disabled={saving}
+              disabled={isBusy}
               onChange={(event) => {
                 setUpdateNoticeEnabled(event.target.checked);
                 writeUpdateNoticeEnabled(event.target.checked);
@@ -439,7 +486,7 @@ export function DashboardSettingsForm({
                 min={1}
                 step={1}
                 value={getNumericValue(settings, field.key)}
-                disabled={saving}
+                disabled={isBusy}
                 onChange={(event) =>
                   handleNumberChange(field.key, event.target.value)
                 }
@@ -464,7 +511,7 @@ export function DashboardSettingsForm({
               <input
                 type="checkbox"
                 checked={getBooleanValue(settings, field.key)}
-                disabled={saving || generatingKey}
+                disabled={isBusy}
                 onChange={(event) =>
                   handleToggleChange(field.key, event.target.checked)
                 }
@@ -496,7 +543,7 @@ export function DashboardSettingsForm({
             <Button
               type="button"
               variant="outline"
-              disabled={saving || generatingKey}
+              disabled={isBusy}
               onClick={() => void handleGenerateMcpKey()}
               className="mt-3 rounded-full border-black/14 bg-white hover:bg-black hover:text-[#FFED00]"
             >
@@ -508,9 +555,98 @@ export function DashboardSettingsForm({
               ) : (
                 <>
                   <MaterialSymbol name="key" size={16} />
-                  Generate MCP key
+                  {settings.integrations.mcpConfigured ? "Rotate MCP key" : "Generate MCP key"}
                 </>
               )}
+            </Button>
+            <p className="mt-3 text-xs leading-5 text-muted-foreground">
+              Generating or rotating a key enables MCP immediately; no save is
+              needed. Rotating revokes the current key.
+            </p>
+          </div>
+        </div>
+
+        <div className="lime-card min-w-0 space-y-4 rounded-2xl p-4 sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1.5">
+              <h3 className="text-sm font-semibold text-foreground">Connect an AI tool</h3>
+              <p className="text-xs leading-5 text-muted-foreground">
+                MCP can read scans, saved findings, and report metadata. It cannot
+                create scans or change your data.
+              </p>
+            </div>
+            <a
+              href="https://lime.heysuman.com/docs/user/mcp/"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-semibold text-foreground hover:underline"
+            >
+              MCP setup guide
+              <MaterialSymbol name="open_in_new" size={14} />
+            </a>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-foreground">Streamable HTTP endpoint</p>
+            <code className="block break-all rounded-xl border border-black/10 bg-[#FBFAF6] p-3 text-xs text-foreground">
+              {mcpEndpoint || "/mcp"}
+            </code>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!mcpEndpoint}
+              onClick={() => void copyMcpValue(mcpEndpoint, "Endpoint")}
+              className="rounded-full border-black/14 bg-white"
+            >
+              <MaterialSymbol name="content_copy" size={15} />
+              Copy MCP endpoint
+            </Button>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-foreground">Bearer token authentication</p>
+            <p className="text-xs leading-5 text-muted-foreground">
+              Use any client that supports Streamable HTTP and custom headers.
+              Replace the placeholder with your generated key and send this
+              header on every request. Client configuration fields may differ.
+            </p>
+            <code className="block break-all rounded-xl border border-black/10 bg-[#FBFAF6] p-3 text-xs text-foreground">
+              Authorization: Bearer &lt;YOUR_MCP_KEY&gt;
+            </code>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!mcpEndpoint}
+              onClick={() => void copyMcpValue(mcpConnectionDetails, "HTTP connection details")}
+              className="rounded-full border-black/14 bg-white"
+            >
+              <MaterialSymbol name="content_copy" size={15} />
+              Copy HTTP connection details
+            </Button>
+          </div>
+
+          <div className="space-y-2 border-t border-black/8 pt-4">
+            <p className="text-xs font-medium text-foreground">Codex configuration example (optional)</p>
+            <p className="text-xs leading-5 text-muted-foreground">
+              Set <code>LIME_MCP_KEY</code> to your generated key in the environment
+              that starts Codex. Add this to <code>~/.codex/config.toml</code>, then
+              reconnect or start a new session. Keep the key out of config files.
+            </p>
+            <pre className="whitespace-pre-wrap break-all rounded-xl border border-black/10 bg-[#FBFAF6] p-3 text-xs text-foreground">
+              <code>{mcpConfig}</code>
+            </pre>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!mcpEndpoint}
+              onClick={() => void copyMcpValue(mcpConfig, "Codex config")}
+              className="rounded-full border-black/14 bg-white"
+            >
+              <MaterialSymbol name="content_copy" size={15} />
+              Copy Codex config
             </Button>
           </div>
         </div>
@@ -523,12 +659,30 @@ export function DashboardSettingsForm({
             <code className="mt-2 block break-all rounded-lg bg-white p-3 text-xs text-[#0F172A]">
               {generatedMcpKey}
             </code>
+            <p className="mt-2 text-xs leading-5 text-[#0F172A]/75">
+              Copy and store this key now. It will not be shown after you leave
+              this page. Only share it with clients you trust.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isBusy}
+              onClick={() => void copyMcpValue(generatedMcpKey, "MCP key")}
+              className="mt-3 rounded-full border-black/14 bg-white"
+            >
+              <MaterialSymbol name="content_copy" size={15} />
+              Copy MCP key
+            </Button>
           </div>
+        ) : null}
+        {copyFeedback ? (
+          <p role="status" className="text-xs text-muted-foreground">{copyFeedback}</p>
         ) : null}
       </section>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={saving || generatingKey} className="rounded-full bg-black px-[22px] text-white hover:bg-[#FFED00] hover:text-black">
+        <Button type="submit" disabled={isBusy} className="rounded-full bg-black px-[22px] text-white hover:bg-[#FFED00] hover:text-black">
           {saving ? (
             <>
               <MaterialSymbol name="progress_activity" size={16} className="animate-spin" />
@@ -544,7 +698,7 @@ export function DashboardSettingsForm({
         <Button
           type="button"
           variant="outline"
-          disabled={saving}
+          disabled={isBusy}
           onClick={handleReset}
           className="rounded-full border-black/14 bg-white px-5 hover:bg-black/5"
         >

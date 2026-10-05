@@ -31,7 +31,7 @@ services:
       AXE_GUIDANCE_PATH: /shared-data/axe-guidance.json
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
       SHOPKEEPER_URL: ${SHOPKEEPER_URL:?set SHOPKEEPER_URL}
-      LIME_UPDATE_CHECK: ${LIME_UPDATE_CHECK:-false}
+      LIME_UPDATE_CHECK: ${LIME_UPDATE_CHECK:-true}
       LIME_GITHUB_REPO: ${LIME_GITHUB_REPO:-sumanbasuli/lime}
     ports:
       - "${LIME_UI_PORT:-3000}:3000"

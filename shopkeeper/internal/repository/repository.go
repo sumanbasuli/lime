@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -737,7 +740,9 @@ func (r *Repository) GetMCPAuthSettings(ctx context.Context) (*models.MCPAuthSet
 	return settings, nil
 }
 
-// GetMCPScanScoreSummary returns the cached score summary for a scan when one exists.
+// GetMCPScanScoreSummary returns a fresh persisted score snapshot, or nil when
+// the dashboard needs to compute it. Compare at JS Date precision because the
+// dashboard persists the scan timestamp with millisecond precision.
 func (r *Repository) GetMCPScanScoreSummary(ctx context.Context, scanID string) (*models.MCPScanScoreSummary, error) {
 	var summary models.MCPScanScoreSummary
 	var score int
@@ -764,9 +769,15 @@ func (r *Repository) GetMCPScanScoreSummary(ctx context.Context, scanID string) 
 		   weighted_failed,
 		   weighted_total,
 		   scored_audit_count,
-		   updated_at
-		 FROM scan_score_summary_cache
-		 WHERE scan_id = $1`,
+		   cache.updated_at
+		 FROM scan_score_summary_cache cache
+		 JOIN scans scan ON scan.id = cache.scan_id
+		 WHERE cache.scan_id = $1
+		   AND date_trunc('milliseconds', cache.scan_updated_at) = date_trunc('milliseconds', scan.updated_at)
+		   AND cache.scan_status = scan.status
+		   AND cache.updated_at >= NOW() - COALESCE(
+		     (SELECT summary_cache_ttl_seconds FROM app_settings WHERE key = 'global'), 60
+		   ) * INTERVAL '1 second'`,
 		scanID,
 	).Scan(
 		&score,
@@ -930,7 +941,7 @@ func (r *Repository) ListMCPScans(ctx context.Context, limit, offset int) ([]mod
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+scanColumns+`
 		 FROM scans
-		 ORDER BY created_at DESC
+		 ORDER BY created_at DESC, id DESC
 		 LIMIT $1 OFFSET $2`,
 		limit,
 		offset,
@@ -950,16 +961,16 @@ func (r *Repository) ListMCPScans(ctx context.Context, limit, offset int) ([]mod
 		}
 		scans = append(scans, s)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read MCP scan rows: %w", err)
+	}
 	if scans == nil {
 		scans = []models.Scan{}
 	}
 	return scans, nil
 }
 
-// GetMCPIssueSummaries returns failed and needs-review issue groups without loading occurrences.
-func (r *Repository) GetMCPIssueSummaries(ctx context.Context, scanID string, limit, offset int) ([]models.MCPIssueSummary, int, error) {
-	rows, err := r.pool.Query(ctx,
-		`WITH failed AS (
+const mcpIssueSummariesCTE = `WITH failed AS (
 		   SELECT
 		     'failed' AS kind,
 		     i.id::text AS key,
@@ -1017,8 +1028,12 @@ func (r *Repository) GetMCPIssueSummaries(ctx context.Context, scanID string, li
 		   SELECT * FROM failed
 		   UNION ALL
 		   SELECT * FROM needs_review
-		 )
-		 SELECT *, COUNT(*) OVER()::int AS total_count
+		 )`
+
+// GetMCPIssueSummaries returns failed and needs-review issue groups without loading occurrences.
+func (r *Repository) GetMCPIssueSummaries(ctx context.Context, scanID string, limit, offset int) ([]models.MCPIssueSummary, int, error) {
+	rows, err := r.pool.Query(ctx,
+		mcpIssueSummariesCTE+` SELECT *, COUNT(*) OVER()::int AS total_count
 		 FROM combined
 		 ORDER BY
 		   CASE
@@ -1027,7 +1042,9 @@ func (r *Repository) GetMCPIssueSummaries(ctx context.Context, scanID string, li
 		     ELSE 2
 		   END,
 		   occurrence_count DESC,
-		   title ASC
+		   title ASC,
+		   kind ASC,
+		   key ASC
 		 LIMIT $2 OFFSET $3`,
 		scanID,
 		limit,
@@ -1060,6 +1077,16 @@ func (r *Repository) GetMCPIssueSummaries(ctx context.Context, scanID string, li
 		total = totalCount
 		summaries = append(summaries, summary)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("failed to read MCP issue summary rows: %w", err)
+	}
+	rows.Close()
+	// The window count is absent when OFFSET lies beyond the final group.
+	if len(summaries) == 0 && offset > 0 {
+		if err := r.pool.QueryRow(ctx, mcpIssueSummariesCTE+` SELECT COUNT(*)::int FROM combined`, scanID).Scan(&total); err != nil {
+			return nil, 0, fmt.Errorf("failed to count MCP issue summaries: %w", err)
+		}
+	}
 	if summaries == nil {
 		summaries = []models.MCPIssueSummary{}
 	}
@@ -1068,21 +1095,20 @@ func (r *Repository) GetMCPIssueSummaries(ctx context.Context, scanID string, li
 
 // GetMCPIssueDetail returns a paginated issue detail for MCP clients.
 func (r *Repository) GetMCPIssueDetail(ctx context.Context, scanID, kind, key string, limit, offset int) (*models.MCPIssueDetail, error) {
-	summaries, _, err := r.GetMCPIssueSummaries(ctx, scanID, 1000, 0)
+	if kind == "failed" {
+		key = strings.ToLower(key)
+	}
+	var summary models.MCPIssueSummary
+	err := r.pool.QueryRow(ctx,
+		mcpIssueSummariesCTE+` SELECT * FROM combined WHERE kind = $2 AND key = $3`,
+		scanID, kind, key,
+	).Scan(&summary.Kind, &summary.Key, &summary.IssueID, &summary.RuleID,
+		&summary.Title, &summary.HelpURL, &summary.Severity, &summary.IsFalsePositive, &summary.OccurrenceCount)
 	if err != nil {
-		return nil, err
-	}
-
-	var summary *models.MCPIssueSummary
-	for _, candidate := range summaries {
-		if candidate.Kind == kind && candidate.Key == key {
-			copy := candidate
-			summary = &copy
-			break
+		if err == pgx.ErrNoRows {
+			return nil, nil
 		}
-	}
-	if summary == nil {
-		return nil, nil
+		return nil, fmt.Errorf("failed to get MCP issue detail summary: %w", err)
 	}
 
 	var occurrences []models.IssueOccurrence
@@ -1093,7 +1119,7 @@ func (r *Repository) GetMCPIssueDetail(ctx context.Context, scanID, kind, key st
 			 FROM issue_occurrences io
 			 JOIN urls u ON u.id = io.url_id
 			 WHERE io.issue_id = $1
-			 ORDER BY u.url, io.created_at
+			 ORDER BY u.url, io.created_at, io.id
 			 LIMIT $2 OFFSET $3`,
 			key,
 			limit,
@@ -1112,6 +1138,9 @@ func (r *Repository) GetMCPIssueDetail(ctx context.Context, scanID, kind, key st
 			}
 			occurrences = append(occurrences, occurrence)
 		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("failed to read MCP failed occurrence rows: %w", err)
+		}
 	} else {
 		rows, err := r.pool.Query(ctx,
 			`SELECT uao.id, uao.url_id, uao.html_snippet, uao.screenshot_path,
@@ -1122,7 +1151,7 @@ func (r *Repository) GetMCPIssueDetail(ctx context.Context, scanID, kind, key st
 			   AND u.status = 'completed'
 			   AND uao.rule_id = $2
 			   AND uao.outcome = 'incomplete'
-			 ORDER BY u.url, uao.created_at
+			 ORDER BY u.url, uao.created_at, uao.id
 			 LIMIT $3 OFFSET $4`,
 			scanID,
 			key,
@@ -1143,18 +1172,38 @@ func (r *Repository) GetMCPIssueDetail(ctx context.Context, scanID, kind, key st
 			occurrence.RuleID = key
 			occurrences = append(occurrences, occurrence)
 		}
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("failed to read MCP needs-review occurrence rows: %w", err)
+		}
 	}
 	if occurrences == nil {
 		occurrences = []models.IssueOccurrence{}
 	}
+	for i := range occurrences {
+		occurrences[i].ScreenshotURL = mcpScreenshotURL(scanID, occurrences[i].ScreenshotPath)
+		occurrences[i].ElementScreenshotURL = mcpScreenshotURL(scanID, occurrences[i].ElementScreenshotPath)
+	}
 
 	return &models.MCPIssueDetail{
-		Summary:          *summary,
+		Summary:          summary,
 		Occurrences:      occurrences,
 		OccurrenceOffset: offset,
 		OccurrenceLimit:  limit,
-		HasMore:          offset+len(occurrences) < summary.OccurrenceCount,
+		HasMore:          len(occurrences) > 0 && offset+len(occurrences) < summary.OccurrenceCount,
 	}, nil
+}
+
+// MCP adds public screenshot links without changing stored paths or REST reads.
+func mcpScreenshotURL(scanID string, storagePath *string) *string {
+	if storagePath == nil || *storagePath == "" {
+		return nil
+	}
+	filename := path.Base(*storagePath)
+	if filename == "." || filename == "/" {
+		return nil
+	}
+	publicURL := "/api/screenshots/" + strings.ToLower(scanID) + "/" + url.PathEscape(filename)
+	return &publicURL
 }
 
 // GetScanURLs returns all URL records for a scan.

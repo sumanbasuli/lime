@@ -98,6 +98,8 @@ type IssueOccurrence struct {
 	HTMLSnippet           *string   `json:"html_snippet"`
 	ScreenshotPath        *string   `json:"screenshot_path"`
 	ElementScreenshotPath *string   `json:"element_screenshot_path"`
+	ScreenshotURL         *string   `json:"screenshot_url,omitempty"`
+	ElementScreenshotURL  *string   `json:"element_screenshot_url,omitempty"`
 	CSSSelector           *string   `json:"css_selector"`
 	CreatedAt             time.Time `json:"created_at"`
 	PageURL               string    `json:"page_url,omitempty"`

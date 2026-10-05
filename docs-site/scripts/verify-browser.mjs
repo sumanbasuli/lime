@@ -18,6 +18,7 @@ const routes = [
   "/docs/",
   "/docs/user/first-scan/",
   "/docs/user/link-checker/",
+  "/docs/user/mcp/",
   "/docs/developer/",
   "/docs/reference/setup/",
   "/docs/reference/verification/",
@@ -98,7 +99,7 @@ try {
   for (const route of routes) {
     await auditRoute(browser, route, { width: 1440, height: 1000 });
   }
-  for (const route of ["/", "/docs/", "/docs/reference/verification/", "/api/", "/screenshots/", "/roadmap/"]) {
+  for (const route of ["/", "/docs/", "/docs/user/mcp/", "/docs/reference/verification/", "/api/", "/screenshots/", "/roadmap/"]) {
     await auditRoute(browser, route, { width: 390, height: 844 }, true);
   }
 
@@ -110,6 +111,14 @@ try {
   await interactionPage.keyboard.press("Escape");
   if (await interactionPage.getByRole("dialog", { name: /search docs/i }).count()) {
     failures.push("Docs search dialog did not close with Escape");
+  }
+
+  await interactionPage.goto(baseUrl + "/docs/user/mcp/", { waitUntil: "networkidle" });
+  const mcpContent = await interactionPage.locator("main").innerText();
+  for (const expected of ["http://localhost:3000/mcp", "bearer_token_env_var", "Bearer ${LIME_MCP_KEY}", "Bearer ${env:LIME_MCP_KEY}", "Authorization:${LIME_MCP_AUTH_HEADER}", "LIME_MCP_SDK=v2", "verify:mcp", "mcp-remote@0.14.3", "lime-mcp-client.mts", "test:mcp-transport"]) {
+    if (!mcpContent.includes(expected)) {
+      failures.push("MCP documentation is missing or incorrectly expands " + expected);
+    }
   }
 
   await interactionPage.goto(baseUrl + "/screenshots/", { waitUntil: "networkidle" });

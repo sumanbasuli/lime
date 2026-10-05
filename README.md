@@ -34,7 +34,8 @@ Built to be cheap to run on a small server, straightforward to push to Fly.io, a
 - **Partial scan retry** - retry failed pages inside the same scan without creating a second scan.
 - **Pause and resume** - cooperatively pause an active scan and continue pending pages on the same scan.
 - **Scan recovery** - non-terminal scans resume after Shopkeeper restarts.
-- **Update notice** - opt-in sidebar banner when a new GitHub release is available.
+- **Update notice** - enabled-by-default release checks and a sidebar banner when a newer GitHub release is available; server and browser controls let you opt out.
+- **Read-only MCP** - let compatible AI clients inspect saved scans, scores, issues, report availability, and settings with a generated bearer key.
 - **Three deploy targets** - Fly.io, Docker, and Debian systemd.
 
 ## Architecture
@@ -119,11 +120,11 @@ Runtime configuration lives in `.env` (root) or deploy-specific env files.
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DATABASE_URL` | yes | PostgreSQL connection string, shared by UI and Shopkeeper. |
-| `SHOPKEEPER_URL` | yes | URL the UI proxies `/api/...` to. |
+| `SHOPKEEPER_URL` | yes | Runtime backend URL for the UI's `/api/...` and `/mcp` proxies. |
 | `LIME_IMAGE_REGISTRY` | release only | GHCR namespace for published images, e.g. `ghcr.io/sumanbasuli`. |
 | `LIME_IMAGE_TAG` | release only | GHCR image tag, e.g. `v0.1.0`. |
 | `LIME_API_PORT` / `LIME_UI_PORT` | optional | Published ports (defaults 8080 / 3000). |
-| `LIME_UPDATE_CHECK` | optional | `true` enables the server's best-effort GitHub release check. Off by default; Settings also controls each browser's card visibility. |
+| `LIME_UPDATE_CHECK` | optional | Best-effort GitHub release checks are enabled by default. Set `false` to disable outbound checks; Settings also controls each browser's card visibility. |
 | `LIME_GITHUB_REPO` | optional | Override the update-check repo (default `sumanbasuli/lime`). |
 | `ACT_RULES_PATH` | optional | Override the bundled ACT catalog path. |
 
@@ -172,6 +173,10 @@ To review the complete marketing website and docs locally, install the docs depe
 `make docs` refreshes the docs site locally. It uses a separate `lime-docs` Docker Compose project, separate Postgres and screenshot volumes, non-default ports, and fresh single-page demo scans for `https://heysuman.com`, `https://www.fake-university.com/`, and `https://overlaysdontwork.com/` so it never screenshots current private/local scans.
 
 For the project handoff, feature verification matrix, isolated test workflow, and current verification evidence, see [Verification And Handoff](docs/verification.md). The **Link checker** screen is a design preview; backend checks and persisted results are not available yet.
+
+## AI Client Integration
+
+Use the dashboard's `http://localhost:3000/mcp` locally, or its reachable HTTPS `/mcp` URL remotely. Generate a key in **Settings > Integrations**, then configure a client supporting Streamable HTTP with a bearer header (or a reviewed local stdio bridge). The [MCP guide](docs/mcp.md) covers Codex, Claude Code, Cursor, VS Code, key rotation, troubleshooting, and a read-only SDK smoke test. The integration exposes six read-only tools; it does not create scans or change triage/settings. OAuth-only connectors are not supported, and localhost is not reachable from a cloud client.
 
 ## Contributing
 

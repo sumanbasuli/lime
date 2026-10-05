@@ -369,7 +369,7 @@ Integration settings include the read-only MCP controls used to connect external
 
 ## Browser update notice
 
-The **Update notice** switch takes effect immediately and survives reload in this browser; it does not require **Save settings** and does not change PostgreSQL settings. A card appears only if your operator has also enabled the server's optional GitHub release check and a newer release is available. Turning off this browser's card does not disable the server's outbound check.
+The **Update notice** switch defaults to on, takes effect immediately, and survives reload in this browser; it does not require **Save settings** and does not change PostgreSQL settings. The server's best-effort GitHub release check is also enabled by default. A card appears only when a newer release is available and neither server checks nor this browser's display preference are disabled. Operators can set \`LIME_UPDATE_CHECK=false\` on the UI service to stop outbound checks. Turning off only this browser's card does not disable the server's outbound check; existing off/dismissal preferences remain respected.
 
 Use **View release** to read release notes. Dismiss hides that exact release in this browser; a different newer release can appear later. This notice does not install updates. Operator configuration is covered in [Updating LIME](/docs/reference/deployment/updates/).
 `,
@@ -392,11 +392,11 @@ MCP is available when it is enabled in **Settings > Integrations** and an MCP ke
 
 Current behavior:
 
-- LIME exposes \`POST /mcp\` on the Shopkeeper/API service.
+- Use \`POST /mcp\` on the dashboard origin. It forwards to Shopkeeper for authentication and read-only tools, then adds fresh scan scores with the existing dashboard scorer.
 - LIME returns JSON responses for MCP initialization, tool listing, and tool calls.
-- \`GET /mcp\` streaming is not enabled.
+- \`GET /mcp\` returns 405: stateless POST JSON responses are valid Streamable HTTP; an always-open SSE stream is not required.
 - MCP session state, OAuth, scoped keys, and write tools are not implemented.
-- Origin validation currently allows requests with no \`Origin\` header and localhost origins. Server-to-server clients and local bridges normally work because they omit \`Origin\`.
+- Origin validation currently allows requests with no \`Origin\` header and localhost origins. Server-to-server clients and local bridges normally omit \`Origin\`; remote browser-origin clients are not supported.
 
 ## What you will need
 
@@ -417,19 +417,25 @@ https://<your-lime-host>/mcp
 Local development endpoint:
 
 \`\`\`text
-http://localhost:8080/mcp
+http://localhost:3000/mcp
 \`\`\`
 
-Use the Shopkeeper/API host, not the docs-site host. For example, do not point AI clients at \`https://sumanbasuli.github.io/lime/\` or a static docs domain.
+Use the dashboard host, not the static docs/marketing host on port 3001. Direct Shopkeeper \`/mcp\` (default port 8080) remains available, but its score summary is null when the saved cache is cold or stale. Dashboard \`/mcp\` provides fresh scores and the correct origin for relative report links. A remote machine or cloud client cannot reach your computer's localhost; use a reachable HTTPS dashboard endpoint.
+
+The canonical proxy accepts bodies up to 1 MiB and has a 30-second deadline for incoming-body reads and upstream fetches. Transport errors use HTTP 413 (too large), 400 (unreadable/canceled body), 504 (proxy deadline), 502 (unreachable backend), or 500 (invalid configuration), and may return plain JSON \`error\` rather than a JSON-RPC tool result. Check HTTP status before \`isError\`. This is not a 30-second guarantee for score computation or report generation.
 
 ## Generate a key
 
 1. Open **Settings**.
 2. Open **Integrations**.
-3. Enable **MCP server**.
-4. Select **Generate MCP key**.
-5. Copy the key immediately. LIME only shows the raw key once.
-6. Store the key in your AI tool or local environment.
+3. Select **Generate MCP key**; generation saves the key and immediately enables MCP.
+4. Copy the key immediately. LIME only shows the raw key once.
+5. Store the key in your AI tool or local environment.
+6. Use **Enable MCP** and **Save settings** for later enable/disable changes.
+
+The connection card shows your dashboard's URL and lets you copy the endpoint, generic HTTP connection details, or optional Codex config. Copy the newly generated key while it is shown; if clipboard access fails, select the displayed text manually. Copy actions do not install or configure a client. Key generation/rotation preserves unrelated reporting/performance drafts without saving them; use **Save settings** for those changes. Rotation requests confirmation because connected clients need the replacement key immediately.
+
+Only a hash and hint are stored. Rotation revokes the old key immediately; disabling MCP rejects new tool requests. The key is shared by the instance, with no automatic expiry or per-user/per-scan scopes. Never commit a real key into a shared configuration.
 
 Use environment variables when your AI tool supports them:
 
@@ -438,16 +444,42 @@ export LIME_MCP_URL="https://lime.example.com/mcp"
 export LIME_MCP_KEY="lime_mcp_xxxxxxxxxxxxxxxxx"
 \`\`\`
 
-## Generic AI client config
+## Choose a client connection
 
-Many AI tools use a JSON config with an \`mcpServers\` object. Use this shape when the tool supports remote HTTP MCP servers:
+Use native Streamable HTTP with a custom bearer header when supported, or a reviewed local stdio bridge otherwise. LIME does not set up users' AI accounts automatically. OAuth-only connectors and remote browser-origin clients are not currently supported: do not assume ChatGPT or Claude web connectors can use LIME's static bearer key.
+
+Native HTTP configuration does not require Node.js. The local bridge and TypeScript examples require a supported Node.js release with npm/npx available in the launching application's \`PATH\`. Check \`node --version\`, \`npm --version\`, and \`npx --version\` in that environment. The pinned v1 SDK/runner require Node 18 or newer; the v2 client requires Node 20 or newer. Package minimums are not a recommendation to run an unsupported Node release.
+
+JSON does not universally expand environment variables. Use the format documented by your chosen client; these are setup instructions, not proof that a particular installed app has connected.
+
+### Codex
+
+Add to your user \`~/.codex/config.toml\` or trusted project \`.codex/config.toml\`:
+
+\`\`\`toml
+[mcp_servers.lime]
+url = "http://localhost:3000/mcp"
+bearer_token_env_var = "LIME_MCP_KEY"
+\`\`\`
+
+Or run this yourself:
+
+\`\`\`bash
+codex mcp add lime --url http://localhost:3000/mcp --bearer-token-env-var LIME_MCP_KEY
+\`\`\`
+
+Codex must receive the key in its process environment; a terminal export may not reach an already-running desktop app. Restart/reconnect using your host's environment setup. This static-key server does not require an OAuth \`codex mcp login\` step. See [OpenAI's MCP guide](https://developers.openai.com/codex/mcp/).
+
+### Claude Code
+
+Project \`.mcp.json\` supports this header environment expansion:
 
 \`\`\`json
 {
   "mcpServers": {
     "lime": {
       "type": "http",
-      "url": "https://lime.example.com/mcp",
+      "url": "http://localhost:3000/mcp",
       "headers": {
         "Authorization": "Bearer \${LIME_MCP_KEY}"
       }
@@ -456,23 +488,50 @@ Many AI tools use a JSON config with an \`mcpServers\` object. Use this shape wh
 }
 \`\`\`
 
-Some clients use \`transport: "streamable-http"\` instead of \`type: "http"\`:
+Set the variable in Claude Code's environment, approve the project server when prompted, and inspect \`/mcp\` status and tools. This is Claude Code, not Claude web connector setup. See [Claude Code's guide](https://code.claude.com/docs/en/mcp).
+
+### Cursor
+
+Use project \`.cursor/mcp.json\` or personal \`~/.cursor/mcp.json\`. Cursor's environment placeholder includes \`env:\`:
 
 \`\`\`json
 {
   "mcpServers": {
     "lime": {
-      "transport": "streamable-http",
-      "url": "https://lime.example.com/mcp",
+      "url": "http://localhost:3000/mcp",
       "headers": {
-        "Authorization": "Bearer \${LIME_MCP_KEY}"
+        "Authorization": "Bearer \${env:LIME_MCP_KEY}"
       }
     }
   }
 }
 \`\`\`
 
-Use the field names your AI tool documents. The required parts are the \`/mcp\` URL and the bearer authorization header.
+The variable must reach Cursor itself. Restart/reconnect and inspect MCP logs/tools; \`envFile\` is for stdio entries, not HTTP entries. See [Cursor's guide](https://cursor.com/docs/mcp).
+
+### VS Code
+
+VS Code uses \`.vscode/mcp.json\` with \`servers\`, not \`mcpServers\`. A secret prompt avoids embedding the key:
+
+\`\`\`json
+{
+  "inputs": [{
+    "type": "promptString",
+    "id": "lime-mcp-key",
+    "description": "LIME MCP key",
+    "password": true
+  }],
+  "servers": {
+    "lime": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp",
+      "headers": { "Authorization": "Bearer \${input:lime-mcp-key}" }
+    }
+  }
+}
+\`\`\`
+
+Start the server through VS Code's MCP controls and verify its tools. See [VS Code's MCP reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
 
 ## Local bridge config
 
@@ -485,21 +544,35 @@ Use this pattern when an AI tool only supports local \`stdio\` MCP server entrie
       "command": "npx",
       "args": [
         "-y",
-        "mcp-remote",
-        "\${LIME_MCP_URL}",
+        "mcp-remote@0.14.3",
+        "http://localhost:3000/mcp",
+        "--transport",
+        "http-only",
         "--header",
-        "Authorization: Bearer \${LIME_MCP_KEY}"
+        "Authorization:\${LIME_MCP_AUTH_HEADER}"
       ],
       "env": {
-        "LIME_MCP_URL": "https://lime.example.com/mcp",
-        "LIME_MCP_KEY": "lime_mcp_xxxxxxxxxxxxxxxxx"
+        "LIME_MCP_AUTH_HEADER": "Bearer <paste-generated-key-in-private-config>"
       }
     }
   }
 }
 \`\`\`
 
-The bridge package is an example pattern, not a LIME dependency. Use your organization's preferred bridge if it supports Streamable HTTP and custom request headers.
+The example pins the bridge release tested with LIME. Node.js and npx must be on the host client's \`PATH\`; its Undici dependency requires Node 20.18.1 or newer. The isolated check used Node 24.18.0, read all six tools, and confirmed the launcher exited and callback port was released. It did not configure a desktop client or use OAuth. Use a supported Node release and review third-party dependencies before deployment; pinning the bridge is not a security audit or a dependency-tree lock.
+
+The URL is explicit: subprocess arguments do not expand \`\${LIME_MCP_URL}\` as a shell would. This bridge substitutes environment placeholders in headers; the no-space argument avoids launcher quoting problems. Protect the private config/environment. For remote access use HTTPS; non-localhost HTTP requires \`--allow-http\` and a trusted private network. The bridge is not a LIME application dependency. See the [bridge's configuration guide](https://github.com/punkpeye/mcp-remote#custom-headers).
+
+For a client that accepts a stdio launch command, the equivalent shell form is:
+
+\`\`\`bash
+export LIME_MCP_AUTH_HEADER="Bearer $LIME_MCP_KEY"
+npx --yes mcp-remote@0.14.3 http://localhost:3000/mcp \\
+  --transport http-only \\
+  --header 'Authorization:\${LIME_MCP_AUTH_HEADER}'
+\`\`\`
+
+Single quotes keep header substitution in the bridge rather than the shell. It expects MCP messages on stdin/stdout; a standalone terminal launch can wait quietly and is not a complete connection test. \`make verify-app\` tests the actual stdio bridge with an isolated fixture key and temporary auth/cache directory, without changing user client configuration or normal-instance keys.
 
 ## Smoke test
 
@@ -540,13 +613,52 @@ curl -i "$LIME_MCP_URL" \\
 
 Expected result: HTTP 200 with a JSON MCP initialize response. A missing or invalid key should return HTTP 401.
 
-## TypeScript client example
-
-Use this when you are testing an integration outside an AI client UI:
+Use the returned protocol version on subsequent requests and complete initialization with a notification:
 
 \`\`\`bash
-npm install @modelcontextprotocol/sdk
+curl -i "$LIME_MCP_URL" \\
+  -H "Authorization: Bearer $LIME_MCP_KEY" \\
+  -H "Content-Type: application/json" \\
+  -H "Accept: application/json, text/event-stream" \\
+  -H "MCP-Protocol-Version: 2025-11-25" \\
+  --data '{"jsonrpc":"2.0","method":"notifications/initialized"}'
 \`\`\`
+
+Expected result: HTTP 202 with no body. A client library handles this lifecycle automatically. LIME negotiates the three 2025 protocol versions (March 26, June 18, November 25); these examples use November 25, not the newer protocol generation. See the [transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) and [lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle) specifications.
+
+## Verify a connection
+
+From a repository checkout with \`docs-site\` dependencies installed:
+
+\`\`\`bash
+export LIME_MCP_URL="http://localhost:3000/mcp"
+export LIME_MCP_KEY="<your-generated-key>"
+# Optional: select a saved scan instead of the latest.
+export LIME_MCP_SCAN_ID="<saved-scan-uuid>"
+npm --prefix docs-site run verify:mcp
+\`\`\`
+
+The default uses SDK v1 \`1.32.0\`. To select the pinned v2 client \`2.3.0\` with legacy 2025 negotiation:
+
+\`\`\`bash
+LIME_MCP_SDK=v2 npm --prefix docs-site run verify:mcp
+\`\`\`
+
+Omit the optional scan variable to use the latest returned scan automatically. This command uses the pinned official SDK and never creates scans, enables MCP, rotates keys, or changes settings. It checks all six advertised tools, calls list/settings on any instance, calls scan/groups/report metadata when a scan exists, and calls issue detail when a group exists. The \`checked\` output records the tools actually called; an empty instance does not prove all six returned saved data. Its sanitized trace excludes authorization headers and response bodies.
+
+Separately check your chosen app's tool list and ask it to read a known saved scan. SDK success is not proof every AI client or remote deployment has connected. The full deterministic suite is covered in [Verification And Handoff](/docs/reference/verification/).
+
+## TypeScript client example
+
+Use this when you are testing an integration outside an AI client UI. In an empty, separate integration directory, initialize a package and install the SDK and pinned TypeScript runner:
+
+\`\`\`bash
+npm init -y
+npm install --save-exact @modelcontextprotocol/sdk@1.32.0
+npm install --save-dev --save-exact tsx@4.21.0
+\`\`\`
+
+Create \`lime-mcp-client.mts\`. The \`.mts\` extension makes this an ES module, so top-level \`await\` works without a package-level \`"type": "module"\` setting:
 
 \`\`\`ts
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -572,12 +684,16 @@ const client = new Client({
   version: "0.1.0",
 });
 
-await client.connect(transport);
-
-const tools = await client.listTools();
-console.log(JSON.stringify(tools, null, 2));
-
-await client.close();
+try {
+  await client.connect(transport);
+  console.log(JSON.stringify(await client.listTools(), null, 2));
+  console.log(JSON.stringify(await client.callTool({
+    name: "list_scans",
+    arguments: { limit: 5, offset: 0 },
+  }), null, 2));
+} finally {
+  await client.close();
+}
 \`\`\`
 
 Run it:
@@ -585,8 +701,27 @@ Run it:
 \`\`\`bash
 LIME_MCP_URL="https://lime.example.com/mcp" \\
 LIME_MCP_KEY="lime_mcp_xxxxxxxxxxxxxxxxx" \\
-npx tsx lime-mcp-client.ts
+npx --no-install tsx lime-mcp-client.mts
 \`\`\`
+
+This pins the SDK v1 generation for the 2025 contract; see the [official SDK v1 source](https://github.com/modelcontextprotocol/typescript-sdk/tree/v1.x). For the separately pinned v2 client generation:
+
+\`\`\`bash
+npm install --save-exact @modelcontextprotocol/client@2.3.0
+\`\`\`
+
+Replace the imports and client constructor below, keeping the bearer transport and try/finally lifecycle:
+
+\`\`\`ts
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+
+const client = new Client(
+  { name: "lime-integration-check", version: "0.1.0" },
+  { versionNegotiation: { mode: "legacy" } },
+);
+\`\`\`
+
+SDK generation is not server protocol version: this v2 example uses the \`2025-11-25\` initialize contract, not modern 2026 discovery/capabilities. LIME has not upgraded to the modern protocol. See the [official split-package SDK](https://github.com/modelcontextprotocol/typescript-sdk) and its [negotiation source](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/packages/client/src/client/versionNegotiation.ts).
 
 ## Available read-only tools
 
@@ -600,6 +735,31 @@ The MCP endpoint exposes these tools:
 - \`get_settings\`
 
 Use \`list_scan_issues\` first, then pass the returned \`kind\` and \`key\` into \`get_issue_detail\` when you need paginated occurrence details.
+
+Scan arguments use \`scan_id\`, not \`scanId\`. \`kind\` is \`failed\` or \`needs_review\`. List limits default to 20; detail limits default to 25; all are capped at 100, with integer offsets from 0 to 100,000. Tool schemas reject unexpected fields or invalid values. Successful results include matching JSON text and \`structuredContent\`; a tool read failure sets \`isError\`, so HTTP 200 alone is not a success check.
+
+Integer validation uses the exact JSON number rather than floating-point rounding. Optional \`arguments\` can be omitted or \`{}\`; explicit \`arguments: null\` is invalid.
+
+Failed issue UUID keys are canonicalized to lowercase; review keys are rule IDs. Detail lookup works beyond the first 1,000 groups. Some older incomplete audits have a summary count but no stored node occurrences: detail then returns \`[]\` and \`has_more: false\`, without inventing screenshots/selectors. Stop occurrence pagination when \`has_more\` is false.
+
+MCP occurrence details add \`screenshot_url\` and \`element_screenshot_url\` for saved images, relative to the dashboard origin, such as \`/api/screenshots/<scan-id>/<filename>\`. Resolve those URL fields on the dashboard to fetch evidence. Empty or absent stored paths omit the corresponding field; a URL does not guarantee a file still exists on disk. Raw \`screenshot_path\` and \`element_screenshot_path\` remain compatible storage metadata, but values such as \`/app/screenshots/...\` are filesystem locations, not HTTP addresses.
+
+Dashboard \`get_scan\` returns scores refreshed through the UI's scorer, including after triage and on a cold cache. Direct API calls only use a valid saved score cache. \`get_report_metadata\` returns per-format \`availability\` and \`reports\` paths with \`report_paths_relative_to: "dashboard_origin"\`. Resolve paths on your dashboard, not the API port. Availability means the format is enabled, not that a file already exists or a download is guaranteed. This tool does not generate reports. \`get_settings\` excludes the raw key and hash, but includes non-secret integration metadata such as a key hint.
+
+\`score_summary.excluded_count\` is a legacy/reserved compatibility field, not a false-positive count. The current scorer filters marked rules before summarizing, so the field remains zero in this pipeline. Use groups' \`is_false_positive\` for triage state and filtered \`failed_count\`/\`scored_audit_count\` for summary comparisons. A rule with no scoring weight does not necessarily change the numeric score when marked.
+
+## Troubleshooting and boundaries
+
+- **401:** verify MCP is enabled, the key has not been rotated, and the client sends its bearer header.
+- **404:** use dashboard \`/mcp\`, not the docs website; verify the reverse proxy and \`SHOPKEEPER_URL\`.
+- **403:** a remote browser \`Origin\` is not allowed. Do not strip origin validation to force a browser connector to work.
+- **No tools:** use Streamable HTTP rather than legacy SSE, complete initialization, and send the negotiated protocol header. A GET 405 is expected.
+- **Bridge failure:** check the explicit URL and complete \`LIME_MCP_AUTH_HEADER\`, process environment, network reachability, and proxies stripping authorization.
+- **500/502/504:** inspect dashboard/backend logs, HTTP(S) \`SHOPKEEPER_URL\`, request size, and backend connectivity. The proxy returns controlled errors without exposing upstream URLs or private network errors.
+
+Contributors can run \`npm --prefix lime run test:mcp-transport\` for controlled regressions of the actual proxy/route source, including deadline/cancellation, authentication forwarding, numeric IDs, and decoded gzip headers. It does not start LIME or change its settings/data, and does not replace the full isolated suite. The dashboard runtime requires Node 23+ independently of the client/bridge runtime.
+
+Use HTTPS for remote access and keep keys out of URLs, logs, source control, and shared screenshots. There is no OAuth login, per-user key scoping, automatic expiry, or write/admin tool capability in the current integration.
 
 ## Example AI prompts
 

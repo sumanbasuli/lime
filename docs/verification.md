@@ -31,7 +31,8 @@ Open `http://localhost:3001/` for the website or `http://localhost:3001/docs/` f
 | Audit persistence | `shopkeeper/internal/sweetner/`, `repository/`, `migrations/` | URLs, audits, issues, occurrences, triage flags |
 | Dashboard pages and chrome | `lime/src/app/`, `lime/src/components/` | Overview, lists, forms, progress, issue review, shared design |
 | Next-owned APIs and caches | `lime/src/app/api/`, `lime/src/lib/` | Paginated issue reads, CSV/LLM exports, PDF controls, settings, derived read caches |
-| Optional release notice | `lime/src/app/%5Flime/update-check/`, `lime/src/components/update-notice.tsx`, `lime/src/lib/update-notice-preference.ts` | Operator-enabled release check, browser-local visibility and release-tag dismissal |
+| External MCP integration | `lime/src/app/mcp/`, `lime/src/lib/shopkeeper-proxy.ts`, `shopkeeper/internal/mcp/` | Canonical dashboard proxy and existing-scorer enrichment; Go authentication, protocol, schemas, read-only tools and pagination |
+| Optional release notice | `lime/src/app/%5Flime/update-check/`, `lime/src/components/update-notice.tsx`, `lime/src/lib/update-notice-preference.ts` | Default-enabled release check with server opt-out, browser-local visibility and release-tag dismissal |
 | Shared metadata | `data/` | Local ACT and axe rule guidance used by both services |
 | Website and documentation | `docs-site/`, `docs/` | Static product site, curated docs, reference Markdown, search and committed screenshots |
 
@@ -56,6 +57,32 @@ Run the integrated checks from the repository root:
 make verify-app       # existing product features in an isolated production stack
 make docs-verify      # website/docs build, assets, links, desktop/mobile interactions
 ```
+
+For changes to the canonical MCP route or shared proxy, also run:
+
+```bash
+npm --prefix lime run test:mcp-transport
+```
+
+This executes the actual TypeScript route/helper source with controlled dependencies and a local gzip server. It requires the dashboard's installed dependencies and Node 23+ but no running LIME stack, database, MCP key, or settings changes. It does not replace `make verify-app`.
+
+For the release-check default and best-effort route branches, run:
+
+```bash
+npm --prefix lime run test:update-notice
+```
+
+This executes the actual update route with mocked GitHub responses, without outbound calls or application-setting writes. Browser display preferences/dismissal and the full stack are checked separately by `make verify-app`.
+
+For an already-enabled instance, a separate read-only MCP SDK smoke check is available:
+
+```bash
+export LIME_MCP_URL="http://localhost:3000/mcp"
+export LIME_MCP_KEY="<your-generated-key>"
+npm --prefix docs-site run verify:mcp
+```
+
+It never generates keys or changes settings. Optional `LIME_MCP_SCAN_ID` selects a saved scan; otherwise the latest returned scan is used. The `checked` output identifies the tools actually called: an empty instance only supplies list/settings data, and an instance without an issue group cannot exercise issue detail. It defaults to pinned official SDK v1 `1.32.0`; set `LIME_MCP_SDK=v2` for the pinned `@modelcontextprotocol/client@2.3.0` in legacy `2025-11-25` mode. That does not upgrade LIME to modern 2026 discovery/capabilities. The sanitized transport trace excludes authorization headers and response bodies. See [MCP Integration](mcp.md) before connecting an AI client. This smoke check is not proof that an installed desktop/web client or a remote deployment has connected.
 
 The browser checks use Playwright from `docs-site`. Install its dependencies with `npm --prefix docs-site ci` and its browser with `cd docs-site && npx playwright install chromium` if the local browser cache is missing. Docker and Compose must be available for `make verify-app`. A first build may need network access to pull base images and install locked dependencies.
 
@@ -105,17 +132,17 @@ The required evidence below describes the product baseline. Runtime results must
 | Screenshot evidence | Saved small preview loads; expanded lightbox uses the full highlighted capture; close/Escape works |
 | Reports | Scan-level and issue-scoped PDF, small/full CSV, and LLM exports contain the expected scan/rule data |
 | Settings | Reporting/performance/integration values persist after reload; disabled formats reject exports; values can be restored |
-| Optional release notice | Disabled server endpoint returns 200; mocked newer release renders a card; browser visibility persists immediately; exact-tag dismissal survives reload |
-| MCP | Disabled/unauthorized requests reject access; a generated key authenticates; tools read saved data and expose no mutation capability |
+| Optional release notice | Default-enabled server branch and explicit opt-out; disabled endpoint returns 200 without outbound calls; mocked newer release renders a card; browser visibility persists immediately; exact-tag dismissal survives reload |
+| MCP | Real SDK initialization/notification/protocol headers and all six tools; canonical cold/triaged scores, direct stale-cache behavior, group/occurrence pagination, screenshot/report paths and format gates, schema/errors, read-only capability, UI copy/settings/key rotation/disable |
 | Responsive redesign | Desktop and mobile routes are usable; navigation, forms, dialogs and controls have no unintended horizontal page overflow |
 | Marketing and documentation | Static routes/assets/internal links pass; search, mobile navigation, gallery and roadmap render and interact correctly |
 | Link checker preview | Navigation and target-entry design render; run action remains disabled; no check/result storage is claimed |
 
 A small deterministic suite cannot establish behavior for every public site, very large report, browser/OS combination, or deployment target. Add a targeted reproduction when a regression depends on those conditions. See [Performance](performance.md) for large-scan concerns and deployment guides for release-specific checks.
 
-## Current Verification Record
+## Completed Redesign Verification Record
 
-On October 5, 2026, the final `make verify-app` run completed successfully with all 16 workflows passed, process exit 0, and no browser errors. `.artifacts/verification/results.json` records completion at `2026-10-05T05:09:20.811Z` (10:39:20 IST), every evidence entry passed, and `browserErrors: []`.
+Before the MCP extension, the redesign's October 5, 2026 `make verify-app` run completed successfully with all 16 workflows passed, process exit 0, and no browser errors. Its result recorded completion at `2026-10-05T05:09:20.811Z` (10:39:20 IST), every evidence entry passed, and `browserErrors: []`. Subsequent runs replace `.artifacts/verification/results.json`; the extension record below describes the newer check separately.
 
 An earlier 15-workflow candidate had incorrectly ignored a 404 from the optional release-notice endpoint. The endpoint lived under the App Router's private `_lime` folder, so it was not registered. Its source is now under `%5Flime`, preserving `/_lime/update-check`, and the outbound fetch has a five-second timeout. The final verifier does not ignore this error: it asserts the disabled endpoint returns 200 and checks a mocked notice's release link, immediate off/on browser preference, persistence, and exact-tag dismissal after reload. Different-tag redisplay is documented from the source contract, not claimed as a browser-tested scenario.
 
@@ -143,6 +170,68 @@ Completed documentation checks:
 
 This record establishes the completed local deterministic baseline and records the earlier unreproduced warning. It does not claim every public website, every PDF page, large-site performance, every browser/OS, or each production deployment target was checked. Live GitHub calls and deployment/update scripts were not exercised by the deterministic suite; release-notice browser checks use mocked release metadata. When recording future passes, retain the commands, artifacts, tested viewports, corrected failures, and coverage limits; do not substitute screenshot generation or source inspection for lifecycle/report/settings assertions.
 
+## MCP Integration Extension
+
+The expanded `make verify-app` run passed all 18 workflows with process exit 0 and no browser errors on October 5, 2026, completing at `2026-10-05T06:43:34.650Z` (12:13:34.650 IST) with 18 passed evidence entries and `browserErrors: []`. This is a real SDK/browser/data integration result, separate from the redesign's earlier raw JSON-RPC checks. The disposable Compose project was empty after cleanup. The result artifacts have since been replaced by the refinement run recorded below; this timestamp is retained as historical evidence.
+
+Both pinned official SDK generations read all six tools on the canonical dashboard endpoint. `.artifacts/verification/mcp-client-results.json` records v1 `@modelcontextprotocol/sdk@1.32.0` initialization/tool/notification responses, expected GET 405, and a rejected revoked-key request; the v2 `@modelcontextprotocol/client@2.3.0` result records all six checked tools with `era: "legacy"` and `version: "2025-11-25"`. Their sanitized traces exclude credentials and response bodies. This does not claim modern 2026 discovery/capabilities.
+
+The run passed canonical cold-cache and triaged scoring, direct stale-cache behavior, detail lookup beyond offset 1,000 after inserting 1,005 synthetic groups, 32-occurrence pagination, real HTTP screenshot URLs, usable PDF/CSV/LLM downloads and format gates, localhost CORS, three supported 2025 protocol revisions, schema/tool errors, read-only boundaries, exact raw numeric JSON-RPC ID `9007199254740993` on both endpoints, and the Settings copy/draft/save/rotate/disable flow. The existing scoring algorithm was preserved: an earlier test incorrectly expected `excluded_count` to count false-positive marks; the correct assertions use group flags and filtered failed/scored counts.
+
+Client setup examples are checked against their primary documentation. No user's AI client configuration or account was changed, and the suite does not prove each desktop/web client or a public remote deployment has connected. The large-group and pagination checks use deterministic synthetic data rather than a 1,000-page public website.
+
+The backend handles uppercase failed-issue UUID keys by canonicalizing them. Legacy incomplete audit rows without stored node occurrences retain their summary count but return empty detail with `has_more: false`; the API does not manufacture selectors or screenshot evidence. Isolated SQL checks passed these cases and large-group detail reads. A prior SDK run exposed raw screenshot storage paths that were not HTTP URLs; MCP detail now adds dashboard-relative screenshot URL fields while retaining compatible raw paths, and the final suite fetched the real images successfully.
+
+A candidate run exposed a real pause/resume regression: interrupted Chromium startups returned `chrome failed to start` without wrapping cancellation, so unfinished pages were incorrectly saved as failures and resume skipped them. Juicer now classifies a non-nil operation error as interrupted when the parent scan-run context is canceled. Active-run startup/navigation errors and local page timeouts still fail normally; successful operations remain valid. Eleven targeted cases in `shopkeeper/internal/juicer/cancellation_test.go`, the full uncached Go suite, and Juicer race checks passed. The final end-to-end run confirmed zero failed URLs at the paused boundary and all eight pages completed after resume. Spotlight preview/full images and responsive routes at 1440, 768, 390, and 320 pixels passed again. Screenshot rendering and the existing score algorithm are unchanged.
+
+The normal local stack was rebuilt without removing its volumes. Read-only assertions confirmed the same 2 scans, 6 issues, and 44 pages, and exactly unchanged reporting/performance/integration settings. MCP remained disabled and unconfigured, with no key hint or rotation timestamp. The database and Shopkeeper were healthy; the UI container was running and its HTTP routes worked (the normal Compose UI has no container healthcheck). Proxied health returned `ok`; an unauthenticated MCP POST returned 401 with a Bearer authentication challenge. These normal-instance checks did not generate a key or write settings.
+
+The rebuilt normal Settings page passed read-only checks at widths 1440, 390, and 320: no page overflow, browser errors, framework overlays, or duplicate main landmark. Its client-independent connection card displayed `http://localhost:3000/mcp`, the three copy-action labels, and the correct MCP guide link. Existing fields/formats and disabled/unconfigured MCP state were unchanged, with no freshly generated key. Verification blocked non-read requests and saw none; it did not click controls or access the clipboard. Artifacts are `.artifacts/verification/normal-mcp-settings-{1440,390,320}.png`; the desktop and 320-pixel images were visually reviewed.
+
+Full docs ESLint and TypeScript checks passed for the MCP changes. `make docs-verify` passed the production export with 41 HTML pages and valid internal links/assets, then checked 12 representative desktop routes at 1440×1000 and seven mobile routes at 390×844, including the MCP and handoff guides. Search, mobile navigation, screenshot gallery interactions, and literal client environment/configuration examples passed without browser errors or page overflow. These docs checks do not run scans or configure AI clients.
+
+Neither pinned official MCP client has a finding in the recorded npm audit, but that is not a security-clearance claim for the project. `.artifacts/verification/dependency-audit.json` covers the 711-dependency `docs-site` tree after the v1/v2 additions and records 25 vulnerable dependency entries (3 low, 4 moderate, 17 high, 1 critical), including direct Next, eslint-config-next and shadcn dependencies. These are aggregate package counts, not a count of individual advisories. Broad dependency upgrades are outside this MCP change. Review the critical findings and dependency backlog before a public production deployment; no live deployment or complete production security audit was performed.
+
+## Further MCP Refinement Checks
+
+Additional focused checks found stalled incoming request bodies could outlive the proxy deadline, body-read errors were uncontrolled, malformed backend URLs were not handled, and network errors could expose upstream configuration. The shared proxy now applies cancellation/deadlines while reading the body and fetching, returns controlled errors, and removes stale compression/length headers after Node fetch decodes a response. MCP retains its 1 MiB body limit and 30-second proxy deadline; separate score computation and report generation are not promised within that deadline.
+
+The actual-source `npm --prefix lime run test:mcp-transport` suite passed all 14 checks. Coverage includes body size/cancellation/deadline, upstream fetch deadline, redacted network/configuration errors, a real local gzip response, exact numeric JSON-RPC IDs, authentication/protocol/status/CORS preservation, and consistent structured/text score results. Unauthorized or protocol-error responses do not trigger scoring; score-read failures preserve the ID/CORS while returning an actionable redacted tool error. These are controlled regressions, not a remote deployment or installed-client integration pass.
+
+Go checks now reject exact fractional pagination values even when floating-point conversion would round them to integers, reject nonzero overflow/underflow edge cases, and reject explicit null tool arguments without reading data. Exact integer forms such as `1.0` and `1e2`, zero coefficients with extreme exponents, and omitted/empty optional arguments remain valid. The full Go suite and MCP race checks passed. Real isolated PostgreSQL checks passed deadlines for six blocked read paths (scan, saved score, issue groups, occurrence detail, authentication settings, visible settings), then confirmed pool recovery and subsequent reads; nullable legacy scores remained readable.
+
+The standalone client instructions now use `.mts` for top-level `await`, a pinned runner, and explicit Node/npm/npx/PATH prerequisites. All five guide JSON examples parse and the standalone snippet compiles as ESM.
+
+The subsequent full `make verify-app` run passed all 18 workflows with exit 0 at `2026-10-05T07:32:08.365Z` (13:02:08.365 IST), with 18 passed evidence entries and `browserErrors: []`; the disposable Compose project was empty afterward. Both official SDK generations again read all six tools. Raw requests on both endpoints also checked exact fractions, nonzero underflow/extreme offsets, explicit null arguments, and valid exact integer/zero-exponent values. Its result artifacts were later replaced by the release-default run below; this timestamp remains historical.
+
+The real pinned `mcp-remote@0.14.3` subprocess bridged official SDK v1 `1.32.0` stdio messages to dashboard Streamable HTTP and read all six tools. Its `mcp-client-results.json` recorded the bridge version/tools and `cleanup: { launcherExited: true, callbackPortReleased: true }` alongside the v1/v2 evidence. The host used Node 24.18.0. The helper supplied its bearer value only through the child environment, used a temporary auth/cache directory, checked stderr did not expose the key, and removed its own temporary state. No user's client configuration, key, or normal-instance settings were changed. This is real bridge/protocol/data proof, not proof that each installed AI application or a public remote deployment connected.
+
+The normal stack was then rebuilt from the refined source without removing its volumes. Read-only checks confirmed HTTP 200 on the home page, healthy proxied API status, and MCP HTTP 401 with `WWW-Authenticate: Bearer realm="LIME MCP"`. The same 2 scans, 6 issues, and 44 pages and exactly unchanged reporting/performance/integration settings were preserved; MCP remained disabled/unconfigured with null hint and generation timestamp. Database and backend containers were healthy, and the UI was running with functional HTTP (no normal UI container healthcheck). Full Go tests, focused MCP/repository/Juicer race checks, and dashboard ESLint/TypeScript checks passed.
+
+Full docs ESLint and TypeScript checks, `git diff --check`, and `make docs-check-source` passed. The refinement's `make docs-verify` production export validated 41 HTML pages and internal assets/links, then checked 12 representative desktop and seven mobile routes, search, navigation, and screenshot-gallery interactions without browser errors or horizontal page overflow. Literal client examples also retained the environment placeholders, pinned bridge version, `.mts` filename, and transport-regression command. These documentation checks do not configure an AI client or run scans.
+
+## Release Notice Default Change
+
+The requested update-card change enables server release checks when `LIME_UPDATE_CHECK` is unset and changes normal/source and release Compose defaults to true. Operators can still set `LIME_UPDATE_CHECK=false`; existing false values, browser-off preferences, and exact-release dismissals remain respected. The browser preference already defaulted on. The isolated docs/verification Compose stack explicitly remains false, so deterministic checks do not depend on live GitHub calls. This changes notice defaults only, not automatic update installation or PostgreSQL settings.
+
+The initial actual-source `npm --prefix lime run test:update-notice` suite passed six checks: unset/explicit-true enablement with a newer stable release, explicit-false disablement without outbound calls, best-effort network/status/JSON failures, draft/prerelease suppression, and up-to-date releases. Actual Compose resolution confirmed true defaults and explicit-false overrides in normal/source and release stacks, while docs/verification stayed false. Dashboard lint/TypeScript checks passed.
+
+The new-default `make verify-app` run passed all 18 workflows with exit 0, completing at `2026-10-05T08:52:44.921Z` (14:22:44.921 IST). The current `.artifacts/verification/results.json` records 18 passed evidence entries and `browserErrors: []`; the disposable Compose project was empty after cleanup. Browser checks started with no saved visibility preference, confirmed the Update notice checkbox was on and a mocked newer-release card appeared, then passed off/reload, on, and exact-tag dismissal. GitHub responses were mocked; this does not claim live upstream availability.
+
+The latest run also read all six tools through both official SDK generations and the pinned `mcp-remote@0.14.3` stdio bridge. The current `mcp-client-results.json` contains the bridge evidence with `launcherExited: true` and `callbackPortReleased: true`. All 14 focused MCP transport checks passed again. Normal client keys and PostgreSQL settings were not changed by verification.
+
+The first normal rebuild preserved its database/volumes and the same 2 scans, 6 issues, and 44 pages and unchanged reporting/performance/integration settings; MCP remained disabled/unconfigured. However, its live endpoint returned `current: "0.0.0"`, `latest: "v1.0.5"`, and `outdated: true` because Compose supplied a placeholder version. A fresh read-only browser correctly showed the default-on checkbox, null saved visibility preference, and release card with no errors or non-read requests, but visual review identified that card as a false-positive release comparison. `.artifacts/verification/normal-update-default-on.png` is diagnostic evidence, not final proof of correct installed-version behavior; no controls or settings were changed.
+
+The subsequent version correction uses the packaged dashboard version when `LIME_VERSION` is unset or blank, while preserving nonblank runtime/release-build overrides. The expanded actual-source `test:update-notice` suite passed all eight checks, including unset/empty/whitespace version fallback and an explicit `v1.0.4` override; dashboard lint/TypeScript checks and all 14 MCP transport checks passed. The final Docker UI build exited 0 without the JSON-import warning.
+
+Corrected production HTTP returned 200 with `enabled: true`, `current: "1.0.5"`, `latest: "v1.0.5"`, and `outdated: false`, recording `checkedAt: "2026-10-05T09:02:55.307Z"` (14:32:55.307 IST). A fresh read-only normal Settings browser confirmed the default-on checkbox, null stored visibility preference, correct release version, and absence of the false update card, with no browser errors or non-read requests. The same 2 scans, 6 issues, and 44 pages and exactly unchanged reporting/performance/integration settings were preserved; MCP remained disabled/unconfigured. No controls or settings were changed. `.artifacts/verification/normal-update-version-corrected.png` was visually reviewed; the earlier diagnostic image was preserved.
+
+The 08:52 full 18-workflow run preceded this final fallback correction. Its final verification is the eight actual-source checks and corrected production HTTP/browser check above; no later full-suite rerun is claimed for that last change. This single live release result does not establish future GitHub availability or every deployment target.
+
+After the default/fallback documentation updates, full docs ESLint/TypeScript, `make docs-check-source`, and `git diff --check` passed. `make docs-verify` passed the 41-page production export/internal asset-link checks and 12 representative desktop plus seven mobile routes, including search, navigation, gallery, and literal client examples, without browser errors or page overflow. Current guides/API use default-on/server-opt-out wording and preserve the separate browser control.
+
+The earlier records above describe their respective completed configurations, including disabled endpoint/normal-instance checks before this default changed. Their timestamps remain historical; the current result artifacts now belong to the 08:52 release-default run.
+
 ## Workflow For Future Changes
 
 1. Locate the owning service and reproduce the current behavior before editing.
@@ -162,6 +251,8 @@ Use `docker compose ps`, `make logs-shopkeeper`, and `make logs-ui` for the norm
 Use the rendered heading and expected controls to establish dashboard readiness. Background progress polling can prevent a `networkidle` wait from completing even when the page is usable; correlate a timeout with rendered content and server logs before treating it as a product failure.
 
 If a scan is completed but its progress count is low, compare `scanned_urls` with the scan's terminal URL rows. Audit workers run concurrently; progress callbacks must remain serialized and monotonic so an older update cannot overwrite a newer count. See [Progress Ordering](architecture/shopkeeper.md#progress-ordering).
+
+If pause/resume leaves unexpected failed URLs, compare browser errors with the parent run's cancellation state. Interrupted Chromium startup errors can omit the cancellation cause; those operations must remain pending instead of being stored as genuine failures. A child page timeout on a still-active run remains a failure. See [Cancellation And Resume](architecture/juicer.md#cancellation-and-resume).
 
 If issue refresh or pagination returns a duplicate-key error after triage, inspect `scan_issue_summary_cache` replacement and the parent scan's source timestamp. Concurrent replacements must hold the scan-row lock through their delete/insert transaction. See [Concurrent Cache Replacement](performance.md#concurrent-cache-replacement).
 

@@ -1,7 +1,7 @@
 # Expects the docker build context at the repository root so the
 # shared ./data catalog can be baked into the image alongside ./lime.
 FROM node:23-alpine AS base
-ARG LIME_VERSION=dev
+ARG LIME_VERSION=""
 ARG LIME_COMMIT=""
 
 # Install dependencies only when needed
@@ -28,7 +28,7 @@ RUN npm run build
 
 # Production image
 FROM base AS runner
-ARG LIME_VERSION=dev
+ARG LIME_VERSION=""
 ARG LIME_COMMIT=""
 WORKDIR /app
 ENV NODE_ENV=production

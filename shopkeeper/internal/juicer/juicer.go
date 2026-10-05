@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"image"
 	"image/draw"
@@ -396,13 +395,11 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 }
 
 func shouldTreatAsCanceled(ctx context.Context, err error) bool {
-	if ctx.Err() == nil {
-		return false
-	}
-
-	return errors.Is(err, context.Canceled) ||
-		errors.Is(err, context.DeadlineExceeded) ||
-		strings.Contains(err.Error(), "context canceled")
+	// ctx is the parent scan run, not the per-page timeout. Chromium startup
+	// errors can lose the cancellation cause when the browser is terminated.
+	// Any unfinished operation error after a run cancellation must leave the
+	// page pending for resume, while successful results remain valid.
+	return err != nil && ctx.Err() != nil
 }
 
 func captureViolationNodeScreenshots(ctx context.Context, violations []Violation, scanID, screenshotDir string, page PageInput, startIndex int) int {

@@ -5,6 +5,14 @@ section matching `VERSION` to populate GitHub Release notes.
 
 ## [Unreleased]
 
+- Enabled the sidebar release check by default, with `LIME_UPDATE_CHECK=false` as the server opt-out; preserved browser-off/release-dismissal preferences and explicitly disabled checks in the isolated docs/verification stack.
+- Corrected release comparison to use the packaged dashboard version when no nonblank build/runtime override is supplied, preventing default development placeholders from announcing false updates.
+- Hardened the shared dashboard proxy used by MCP with body/fetch deadlines, cancellation and controlled error handling, and corrected decoded-compression headers; added actual-source transport regressions without changing authentication or scoring rules.
+- Validated MCP integer arguments exactly instead of accepting floating-point-rounded fractions, rejected explicit null arguments, and corrected standalone ESM client setup instructions.
+- Verified the pinned `mcp-remote` stdio-to-HTTP bridge against all six read-only tools with isolated credentials and process/port cleanup checks; documented its runtime and client-host environment requirements.
+- Added a canonical dashboard `/mcp` proxy with authenticated fresh score enrichment through the existing scorer, dashboard-relative report metadata with availability and screenshot URLs, validated tool schemas/errors, and complete issue-detail pagination.
+- Added real v1/v2 SDK-based MCP verification using the legacy 2025 protocol and client-agnostic bearer-key guides for Codex, Claude Code, Cursor, VS Code, and stdio bridges; documented read-only scope, direct-backend cache limitations, legacy audit details, and unsupported OAuth-only connectors.
+- Fixed interrupted Chromium startups being persisted as failed pages after pause cancellation; parent-run cancellation now keeps unfinished pages pending for resume, while active-run browser failures and local page timeouts remain genuine failures.
 - Fixed issue-detail request cancellation and added visible retry recovery; improved mobile search, drawer navigation, issue actions, viewport icons, and the main landmark without changing spotlight screenshot behavior. Dashboard skip navigation is excluded from printed reports.
 - Fixed concurrent scan progress updates that could leave a completed scan's count below its audited page count; MCP initialization now advertises the actual backend build version.
 - Fixed omitted issue-read pagination limits so group and occurrence APIs use their documented defaults instead of returning empty pages.

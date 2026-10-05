@@ -22,8 +22,8 @@ primary_region = "iad"
   AXE_GUIDANCE_PATH = "/shared-data/axe-guidance.json"
   SHOPKEEPER_URL = "http://lime-shopkeeper.internal:8080"
   LIME_GITHUB_REPO = "sumanbasuli/lime"
-  # Set LIME_UPDATE_CHECK=true via `fly secrets set` (or in this file) to
-  # show update notices in the sidebar. Default off.
+  # Update checks are enabled by default. Set LIME_UPDATE_CHECK=false via
+  # `fly secrets set` (or in this file) to disable outbound release checks.
 
 [http_service]
   internal_port = 3000

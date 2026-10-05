@@ -25,9 +25,9 @@ All environment configuration is managed through `.env` files:
 | `LIME_UI_PORT` | `3000` | Public host port for the NextJS UI |
 | `LIME_DB_PORT` | `5432` | Public host port for the bundled PostgreSQL container |
 | `LIME_DOCS_PORT` | `3001` | Local marketing website and documentation port |
-| `LIME_UPDATE_CHECK` | `false` | Operator opt-in for the UI's outbound GitHub release check; the per-browser Update notice preference only controls card visibility |
+| `LIME_UPDATE_CHECK` | `true` | Default-enabled best-effort GitHub release check; set `false` to opt out. The per-browser Update notice preference only controls card visibility |
 | `LIME_GITHUB_REPO` | `sumanbasuli/lime` | Repository used by the optional release check |
-| `LIME_VERSION` | build/runtime dependent | Version compared by the release check; source Compose defaults to `0.0.0`, release images include their build version |
+| `LIME_VERSION` | packaged dashboard version | Nonblank runtime/release-build version overrides remain authoritative for release comparison; when unset or blank, the UI uses its package version |
 | `ACT_RULES_PATH` | auto-resolved | Optional explicit path to `data/act-rules.json` for Shopkeeper and Next |
 
 ### File Locations
@@ -195,9 +195,9 @@ docker compose --env-file .env -f docker-compose.release.yml up -d
 | POST | `/api/scans/{id}/issues/{issueId}/false-positive` | Mark an issue as a false positive |
 | DELETE | `/api/scans/{id}/issues/{issueId}/false-positive` | Remove the false-positive mark from an issue |
 
-These routes are served by Shopkeeper and are also reachable through the dashboard's same-origin proxy. Paginated issue reads, application settings, and CSV/LLM exports are owned by Next and must use the dashboard origin. The [public API reference](https://lime.heysuman.com/api/) lists both surfaces. Shopkeeper also serves `/api/version`, `/api/screenshots/{scanId}/{filename}`, and the read-only `/mcp` transport described in [MCP Integration](mcp.md).
+These routes are served by Shopkeeper and are also reachable through the dashboard's same-origin proxy. Paginated issue reads, application settings, and CSV/LLM exports are owned by Next and must use the dashboard origin. The [public API reference](https://lime.heysuman.com/api/) lists both surfaces. Shopkeeper also serves `/api/version`, `/api/screenshots/{scanId}/{filename}`, and the read-only MCP tools. Use the dashboard's canonical `/mcp` endpoint (local port 3000): it proxies authentication/tool requests to Shopkeeper, adds fresh scores using the existing UI scorer, and provides the correct origin for report paths. The static docs website on port 3001 is not an MCP endpoint. Direct Shopkeeper `/mcp` remains available but returns null for cold/stale score caches. See [MCP Integration](mcp.md) for client-specific bearer-key setup, reachable HTTPS remote access, and the read-only SDK smoke test.
 
-Next also owns `GET /_lime/update-check`, which returns HTTP 200 with `enabled: false` when release checking is disabled. See [Updating LIME](deployment/updates.md) for the operator opt-in, immediate browser preference, and release-specific dismissal behavior.
+Next also owns `GET /_lime/update-check`, which checks releases by default and returns HTTP 200 with `enabled: false` when explicitly disabled. Set `LIME_UPDATE_CHECK=false` on the UI service to opt out; the isolated docs/verification Compose stack keeps this value explicitly false. See [Updating LIME](deployment/updates.md) for the server opt-out, immediate browser preference, and release-specific dismissal behavior.
 
 ## Runtime Behavior
 

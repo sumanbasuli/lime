@@ -31,17 +31,17 @@ const methodDescriptions: Record<string, string> = {
 const methodOrder = ["GET", "POST", "PUT", "DELETE"] as const;
 
 function curlForEndpoint(endpoint: ApiEndpoint) {
-  const port = endpoint.path === "/mcp" ? 8080 : 3000;
   const endpointPath = endpoint.path
     .replaceAll("{id}", "$SCAN_ID")
     .replaceAll("{scanId}", "$SCAN_ID")
     .replaceAll("{issueId}", "$ISSUE_ID")
     .replaceAll("{filename}", "$SCREENSHOT_FILENAME");
   const query = endpoint.exampleQuery ? `?${endpoint.exampleQuery}` : "";
-  const url = `http://localhost:${port}${endpointPath}${query}`;
+  const url = `http://localhost:3000${endpointPath}${query}`;
   const lines = [`curl -fSs -X ${endpoint.method} "${url}"`];
   if (endpoint.bearerKey) {
     lines.push('  -H "Authorization: Bearer $LIME_MCP_KEY"');
+    lines.push('  -H "Accept: application/json, text/event-stream"');
   }
   if (endpoint.body) {
     lines.push(`  -H "Content-Type: application/json"`);
@@ -83,10 +83,10 @@ export default function ApiReferencePage() {
           API Reference
         </h1>
         <p className="mt-5 max-w-3xl text-base leading-7 text-black/58 sm:text-lg sm:leading-8">
-          Run REST examples against the dashboard on port <code>3000</code>.
+          Run examples against the dashboard on port <code>3000</code>.
           It serves its own endpoints and proxies Shopkeeper routes. Each card
-          identifies the owning service; only the MCP transport uses Shopkeeper
-          directly on port <code>8080</code>.
+          identifies the owning service. Canonical <code>/mcp</code> also uses
+          the dashboard origin for fresh scores and usable report links.
         </p>
         <p className="mt-3 text-sm leading-6 text-black/55">
           Set <code>SCAN_ID</code> and <code>ISSUE_ID</code> to saved result IDs.

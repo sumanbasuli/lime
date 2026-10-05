@@ -33,7 +33,7 @@ func Setup(
 				len(origin) > 17 && origin[:17] == "http://localhost:"
 		},
 		AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Content-Type", "Authorization"},
+		AllowedHeaders:   []string{"Content-Type", "Authorization", "MCP-Protocol-Version"},
 		AllowCredentials: true,
 	})
 	r.Use(c.Handler)

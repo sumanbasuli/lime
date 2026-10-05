@@ -38,7 +38,9 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if [ ! -d "${ROOT_DIR}/docs-site/node_modules/playwright" ]; then
+if [ ! -d "${ROOT_DIR}/docs-site/node_modules/playwright" ] ||
+   [ ! -d "${ROOT_DIR}/docs-site/node_modules/@modelcontextprotocol/sdk" ] ||
+   [ ! -d "${ROOT_DIR}/docs-site/node_modules/@modelcontextprotocol/client" ]; then
   npm --prefix "${ROOT_DIR}/docs-site" ci
 fi
 if ! (cd "${ROOT_DIR}/docs-site" && node --input-type=module -e 'import { chromium } from "playwright"; import { existsSync } from "node:fs"; if (!existsSync(chromium.executablePath())) process.exit(1);'); then

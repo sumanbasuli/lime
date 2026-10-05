@@ -27,7 +27,8 @@ They talk to each other over Fly's private `.internal` network. PostgreSQL is pr
 ```bash
 export DATABASE_URL='postgresql://...'        # required
 export FLY_ORG='personal'                     # optional (default personal)
-export LIME_UPDATE_CHECK=true                 # optional (show update notices)
+# Optional: disable the default-enabled GitHub release check.
+# export LIME_UPDATE_CHECK=false
 
 ./scripts/fly-deploy.sh v0.1.0
 ```
@@ -120,4 +121,4 @@ Screenshots are stored on the volume mounted at `/app/screenshots` inside Shopke
 
 - Chromium needs memory. `shared-cpu-2x@2048MB` is the minimum that reliably completes multi-page scans. Bump to `performance-2x@4096MB` for large sites.
 - Autoscale is off on Shopkeeper to keep scans and the screenshot volume on a known machine. The UI auto-stops when idle.
-- `LIME_UPDATE_CHECK=true` enables the server's best-effort GitHub release check. The sidebar card also respects each browser's visibility and release-dismissal preferences; see [Updating LIME](updates.md).
+- GitHub release checks are enabled by default. Set `LIME_UPDATE_CHECK=false` on the UI app to opt out; explicit false values remain disabled. The sidebar card also respects each browser's visibility and release-dismissal preferences; see [Updating LIME](updates.md).

@@ -6,6 +6,8 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { connectMcp, readMcpTool, MCP_TOOL_NAMES, verifyMcpReadClient } from "./verify-mcp.mjs";
+import { verifyMcpBridge } from "./verify-mcp-bridge.mjs";
 
 function arg(name, fallback) {
   const index = process.argv.indexOf(name);
@@ -26,6 +28,9 @@ const requests = new Map();
 let retryAvailable = false;
 let browser;
 let page;
+let mcpConnection;
+let mcpV2Evidence;
+let mcpBridgeEvidence;
 
 function fixturePage(url) {
   // The embedded axe rules produce 17 failed and two manual-review groups on
@@ -90,6 +95,11 @@ async function json(url, options = {}, expectedStatus = 200) {
 
 const jsonOptions = (method, payload) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 const scanUrl = (id) => `${baseUrl}/api/scans/${id}`;
+
+async function verificationSql(statement) {
+  const { stdout } = await exec("docker", ["compose", "-p", "lime-verification", "-f", "docker-compose.docs.yml", "exec", "-T", "db", "psql", "-U", "lime", "-d", "lime_docs_db", "-Atc", statement], { cwd: repoRoot });
+  return stdout.trim();
+}
 
 async function waitForScan(id, statuses = ["completed"], timeout = 180_000) {
   const deadline = Date.now() + timeout;
@@ -164,10 +174,10 @@ async function download(button, extension) {
   return content;
 }
 
-async function rpc(method, params = {}, key, status = 200) {
-  const headers = { "Content-Type": "application/json" };
+async function rpc(method, params = {}, key, status = 200, endpoint = `${baseUrl}/mcp`) {
+  const headers = { "Content-Type": "application/json", Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2025-11-25" };
   if (key) headers.Authorization = `Bearer ${key}`;
-  return json(`${apiUrl}/mcp`, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }, status);
+  return json(endpoint, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }, status);
 }
 
 await mkdir(outputDir, { recursive: true });
@@ -214,6 +224,8 @@ try {
       await notice.waitFor();
       assert.equal(await page.getByRole("link", { name: "View release", exact: true }).getAttribute("href"), releaseUrl);
       const preference = page.getByLabel(/^Update notice/);
+      assert.equal(await preference.isChecked(), true, "A fresh browser defaults to showing update notices");
+      assert.equal(await page.evaluate(() => localStorage.getItem("lime.updateNotice.enabled")), null, "No preference is needed to show a new update card");
       await preference.locator("..").click();
       await notice.waitFor({ state: "hidden" });
       await page.reload({ waitUntil: "domcontentloaded" });
@@ -274,6 +286,7 @@ try {
     const state = await waitForScan(paused.id, ["paused"]);
     assert.equal(state.total_urls, 8);
     assert.ok(state.scanned_urls < state.total_urls, "Fixture must pause before completion");
+    assert.equal(await verificationSql(`SELECT count(*) FROM urls WHERE scan_id='${paused.id}' AND status='failed'`), "0", "Pause cancellation leaves unfinished healthy pages pending, not failed");
     const recovery = await createFromForm("/sitemap.xml", "sitemap", "Tablet", "verification-recovery");
     await waitForScan(recovery.id, ["scanning"]);
     await navigate("/links");
@@ -289,6 +302,7 @@ try {
     const completed = await waitForScan(paused.id);
     assert.equal(completed.total_urls, 8);
     assert.equal(completed.scanned_urls, 8);
+    assert.equal(await verificationSql(`SELECT count(*) FROM urls WHERE scan_id='${paused.id}' AND status='completed'`), "8", "Resume audits every healthy page, not only counts attempted pages");
   });
 
   await check("nested sitemap discovery, duplicate removal and off-host filtering", async () => {
@@ -523,61 +537,259 @@ try {
     await json(`${baseUrl}/api/settings`, jsonOptions("PUT", { reporting: settings.reporting }));
   });
 
-  await check("MCP enable, generated key, read tools, rotation and disable", async () => {
+  let mcpKey;
+  let mcpScan;
+  await check("MCP settings, client setup, one-time key and draft preservation", async () => {
     await rpc("initialize", {}, undefined, 401);
     await navigate("/settings", "Settings");
-    await page.getByLabel(/^Enable MCP/).locator("..").click();
-    await page.getByRole("button", { name: "Save settings", exact: true }).click();
-    await page.getByText(/Settings saved/i).waitFor();
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    assert.equal(await page.getByRole("link", { name: "MCP setup guide" }).getAttribute("href"), "https://lime.heysuman.com/docs/user/mcp/");
+    await page.getByRole("button", { name: "Copy MCP endpoint", exact: true }).click();
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), `${baseUrl}/mcp`);
+    await page.getByRole("button", { name: "Copy HTTP connection details", exact: true }).click();
+    const httpDetails = await page.evaluate(() => navigator.clipboard.readText());
+    assert.ok(httpDetails.includes(`${baseUrl}/mcp`));
+    assert.ok(httpDetails.includes("Authorization: Bearer <YOUR_MCP_KEY>"));
+    await page.getByRole("button", { name: "Copy Codex config", exact: true }).click();
+    const config = await page.evaluate(() => navigator.clipboard.readText());
+    assert.ok(config.includes(`url = "${baseUrl}/mcp"`));
+    assert.ok(config.includes('bearer_token_env_var = "LIME_MCP_KEY"'));
+    const saved = await json(`${baseUrl}/api/settings`);
+    const draftCap = saved.reporting.fullPdfOccurrenceLimit + 1;
+    await page.getByLabel(/^Full PDF occurrence cap/).fill(String(draftCap));
+    await page.getByLabel(/^Report concurrency/).fill("4");
     const [generated] = await Promise.all([
       page.waitForResponse((response) => response.url().endsWith("/api/settings") && response.request().method() === "POST"),
       page.getByRole("button", { name: "Generate MCP key", exact: true }).click(),
     ]);
+    assert.equal(generated.status(), 200);
     const result = await generated.json();
-    const key = result.mcpKey;
-    assert.ok(key, "Generated MCP key response");
+    mcpKey = result.mcpKey;
+    assert.ok(mcpKey, "Generated MCP key response");
     await page.getByText("New MCP key", { exact: true }).waitFor();
-    assert.equal(await page.locator("code").last().innerText(), key);
-    const initialized = await rpc("initialize", {}, key);
+    assert.ok((await page.locator("code").last().innerText()) === mcpKey);
+    await page.getByRole("button", { name: "Copy MCP key", exact: true }).click();
+    assert.ok((await page.evaluate(() => navigator.clipboard.readText())) === mcpKey, "Raw key can be copied once");
+    assert.equal(await page.getByLabel(/^Full PDF occurrence cap/).inputValue(), String(draftCap));
+    assert.equal(await page.getByLabel(/^Report concurrency/).inputValue(), "4");
+    assert.equal((await json(`${baseUrl}/api/settings`)).reporting.fullPdfOccurrenceLimit, saved.reporting.fullPdfOccurrenceLimit, "Key generation does not save reporting drafts");
+    assert.equal(result.settings.integrations.mcpEnabled, true, "Generation enables MCP immediately");
+    assert.equal(await verificationSql("SELECT length(mcp_key_hash) FROM app_settings WHERE key='global'"), "64", "Only a SHA256 key hash is stored");
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Rotate MCP key", exact: true }).waitFor();
+    assert.equal(await page.getByText("New MCP key", { exact: true }).count(), 0, "Raw key is not shown after reload");
+    assert.ok(!(await (await request(`${baseUrl}/api/settings`)).text()).includes(mcpKey), "Settings never expose the raw key");
+    mcpConnection = await connectMcp(`${baseUrl}/mcp`, mcpKey);
     const version = await json(`${baseUrl}/api/version`);
-    assert.equal(initialized.result.serverInfo.version, version.version);
-    const tools = (await rpc("tools/list", {}, key)).result.tools;
-    assert.equal(tools.length, 6);
-    for (const [name, argumentsValue] of [
-      ["list_scans", {}], ["get_scan", { scan_id: single.id }],
-      ["list_scan_issues", { scan_id: single.id }],
-      ["get_issue_detail", { scan_id: single.id, kind: "failed", key: issue.id }],
-      ["get_report_metadata", { scan_id: single.id }], ["get_settings", {}],
-    ]) {
-      const response = await rpc("tools/call", { name, arguments: argumentsValue }, key);
-      assert.ok(response.result, `${name}: ${JSON.stringify(response.error)}`);
-      assert.notEqual(response.result.isError, true, name);
-      const content = response.result.structuredContent;
-      if (name === "list_scans") assert.ok(content.scans.some((scan) => scan.id === single.id));
-      if (name === "get_scan") {
-        assert.equal(content.scan.id, single.id);
-        assert.equal(content.progress.percent, 100);
-        assert.ok(content.score_summary.has_score);
-      }
-      if (name === "list_scan_issues") assert.ok(content.issues.some((entry) => entry.issue_id === issue.id));
-      if (name === "get_issue_detail") assert.equal(content.detail.summary.issue_id, issue.id);
-      if (name === "get_report_metadata") assert.equal(content.reports.pdf, `/api/scans/${single.id}/issues/report.pdf`);
-      if (name === "get_settings") {
-        assert.equal(content.integrations.mcp_enabled, true);
-        assert.ok(!JSON.stringify(content).includes(key), "MCP reads do not expose bearer key");
-      }
+    assert.equal(mcpConnection.client.getServerVersion().version, version.version);
+    await mcpConnection.client.ping();
+    assert.equal(mcpConnection.transport.sessionId, undefined, "Stateless JSON transport does not issue session IDs");
+    assert.ok(mcpConnection.trace.some((entry) => entry.rpcMethod === "initialize" && entry.status === 200));
+    assert.ok(mcpConnection.trace.some((entry) => entry.rpcMethod === "notifications/initialized" && entry.status === 202 && entry.protocol === "2025-11-25"));
+    const tools = (await mcpConnection.client.listTools()).tools;
+    assert.deepEqual(tools.map((tool) => tool.name).sort(), [...MCP_TOOL_NAMES].sort());
+    for (const tool of tools) {
+      assert.equal(tool.annotations.readOnlyHint, true);
+      assert.equal(tool.annotations.destructiveHint, false);
+      if (tool.inputSchema.properties.scan_id) assert.ok(tool.inputSchema.required.includes("scan_id"));
     }
+  });
+
+  await check("MCP SDK cold scores, pagination, triage freshness and usable reports", async () => {
+    const client = mcpConnection.client;
+    mcpScan = await json(`${apiUrl}/api/scans`, jsonOptions("POST", { sitemap_url: fixtureOrigin + "/good", scan_type: "single", tag: "mcp-cold-cache" }), 201);
+    await waitForScan(mcpScan.id);
+    assert.equal(await verificationSql(`SELECT count(*) FROM scan_score_summary_cache WHERE scan_id='${mcpScan.id}'`), "0", "MCP-only fixture has never been opened in the dashboard");
+    const directCold = await rpc("tools/call", { name: "get_scan", arguments: { scan_id: mcpScan.id } }, mcpKey, 200, `${apiUrl}/mcp`);
+    assert.equal(directCold.result.structuredContent.score_summary, null, "Direct Shopkeeper accurately reports a cold score cache");
+    const cold = await readMcpTool(client, "get_scan", { scan_id: mcpScan.id });
+    assert.equal(cold.scan.id, mcpScan.id);
+    assert.equal(cold.progress.percent, 100);
+    assert.equal(cold.score_summary.has_score, true, "Canonical MCP computes score without dashboard navigation");
+    assert.equal(cold.score_summary.completed_url_count, 1);
+    assert.equal(cold.score_summary.score, await displayedScore(mcpScan.id));
+    await navigate("/settings", "Settings");
+    const scans = await readMcpTool(client, "list_scans", { limit: 2, offset: 0 });
+    assert.equal(scans.scans.length, 2);
+    const secondPage = await readMcpTool(client, "list_scans", { limit: 2, offset: 2 });
+    assert.ok(!secondPage.scans.some((scan) => scans.scans.some((first) => first.id === scan.id)));
+    const groups = [];
+    let total;
+    for (let offset = 0; total === undefined || offset < total; offset += 7) {
+      const data = await readMcpTool(client, "list_scan_issues", { scan_id: mcpScan.id, limit: 7, offset });
+      total = data.total;
+      groups.push(...data.issues);
+    }
+    assert.equal(groups.length, total);
+    assert.equal(new Set(groups.map((group) => `${group.kind}:${group.key}`)).size, total);
+    const beyond = await readMcpTool(client, "list_scan_issues", { scan_id: mcpScan.id, offset: 100000 });
+    assert.equal(beyond.issues.length, 0);
+    assert.equal(beyond.total, total, "Empty final page retains the true group total");
+    const labeled = groups.find((group) => group.rule_id === "label");
+    assert.ok(labeled);
+    const occurrences = await readMcpTool(client, "get_issue_detail", { scan_id: mcpScan.id, kind: labeled.kind, key: labeled.key, limit: 1 });
+    assert.equal(occurrences.detail.occurrences.length, 1);
+    assert.equal(occurrences.detail.has_more, true);
+    const occurrence = occurrences.detail.occurrences[0];
+    assert.ok(occurrence.html_snippet.includes("input"));
+    assert.ok(occurrence.css_selector);
+    for (const imagePath of [occurrence.screenshot_url, occurrence.element_screenshot_url]) {
+      assert.ok(imagePath);
+      assert.ok(imagePath.startsWith(`/api/screenshots/${mcpScan.id}/`));
+      assert.match((await request(new URL(imagePath, baseUrl))).headers.get("content-type"), /image/);
+    }
+    const reviewGroup = groups.find((group) => group.kind === "needs_review");
+    assert.ok(reviewGroup);
+    await readMcpTool(client, "get_issue_detail", { scan_id: mcpScan.id, kind: reviewGroup.kind, key: reviewGroup.key, limit: 1 });
+    const multiGroups = await readMcpTool(client, "list_scan_issues", { scan_id: paused.id });
+    const multiLabel = multiGroups.issues.find((group) => group.rule_id === "label");
+    const occurrenceIDs = [];
+    for (let offset = 0; offset < 32; offset += 7) {
+      const data = await readMcpTool(client, "get_issue_detail", { scan_id: paused.id, kind: multiLabel.kind, key: multiLabel.key, limit: 7, offset });
+      assert.equal(data.detail.summary.occurrence_count, 32);
+      assert.equal(data.detail.has_more, offset + data.detail.occurrences.length < 32);
+      occurrenceIDs.push(...data.detail.occurrences.map((item) => item.id));
+    }
+    assert.equal(new Set(occurrenceIDs).size, 32, "Occurrence pagination does not skip or duplicate rows");
+    const exhausted = await readMcpTool(client, "get_issue_detail", { scan_id: paused.id, kind: multiLabel.kind, key: multiLabel.key, offset: 100000 });
+    assert.equal(exhausted.detail.occurrences.length, 0);
+    assert.equal(exhausted.detail.has_more, false);
+    await json(`${scanUrl(mcpScan.id)}/issues/${labeled.key}/false-positive`, { method: "POST" });
+    const stale = await rpc("tools/call", { name: "get_scan", arguments: { scan_id: mcpScan.id } }, mcpKey, 200, `${apiUrl}/mcp`);
+    assert.equal(stale.result.structuredContent.score_summary, null, "Direct endpoint never serves the stale triage score");
+    const marked = await readMcpTool(client, "get_scan", { scan_id: mcpScan.id });
+    assert.ok(marked.score_summary.score > cold.score_summary.score);
+    // The existing dashboard scorer removes false-positive rules before
+    // aggregation; its legacy excluded_count is not a triage counter.
+    assert.equal(marked.score_summary.excluded_count, cold.score_summary.excluded_count);
+    assert.equal(marked.score_summary.failed_count, cold.score_summary.failed_count - 1);
+    assert.equal(marked.score_summary.scored_audit_count, cold.score_summary.scored_audit_count - 1);
+    assert.equal(marked.score_summary.weighted_failed, cold.score_summary.weighted_failed - 10, "Label rule is removed from the existing weighted score");
+    const markedGroups = await readMcpTool(client, "list_scan_issues", { scan_id: mcpScan.id });
+    assert.equal(markedGroups.issues.find((group) => group.key === labeled.key).is_false_positive, true);
+    await json(`${scanUrl(mcpScan.id)}/issues/${labeled.key}/false-positive`, { method: "DELETE" });
+    assert.equal((await readMcpTool(client, "get_scan", { scan_id: mcpScan.id })).score_summary.score, cold.score_summary.score);
+    // A targeted lookup must not be capped at the first 1,000 groups. Synthetic
+    // read-only pagination rows exist only in the disposable verification DB.
+    await verificationSql(`INSERT INTO issues (scan_id,violation_type,description,severity) SELECT '${mcpScan.id}', 'mcp-pagination-'||n, 'MCP pagination '||n, 'serious' FROM generate_series(1,1005) n`);
+    try {
+      const far = await readMcpTool(client, "list_scan_issues", { scan_id: mcpScan.id, limit: 5, offset: 1000 });
+      assert.equal(far.total, total + 1005);
+      assert.equal(far.issues.length, 5);
+      for (const group of far.issues) {
+        const data = await readMcpTool(client, "get_issue_detail", { scan_id: mcpScan.id, kind: group.kind, key: group.key });
+        assert.equal(data.detail.summary.key, group.key);
+      }
+    } finally {
+      await verificationSql(`DELETE FROM issues WHERE scan_id='${mcpScan.id}' AND violation_type LIKE 'mcp-pagination-%'`);
+    }
+    const metadata = await readMcpTool(client, "get_report_metadata", { scan_id: mcpScan.id });
+    assert.deepEqual(metadata.availability, { pdf: true, csv: true, llm: true });
+    for (const [format, reportPath] of Object.entries(metadata.reports)) {
+      const report = await request(new URL(reportPath, baseUrl));
+      const bytes = Buffer.from(await report.arrayBuffer());
+      assert.ok(bytes.length > 100);
+      if (format === "pdf") assert.equal(bytes.subarray(0, 5).toString(), "%PDF-");
+      if (format === "csv") assert.match(bytes.toString(), /^item_type,rule_id,/);
+      if (format === "llm") assert.ok(bytes.toString().includes("label"));
+    }
+    const settings = await json(`${baseUrl}/api/settings`);
+    try {
+      await json(`${baseUrl}/api/settings`, jsonOptions("PUT", { reporting: { pdfReportsEnabled: false, csvReportsEnabled: false, llmReportsEnabled: false } }));
+      assert.deepEqual((await readMcpTool(client, "get_report_metadata", { scan_id: mcpScan.id })).availability, { pdf: false, csv: false, llm: false });
+      for (const reportPath of Object.values(metadata.reports)) await request(new URL(reportPath, baseUrl), {}, 403);
+    } finally {
+      await json(`${baseUrl}/api/settings`, jsonOptions("PUT", { reporting: settings.reporting }));
+    }
+    const visible = await readMcpTool(client, "get_settings");
+    assert.equal(visible.integrations.mcp_enabled, true);
+    assert.ok(!JSON.stringify(visible).includes(mcpKey), "Read tools do not expose the bearer key");
+    assert.ok(!JSON.stringify(visible).includes("mcp_key_hash"), "Read tools do not expose the hash");
+    const smoke = await verifyMcpReadClient(`${baseUrl}/mcp`, mcpKey, mcpScan.id);
+    assert.equal(smoke.checked.length, 6, "Operator SDK smoke helper exercises every tool");
+    mcpV2Evidence = await verifyMcpReadClient(`${baseUrl}/mcp`, mcpKey, mcpScan.id, { sdk: "v2" });
+    assert.equal(mcpV2Evidence.checked.length, 6, "Current SDK client reads every existing tool");
+    assert.deepEqual(mcpV2Evidence.protocol, { era: "legacy", version: "2025-11-25" });
+    mcpBridgeEvidence = await verifyMcpBridge(`${baseUrl}/mcp`, mcpKey, mcpScan.id);
+    assert.equal(mcpBridgeEvidence.checked.length, 6, "Real stdio bridge reads every existing tool");
+  });
+
+  await check("MCP protocol errors, read-only boundary, rotation and disable", async () => {
+    const client = mcpConnection.client;
+    for (const [name, args] of [
+      ["get_scan", {}], ["get_scan", { scan_id: "invalid" }],
+      ["list_scan_issues", { scan_id: single.id, limit: 1.5 }],
+      ["list_scans", { limit: 101 }], ["list_scans", { offset: -1 }],
+      ["get_issue_detail", { scan_id: single.id, kind: "invalid", key: issue.id }],
+      ["get_scan", { scan_id: "00000000-0000-0000-0000-000000000000" }],
+    ]) {
+      const result = await client.callTool({ name, arguments: args });
+      assert.equal(result.isError, true, `${name} rejects invalid arguments without DB errors`);
+      assert.ok(result.content[0].text);
+      assert.ok(!result.content[0].text.includes("SQLSTATE"));
+    }
+    for (const name of ["create_scan", "delete_scan", "save_settings", "mark_false_positive"]) {
+      const data = await rpc("tools/call", { name, arguments: { scan_id: single.id } }, mcpKey);
+      assert.equal(data.error.code, -32602, "MCP cannot invoke mutation tools");
+    }
+    const headers = { Authorization: `Bearer ${mcpKey}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2025-11-25" };
+    for (const endpoint of [`${baseUrl}/mcp`, `${apiUrl}/mcp`]) {
+      await request(endpoint, { headers }, 405);
+      await request(endpoint, { method: "DELETE", headers }, 405);
+      await request(endpoint, { method: "POST", headers: { ...headers, Origin: "https://untrusted.example" }, body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "ping" }) }, 403);
+      await request(endpoint, { method: "POST", headers: { ...headers, "MCP-Protocol-Version": "invalid" }, body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "ping" }) }, 400);
+      for (const body of ['{', '[]', '{"jsonrpc":"1.0","id":7,"method":"ping"}', '{"jsonrpc":"2.0","id":true,"method":"ping"}', '{"jsonrpc":"2.0","id":null,"method":"ping"}', '{"jsonrpc":"2.0","id":7,"method":"ping"}{}']) {
+        const error = await json(endpoint, { method: "POST", headers, body }, 400);
+        assert.ok(error.error.code < 0);
+      }
+      // Keep the JSON numeric spelling intact: JavaScript Number would round
+      // these fractions/underflows before the server could validate them.
+      for (const args of ['{"limit":1.0000000000000000001}', '{"limit":100.0000000000000000001}', '{"offset":1e-400}', '{"offset":1e-1000000000}']) {
+        const rejected = await json(endpoint, { method: "POST", headers, body: `{"jsonrpc":"2.0","id":"exact-number","method":"tools/call","params":{"name":"list_scans","arguments":${args}}}` });
+        assert.equal(rejected.result.isError, true, "Exact non-integer pagination must not reach a database read");
+      }
+      const nullArgs = await json(endpoint, { method: "POST", headers, body: '{"jsonrpc":"2.0","id":"null-args","method":"tools/call","params":{"name":"get_settings","arguments":null}}' });
+      assert.equal(nullArgs.error.code, -32602, "Present arguments must be an object, not null");
+      const integral = await json(endpoint, { method: "POST", headers, body: '{"jsonrpc":"2.0","id":"integral-number","method":"tools/call","params":{"name":"list_scans","arguments":{"limit":1.0,"offset":0e-1000000000}}}' });
+      assert.ok(!integral.result.isError, "Exact integral JSON numbers remain supported");
+      const notification = await request(endpoint, { method: "POST", headers, body: '{"jsonrpc":"2.0","method":"notifications/initialized"}' }, 202);
+      assert.equal(await notification.text(), "", "Accepted notifications return an empty202");
+      await request(endpoint, { method: "POST", headers, body: " ".repeat(1024 * 1024 + 1) }, 413);
+      for (const version of ["2025-03-26", "2025-06-18", "2025-11-25"]) {
+        const data = await rpc("initialize", { protocolVersion: version, capabilities: {}, clientInfo: { name: "lime-version-probe", version: "1" } }, mcpKey, 200, endpoint);
+        assert.equal(data.result.protocolVersion, version);
+      }
+      const cors = await request(endpoint, { method: "POST", headers: { ...headers, Origin: "http://localhost:3002" }, body: JSON.stringify({ jsonrpc: "2.0", id: "cors", method: "tools/call", params: { name: "get_scan", arguments: { scan_id: mcpScan.id } } }) });
+      assert.equal(cors.headers.get("access-control-allow-origin"), "http://localhost:3002", "Score enrichment preserves upstream CORS headers");
+      const largeID = await request(endpoint, { method: "POST", headers, body: `{"jsonrpc":"2.0","id":9007199254740993,"method":"tools/call","params":{"name":"get_scan","arguments":{"scan_id":"${mcpScan.id}"}}}` });
+      assert.match(await largeID.text(), /"id"\s*:\s*9007199254740993\s*[,}]/, "Score enrichment preserves large numeric JSON-RPC IDs exactly");
+    }
+    let dismissed = false;
+    page.once("dialog", async (dialog) => { dismissed = true; await dialog.dismiss(); });
+    await page.getByRole("button", { name: "Rotate MCP key", exact: true }).click();
+    assert.equal(dismissed, true);
+    await client.ping();
+    page.once("dialog", (dialog) => dialog.accept());
     const [rotation] = await Promise.all([
       page.waitForResponse((response) => response.url().endsWith("/api/settings") && response.request().method() === "POST"),
-      page.getByRole("button", { name: "Generate MCP key", exact: true }).click(),
+      page.getByRole("button", { name: "Rotate MCP key", exact: true }).click(),
     ]);
     const rotated = await rotation.json();
-    await rpc("initialize", {}, key, 401);
-    await rpc("initialize", {}, rotated.mcpKey);
+    await rpc("ping", {}, mcpKey, 401);
+    await assert.rejects(() => client.ping(), /401|Unauthorized|unauthorized/);
+    const previousTrace = mcpConnection.trace;
+    await client.close();
+    mcpConnection = await connectMcp(`${baseUrl}/mcp`, rotated.mcpKey);
+    await mcpConnection.client.ping();
+    await navigate("/settings", "Settings");
     await page.getByLabel(/^Enable MCP/).locator("..").click();
     await page.getByRole("button", { name: "Save settings", exact: true }).click();
     await page.getByText(/Settings saved/i).waitFor();
-    await rpc("initialize", {}, rotated.mcpKey, 401);
+    await rpc("ping", {}, rotated.mcpKey, 401);
+    await assert.rejects(() => mcpConnection.client.ping(), /401|Unauthorized|unauthorized/);
+    await writeFile(path.join(outputDir, "mcp-client-results.json"), JSON.stringify({ sdk: "@modelcontextprotocol/sdk@1.32.0", endpoint: `${baseUrl}/mcp`, tools: MCP_TOOL_NAMES, trace: [...previousTrace, ...mcpConnection.trace], v2: { sdk: "@modelcontextprotocol/client@2.3.0", ...mcpV2Evidence }, bridge: mcpBridgeEvidence }, null, 2));
+    await mcpConnection.client.close();
+    mcpConnection = undefined;
   });
 
   await check("rescan creates new ID, preserves viewport/tag; delete removes results", async () => {
@@ -661,6 +873,7 @@ try {
   throw error;
 } finally {
   await writeFile(path.join(outputDir, "results.json"), JSON.stringify({ completedAt: new Date().toISOString(), evidence, browserErrors }, null, 2));
+  await mcpConnection?.client.close();
   await browser?.close();
   await new Promise((resolve) => fixtureServer.close(resolve));
 }

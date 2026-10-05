@@ -21,7 +21,7 @@ func ScanPages(ctx, allocCtx context.Context, pages []PageInput, scanID string, 
 * **Axe-Core Execution**: Injects axe-core 4.10.2 into each page via `chromedp.Evaluate()` and runs a Lighthouse-aligned accessibility configuration: `elementRef: true`, `runOnly` on `wcag2a`/`wcag2aa`, `resultTypes` including `violations` and `inapplicable`, curated rule overrides, and `noHtml: true` with custom node serialization.
 * **Screenshot Capturing**: Takes full-page PNG screenshots and per-element screenshots saved under the Shopkeeper screenshot directory. Docker/Fly use `/app/screenshots/{scanID}/`; native installs set `SHOPKEEPER_SCREENSHOT_DIR` while stored DB paths remain `/app/screenshots/...` for stable UI/report URLs.
 * **Concurrency Management**: Worker pool using a buffered channel semaphore of size 5.
-* **Politeness**: 500ms delay between requests via `time.Sleep`.
+* **Politeness**: 500ms delay between requests, interruptible when the parent scan run is canceled.
 * **Progress Reporting**: Calls `onProgress(scannedCount)` after each page, enabling real-time scan progress in the UI. Completion callbacks are serialized in counter order so concurrent workers cannot persist a lower count after a higher one.
 * **Viewport Control**: Applies the scan's persisted viewport width/height before navigation so layout, screenshots, and rule evaluation all use the same deterministic rendering width.
 * **Visual Stabilization**: Uses a fuller settle wait before screenshots and as a best-effort step before rule execution, without treating every late-loading asset as a hard scan failure.
@@ -38,6 +38,12 @@ func ScanPages(ctx, allocCtx context.Context, pages []PageInput, scanID string, 
 * **Docker Requirement**: `shm_size: 2gb` in docker-compose for Chromium stability.
 * **Chrome Flags**: `--no-sandbox`, `--disable-gpu`, `--disable-dev-shm-usage` for Docker compatibility.
 * **Viewport Presets**: Shopkeeper currently resolves four presets before Juicer runs: Desktop `1440x900`, Laptop `1280x800`, Tablet `768x1024`, and Mobile `390x844`.
+
+### Cancellation And Resume
+
+Juicer distinguishes the parent scan-run context from each page's timeout. An unfinished browser operation that returns an error after the parent is canceled is treated as interrupted work, even if Chromium startup loses the original cancellation cause and reports only `chrome failed to start`. Canceled page results are not persisted as failures; they remain pending for resume. Successful results remain valid. Startup/navigation errors and local page timeouts while the parent is still active remain genuine failures.
+
+`shopkeeper/internal/juicer/cancellation_test.go` covers these boundaries, including startup errors with blank/DBUS messages, parent cancellation/deadline, active-run errors, local page timeouts, and nil successful operations. This classification does not change screenshot rendering or the scoring algorithm.
 
 ### Chromedp Allocator
 

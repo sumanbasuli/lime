@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo"
@@ -9,7 +10,7 @@ import (
 
 func TestInitializeReportsBuildVersion(t *testing.T) {
 	server := New(nil)
-	result, rpcErr := server.dispatch(context.Background(), rpcRequest{Method: "initialize"})
+	result, rpcErr := server.dispatch(context.Background(), rpcRequest{Method: "initialize", Params: json.RawMessage(`{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}}`)})
 	if rpcErr != nil {
 		t.Fatalf("initialize returned an error: %v", rpcErr)
 	}

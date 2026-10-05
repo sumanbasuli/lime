@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import packageInfo from "../../../../package.json";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -47,13 +48,13 @@ function compareSemver(a: string, b: string): number {
 }
 
 export async function GET(): Promise<NextResponse<DisabledPayload | EnabledPayload | { error: string }>> {
-  const enabled = (process.env.LIME_UPDATE_CHECK ?? "").toLowerCase() === "true";
+  const enabled = (process.env.LIME_UPDATE_CHECK ?? "true").toLowerCase() === "true";
 
   if (!enabled) {
     return NextResponse.json({ enabled: false } satisfies DisabledPayload);
   }
 
-  const current = cleanTag(process.env.LIME_VERSION) ?? "dev";
+  const current = cleanTag(process.env.LIME_VERSION) ?? packageInfo.version;
   const repo = process.env.LIME_GITHUB_REPO?.trim() || DEFAULT_REPO;
   const endpoint = `https://api.github.com/repos/${repo}/releases/latest`;
 

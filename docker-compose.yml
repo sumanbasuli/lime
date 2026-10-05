@@ -56,9 +56,9 @@ services:
       ACT_RULES_PATH: /shared-data/act-rules.json
       DATABASE_URL: postgresql://${POSTGRES_USER:-lime}:${POSTGRES_PASSWORD:-lime_dev_password}@db:5432/${POSTGRES_DB:-lime_db}?sslmode=disable
       SHOPKEEPER_URL: http://shopkeeper:8080
-      LIME_UPDATE_CHECK: ${LIME_UPDATE_CHECK:-false}
+      LIME_UPDATE_CHECK: ${LIME_UPDATE_CHECK:-true}
       LIME_GITHUB_REPO: ${LIME_GITHUB_REPO:-sumanbasuli/lime}
-      LIME_VERSION: ${LIME_VERSION:-0.0.0}
+      LIME_VERSION: ${LIME_VERSION:-}
     ports:
       - "${LIME_UI_PORT:-3000}:3000"
     volumes:

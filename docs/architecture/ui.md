@@ -22,6 +22,7 @@ The frontend for the accessibility scanner is a strictly decoupled **NextJS** ap
   - and scan creation now includes a viewport preset so users can choose the screen size used for rendering
 - **Proxy route handler** at `src/app/api/[...path]/route.ts` forwards scan lifecycle, triage, screenshot, and backend report requests to Shopkeeper using the runtime `SHOPKEEPER_URL` env
 - **Next-owned route handlers** serve paginated issue summaries/details, application settings, and CSV/LLM exports; the PDF route adds UI report settings and concurrency control before calling Shopkeeper
+- **Canonical MCP route** at `src/app/mcp/route.ts` uses the shared `src/lib/shopkeeper-proxy.ts` runtime proxy, preserves bearer/protocol headers, and forwards MCP requests to Shopkeeper. Only after an authenticated successful `get_scan` result does Next add fresh scores with `getScanScoreSummaries`; it uses the existing dashboard scoring algorithm and keeps JSON text/structured results aligned.
 - Shopkeeper owns scan, URL, audit, issue, and occurrence writes. Next persists application settings and derived score/issue-summary caches in the same database. These ownership boundaries should be preserved when adding features.
 
 ### Page Routes
@@ -77,7 +78,9 @@ The header search submits to `/scans?q=...`. Search matches target URL, tag, sta
 
 ### Optional Release Notice
 
-Next owns `GET /_lime/update-check` in `src/app/%5Flime/update-check/route.ts`. The escaped directory is intentional: an `_lime` directory is private to the App Router and does not register the public URL. The restored route returns HTTP 200 with `enabled: false` unless the operator sets `LIME_UPDATE_CHECK=true`; an enabled outbound GitHub fetch has a five-second timeout and failures suppress the notice.
+Next owns `GET /_lime/update-check` in `src/app/%5Flime/update-check/route.ts`. The escaped directory is intentional: an `_lime` directory is private to the App Router and does not register the public URL. Release checks are enabled when `LIME_UPDATE_CHECK` is unset, and normal/source and release Compose default it to true. An explicit `LIME_UPDATE_CHECK=false` opts out and returns HTTP 200 with `enabled: false` without calling GitHub. The isolated docs/verification Compose stack explicitly stays false. An enabled outbound GitHub fetch has a five-second timeout and failures suppress the notice.
+
+Release comparison uses the packaged dashboard version when `LIME_VERSION` is unset or blank. A nonblank runtime/release-build override remains authoritative; a development placeholder is not forced into ordinary Compose deployments.
 
 `UpdateNotice` fetches this best-effort endpoint on mount. A card requires both server enablement and the browser's display preference, plus an outdated version and a latest release tag. The browser preference defaults to on; **Settings > Update notice** writes `lime.updateNotice.enabled` immediately and dispatches a custom event so the mounted sidebar updates without saving PostgreSQL settings. Preference changes from another tab are observed through the storage event. This display switch does not stop server-side release checks.
 
@@ -102,6 +105,16 @@ Typed fetch wrapper using same-origin `/api/...` paths:
 - `getStats()` — GET /api/stats
 
 The browser never needs a deployment-specific backend URL. The Next server proxies these paths to `SHOPKEEPER_URL` at runtime, which keeps the images reverse-proxy friendly and removes build-time API URL coupling.
+
+### MCP Ownership
+
+External clients should use dashboard `/mcp` for complete saved-data integration. Shopkeeper owns key authentication, protocol negotiation, validated schemas, six read-only tools, and paginated repository reads. Next owns the canonical proxy and fresh score enrichment, which occurs only after Shopkeeper accepts the authenticated read. There is no public unauthenticated score endpoint or separate MCP scoring formula. Direct Shopkeeper access reads its valid saved score cache and returns null when it is cold or stale.
+
+Score enrichment preserves the original numeric JSON-RPC ID token, including integers larger than JavaScript's safe range, with Node 23+ native JSON parse context/raw JSON support. Native dashboard deployments must meet the documented Node 23+ runtime prerequisite; the Docker image supplies that runtime. Client authors can use string IDs to avoid rounding in their own JSON construction/parsing.
+
+The MCP route passes a 1 MiB body limit and 30-second deadline to the shared proxy. The deadline covers incoming-body buffering as well as upstream fetch; cancellation releases the body reader before any upstream call. Errors return controlled HTTP 400/413/500/502/504 responses without private upstream details. This deadline does not bound separate score computation. Node fetch decodes compressed response bodies, so the proxy removes the upstream `Content-Encoding` and `Content-Length` along with hop-by-hop headers rather than forwarding stale framing metadata. The regression command is `npm --prefix lime run test:mcp-transport`; it executes the real source with controlled boundaries and a local gzip server, without changing application settings or databases.
+
+Report metadata includes per-format enablement and paths explicitly relative to the dashboard origin, where PDF controls and CSV/LLM exports are served. Metadata does not generate/download a report. The integration is stateless POST JSON Streamable HTTP; GET 405 is intentional. MCP cannot write scans, triage or settings. Shared static bearer keys are not OAuth or per-user scopes. See [MCP Integration](../mcp.md) for client capabilities, setup and verification.
 
 ### Scan Management
 
@@ -152,6 +165,8 @@ Deletion requires a confirmation and removes the scan's saved results and screen
 ### Issue Grouping
 
 Issue groups use the axe rule ID as their grouping contract. A failed issue group takes priority: if that rule also has incomplete outcomes elsewhere in the scan, the UI does not duplicate it as a separate needs-review card. The raw incomplete audits and occurrence records remain persisted. Review-only rules without a failed group appear as needs-review cards. Reports and MCP use the same grouping rule so their card/group counts align with the dashboard.
+
+Scoring filters false-positive rule IDs before constructing its audit summary. The legacy/reserved `excludedCount` (`excluded_count` in MCP) remains a compatibility field, not a count of triage marks. Use issue-level `is_false_positive` and filtered failed/scored counts to verify triage; do not change the scoring algorithm merely to populate that field.
 
 Marking or unmarking a false positive can move a group to a different sort position. The issue feed refreshes its loaded prefix after triage so later **Load more issues** requests use the updated order without skipping or duplicating a group. Group and occurrence APIs default to 12 and 25 items respectively; details stay paginated independently of the group list.
 

@@ -22,10 +22,12 @@ The Fly script does not create a database backup automatically; take one with yo
 
 The notice has two controls:
 
-1. The operator enables outbound release checks with `LIME_UPDATE_CHECK=true` on the UI service. The default is off. `LIME_GITHUB_REPO` selects the repository, defaulting to `sumanbasuli/lime`.
+1. Outbound best-effort release checks are enabled by default when `LIME_UPDATE_CHECK` is unset; normal/source and release Compose also default it to `true`. Set `LIME_UPDATE_CHECK=false` on the UI service to opt out, then restart/recreate the UI process with that environment. Existing explicit false values remain disabled. `LIME_GITHUB_REPO` selects the repository, defaulting to `sumanbasuli/lime`.
 2. Each browser can show or hide the sidebar card using **Settings > Update notice**. This browser preference defaults to on and takes effect immediately, without **Save settings**. It does not change server-wide settings or disable the operator's outbound check.
 
-The Next-owned `GET /_lime/update-check` endpoint returns `{ "enabled": false }` when the server check is disabled. When enabled, it checks `api.github.com` with a five-second timeout and compares the latest release against the UI process's `LIME_VERSION` (the release image supplies a build version; runtime configuration can override it). Drafts, prereleases, and best-effort failures produce no update card. The card links to release notes; it never installs an update.
+The Next-owned `GET /_lime/update-check` endpoint returns `{ "enabled": false }` when the server check is disabled. When enabled, it checks `api.github.com` with a five-second timeout and compares the latest release against the UI version. Nonblank `LIME_VERSION` runtime/release-build overrides remain authoritative; when unset or blank, the route uses the packaged dashboard version rather than a development placeholder. Drafts, prereleases, and best-effort failures produce no update card. The card links to release notes; it never installs an update.
+
+The isolated `docker-compose.docs.yml` stack explicitly disables release checks for deterministic/offline documentation and verification. Turning off only the browser card does not prevent the server from contacting GitHub; use the environment opt-out for that.
 
 The display preference is stored as `lime.updateNotice.enabled` in browser local storage. Dismissing a card stores its exact release tag as `lime.updateNotice.dismissed`, so the same release stays hidden after reload while a different newer release can appear. These choices belong to that browser and origin, not PostgreSQL or an account.
 
@@ -33,7 +35,7 @@ The route source is `lime/src/app/%5Flime/update-check/route.ts`. The escaped fo
 
 ## Manual release notifications
 
-Prefer not to enable outbound calls? Watch the GitHub repository for releases:
+Prefer no outbound release calls? Set `LIME_UPDATE_CHECK=false` and watch the GitHub repository for releases:
 
 1. open `https://github.com/sumanbasuli/lime`
 2. click **Watch > Custom > Releases**
