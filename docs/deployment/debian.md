@@ -19,7 +19,7 @@ Use Debian-family Linux with systemd, a supported CPU architecture, and these de
 - Chrome/Chromium on the service's system `PATH`
 - Git, Make, standard install utilities, and optionally rsync
 
-Install Go using [its platform-specific instructions](https://go.dev/doc/install); do not extract a pinned amd64 archive onto an unknown architecture or over an existing Go tree. Install PostgreSQL using the [Debian](https://www.postgresql.org/download/linux/debian/) or [Ubuntu](https://www.postgresql.org/download/linux/ubuntu/) instructions if the distribution repository does not provide version 17. The installer does not install language runtimes, Chromium, or PostgreSQL for you.
+Follow the [Go installation instructions](https://go.dev/doc/install) for your CPU architecture. Use the PostgreSQL [Debian](https://www.postgresql.org/download/linux/debian/) or [Ubuntu](https://www.postgresql.org/download/linux/ubuntu/) instructions if your distribution does not provide version 17. LIME's native installer expects Go, Node, Chromium, and PostgreSQL to be installed already.
 
 After configuring the appropriate package repositories, a typical Debian package step is:
 
@@ -29,7 +29,7 @@ sudo apt-get install -y git make rsync chromium fonts-liberation postgresql-clie
 sudo apt-get install -y postgresql-17
 ```
 
-Package availability and Chromium packaging differ across Debian/Ubuntu releases; verify a real browser binary works for the systemd service user, rather than assuming an interactive desktop/snap installation is sufficient. These installation examples were reviewed, not executed against a fresh Debian host in the local Docker verification.
+Package availability differs across Debian and Ubuntu releases. Confirm that Chromium can run as the systemd service user; a desktop or Snap installation may need additional configuration.
 
 ```bash
 go version
@@ -105,7 +105,7 @@ Minimum values to set:
 
 The env templates contain a `REPLACE_ME` database password; replace it before startup. Both processes need the same database, and the DB role needs to apply the checked-in schema migrations. Use the provider's required TLS mode for a remote database. The systemd `WorkingDirectory` keeps Shopkeeper's `migrations/` path valid.
 
-Chrome is auto-detected from known system commands in `cmd/shopkeeper/main.go`; its current allocator does not read the template's commented `CHROMIUM_PATH` as a custom binary override. Put a supported binary on the service `PATH` and inspect the `Found Chrome/Chromium` log. Do not assume setting that commented variable fixes detection.
+Shopkeeper detects Chrome using known system commands in `cmd/shopkeeper/main.go`. Put a supported browser binary on the service's `PATH` and look for `Found Chrome/Chromium` in the startup log. The commented `CHROMIUM_PATH` example in the template is not supported as an override.
 
 GitHub release checks are enabled when the UI flag is unset. To disable those outbound calls, add `LIME_UPDATE_CHECK=false` to `ui.env` before starting/restarting the UI. Existing false values stay disabled; sidebar display also respects the browser preference described in [Updating LIME](updates.md).
 
@@ -128,13 +128,13 @@ Shopkeeper listens on all interfaces by default, even for this native install; r
 ## Update
 
 ```bash
-sudo ./scripts/debian-update.sh v1.0.4
+sudo ./scripts/debian-update.sh v2.0.0
 ```
 
 Or through Make:
 
 ```bash
-make debian-update TAG=v1.0.4
+make debian-update TAG=v2.0.0
 ```
 
 The updater:
@@ -145,7 +145,7 @@ The updater:
 4. reinstalls binaries via `scripts/debian-install.sh`
 5. restarts Shopkeeper, waits three seconds, then restarts the UI (a delay, not a migration/readiness gate)
 
-The updater changes the checkout to the tag and runs `make build`; it does not install npm dependencies for that tag. Review lockfile/toolchain changes and install the target dependencies before treating it as unattended automation. Keep the checkout clean and back up config/screenshots too; its automatic dump covers only PostgreSQL.
+The updater checks out the selected tag and runs `make build`, but does not install that release's npm dependencies. Review changes to the lockfile and required toolchains, install the matching dependencies, and keep the checkout clean before updating. Back up configuration and screenshots separately; the automatic dump covers only PostgreSQL.
 
 Returning to a previous tag does not downgrade the schema. A previous binary may not work after forward migrations; use the schema-compatible recovery plan in [Backup And Restore](backup-restore.md), rather than assuming a second updater invocation is a rollback.
 

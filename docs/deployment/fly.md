@@ -12,7 +12,7 @@ Run one Shopkeeper machine per database. Startup recovery assumes the previous b
 ## Prerequisites
 
 - `flyctl` installed and authenticated: <https://fly.io/docs/flyctl/install/>
-- A Fly organization (default `personal` works fine)
+- A Fly organization, such as `personal`
 - A PostgreSQL database reachable from Fly (see [Database options](#database-options))
 
 ## Files in the repository
@@ -32,7 +32,7 @@ export FLY_ORG='personal'                     # optional (default personal)
 # Optional: disable the default-enabled GitHub release check.
 # export LIME_UPDATE_CHECK=false
 
-./scripts/fly-deploy.sh v0.1.0
+./scripts/fly-deploy.sh v2.0.0
 ```
 
 ### Option B: Fly Managed Postgres
@@ -48,7 +48,7 @@ flyctl mpg list
 flyctl mpg attach <cluster-id> -a lime-shopkeeper
 flyctl mpg attach <cluster-id> -a lime-ui
 
-./scripts/fly-deploy.sh v0.1.0
+./scripts/fly-deploy.sh v2.0.0
 ```
 
 The helper:
@@ -69,7 +69,7 @@ Use your actual UI app name for custom deployments. Shopkeeper's default `http:/
 Custom app names or regions:
 
 ```bash
-./scripts/fly-deploy.sh v0.1.0 my-shop my-ui fra
+./scripts/fly-deploy.sh v2.0.0 my-shop my-ui fra
 ```
 
 Persist custom regions/app settings in your deployment configuration. `fly-update.sh` accepts app names but no region argument and reads the checked-in TOML files, whose `primary_region` defaults to `iad`; do not assume a one-time `fra` argument permanently changes later updates.
@@ -97,7 +97,7 @@ Set `DATABASE_URL` in the environment before running the deploy script. The help
 - The UI proxies `/api/...` to `http://lime-shopkeeper.internal:8080`.
 - For a private operator connection, use `flyctl proxy 8080 -a lime-shopkeeper` rather than publishing the backend.
 
-Verify the actual deployed exposure with `flyctl ips list -a lime-shopkeeper` and the service configuration. The template includes a `services.ports` entry for port 8080; its "internal-only" comment is not proof that a deployment has no public address/service. Fly services can expose internet-facing ports when public IPs are allocated ([configuration reference](https://fly.io/docs/reference/configuration/)). Review/remove unwanted public exposure in your deployment copy. The ordinary API has no application login; do not rely on the MCP key to protect it.
+Check `flyctl ips list -a lime-shopkeeper` and the service configuration before relying on private access. The template includes a `services.ports` entry for port 8080, which can become publicly accessible if the app has a public IP ([configuration reference](https://fly.io/docs/reference/configuration/)). Remove any unwanted public exposure. The ordinary API has no built-in login, and the MCP key does not protect it.
 
 ## Custom domains
 
@@ -110,7 +110,7 @@ flyctl certs check -a lime-ui lime.example.com
 ## Updates
 
 ```bash
-./scripts/fly-update.sh v1.0.4
+./scripts/fly-update.sh v2.0.0
 ```
 
 The helper invokes Shopkeeper first, then UI, and `flyctl deploy` uses Fly's configured health checks. It does not back up PostgreSQL, screenshots, or secrets. Take a matching recovery set and read [Updating LIME](updates.md) before deploying.
@@ -141,4 +141,4 @@ flyctl checks list -a lime-shopkeeper
 flyctl logs -a lime-shopkeeper
 ```
 
-Check UI-origin `/api/health`, load a database-backed dashboard page, finish a small scan, open its saved screenshot, and generate PDF/CSV/LLM reports. Validate `/mcp` from the UI origin if enabled; localhost remote-client limitations still apply. Do not paste secrets or signed database URLs into issue reports. This Fly path is source/config-reviewed guidance, not a claim that the local Docker verification deployed Fly resources. See [Operational Troubleshooting](troubleshooting.md).
+Check `/api/health` on the UI, load a dashboard page, finish a small scan, open its saved screenshot, and generate PDF, CSV, and LLM reports. If MCP is enabled, connect a client to `/mcp` on the UI's reachable URL. Keep secrets and database credentials out of issue reports. See [Operational Troubleshooting](troubleshooting.md) if a check fails.

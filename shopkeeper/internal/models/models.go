@@ -134,11 +134,20 @@ type Stats struct {
 	TotalPages  int `json:"total_pages"`
 }
 
-// MCPAuthSettings controls access to the read-only MCP endpoint.
+// MCPAuthSettings controls MCP access. Writes require explicit owner opt-in.
 type MCPAuthSettings struct {
-	Enabled   bool      `json:"enabled"`
-	KeyHash   *string   `json:"-"`
-	RevokedAt time.Time `json:"revoked_at"`
+	Enabled     bool      `json:"enabled"`
+	AllowWrites bool      `json:"allow_writes"`
+	KeyHash     *string   `json:"-"`
+	RevokedAt   time.Time `json:"revoked_at"`
+}
+
+// MCPActionRequest is a durable reservation. An unfinished reservation is never
+// rerun automatically: the original action may have succeeded before a crash.
+type MCPActionRequest struct {
+	Tool          string
+	ArgumentsHash string
+	Response      []byte
 }
 
 // MCPScanScoreSummary mirrors the persisted scan score read model for MCP reads.

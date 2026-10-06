@@ -4,7 +4,7 @@
 
 ## Responsibility
 
-To discover sitemap URLs, resolve page redirects, and return the eligible same-host pages to scan. It is not the accessibility scanner or the standalone link crawler. The separate [link checker](link-checker.md) can reuse a scan's persisted discovered page URLs as companion source pages after accessibility completes.
+Profiler reads sitemaps, follows page redirects, and returns eligible pages on the same host. Juicer then scans those pages for accessibility issues. If a companion [link check](link-checker.md) is selected, it uses the saved page list after the accessibility scan completes.
 
 ## Implementation
 
@@ -20,7 +20,7 @@ To discover sitemap URLs, resolve page redirects, and return the eligible same-h
 * **Validation**: Each URL is validated using `url.ParseRequestURI` — only `http://` and `https://` schemes are accepted.
 * **Fetch Retries**: Sitemap requests retry transient fetch failures before giving up.
 * **Complete Discovery Requirement**: Shopkeeper does not continue into scanning with a partial sitemap index. If any nested sitemap still fails after retries, discovery returns an error and the scan fails instead of silently scanning an incomplete URL set.
-* **Read Bound**: Each sitemap response is read through a 50 MiB `io.LimitReader`; the resulting XML must parse. This bounds the read, not a separate Content-Length/oversize validation contract.
+* **Response Limit**: Reads up to 50 MiB per sitemap through `io.LimitReader`. The XML must parse successfully; there is no separate Content-Length validation.
 
 ### Page Eligibility After XML Discovery
 
@@ -55,7 +55,7 @@ type urlSet struct {
 
 ## Output
 
-A distinct slice of validated, deduplicated URL strings ready to be consumed by the **Juicer** module.
+A deduplicated list of eligible URLs for **Juicer** to scan.
 
 ## Verification And Failure Diagnosis
 

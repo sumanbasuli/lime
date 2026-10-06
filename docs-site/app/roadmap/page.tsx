@@ -1,123 +1,306 @@
+import { MaterialSymbol } from "@/components/material-symbol";
 import { SiteShell } from "@/components/site-shell";
+import { withBasePath } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
 export const metadata = {
   title: "Roadmap",
   description:
-    "LIME's shipped 1.x features, validation priorities, and proposed future work.",
+    "See what’s available in LIME 2.0, what we plan to improve next, and ideas for the future.",
 };
 
-const milestones = [
+const stages = [
   {
-    tag: "Shipped",
-    tone: "green",
-    title: "Current baseline",
+    id: "shipped",
+    number: "01",
+    status: "Available · Accessibility",
+    legend: "Accessibility",
+    countLabel: "features",
+    icon: "check_circle",
+    tone: "paper",
+    title: "From scan to shared report",
+    description:
+      "Scan your site, understand the findings, and give your team the details they need to start fixing accessibility issues.",
     items: [
-      "Sitemap and single-page scans with viewport-aware axe-core execution",
-      "Focused screenshots, issue grouping, ACT guidance, and false-positive triage",
-      "Partial-scan failed-page retry inside the same scan",
-      "Cooperative pause, same-scan resume, and startup recovery",
-      "Full-scan and per-issue PDF, CSV, and LLM exports",
-      "Read-only MCP endpoint with generated bearer-key auth",
-      "Reporting, performance, and integration settings",
-      "Docker, Fly.io, GHCR images, release bundles, and update scripts",
+      {
+        icon: "screen_search_desktop",
+        title: "Scan your way",
+        copy: "Check a single page or a sitemap with axe-core in Chromium. Choose a screen size to see how your pages behave on different devices.",
+      },
+      {
+        icon: "image_search",
+        title: "Evidence you can inspect",
+        copy: "Review grouped findings with guidance, CSS selectors, and screenshots that highlight the affected element. Mark confirmed false positives as you review.",
+      },
+      {
+        icon: "replay",
+        title: "Recover without starting over",
+        copy: "Pause and resume a scan, or retry only the pages that failed. Completed results stay together in the same scan.",
+      },
+      {
+        icon: "file_save",
+        title: "Reports for every audience",
+        copy: "Share a whole scan or a single issue as PDF, CSV, or text for an AI assistant. Choose the level of detail your audience needs.",
+      },
+      {
+        icon: "smart_toy",
+        title: "Connect your AI assistant",
+        copy: "Use MCP to let a compatible assistant review saved results and reports. Enable write access separately when you want it to make changes.",
+      },
+      {
+        icon: "dns",
+        title: "Host it yourself",
+        copy: "Run LIME with Docker or follow the Debian and Fly.io guides. Keep your scans, database, and screenshots on infrastructure you control.",
+      },
     ],
+    href: "/docs/user/first-scan/",
+    linkLabel: "Run your first scan",
+    footer: "Available in LIME 2.0. The first-scan guide walks you through the full process.",
   },
   {
-    tag: "Unreleased",
+    id: "current",
+    number: "02",
+    status: "Available · LIME 2.0",
+    legend: "LIME 2.0",
+    countLabel: "features",
+    icon: "check_circle",
     tone: "yellow",
-    title: "Link checking",
+    title: "New in LIME 2.0",
+    description:
+      "Check links alongside accessibility, work through your AI assistant, and get started with a simpler installation.",
     items: [
-      "Standalone single-page and bounded same-origin crawl checks",
-      "Optional Include link check companion for accessibility scans",
-      "Saved target results, source references, progress, cancellation, rechecks, and CSV",
-      "HTTP-only extraction with explicit network and resource limits; no effect on accessibility scoring",
+      {
+        icon: "link",
+        title: "Link Checker",
+        copy: "Check a page or follow links across your site, on its own or with an accessibility scan. See where each link appears and export the results as CSV. Link checks do not affect accessibility scores.",
+      },
+      {
+        icon: "smart_toy",
+        title: "More you can do with MCP",
+        copy: "Ask your assistant to review findings, download reports, run scans, or check links. Connections start read-only; enable write access to manage scans, findings, and settings.",
+      },
+      {
+        icon: "terminal",
+        title: "Simpler setup",
+        copy: "Install LIME on macOS or Linux with one terminal command. Connect Codex, Claude Code, or OpenCode using the setup examples in Settings.",
+      },
+      {
+        icon: "tune",
+        title: "A refreshed dashboard",
+        copy: "Find your way around with a new dashboard design, clearer link results, and filters that help you focus. Screenshot previews still open to show the highlighted element in context.",
+      },
     ],
+    href: "/docs/user/link-checker/",
+    linkLabel: "Read the Link Checker guide",
+    footer: "Available now. Start with a link check to see which destinations need attention.",
   },
   {
-    tag: "Next priorities",
-    tone: "yellow",
-    title: "Validation and hardening",
+    id: "validation",
+    number: "03",
+    status: "Next priorities",
+    legend: "Up next",
+    countLabel: "priorities",
+    icon: "fact_check",
+    tone: "paper",
+    title: "Make LIME easier to run",
+    description:
+      "Our next priorities focus on installation, reliable backups, larger sites, and compatibility with more AI clients.",
     items: [
-      "Repeatable large-site benchmarks and report-memory measurements",
-      "Real deployment, update, backup, and restore validation per target",
-      "Dependency and security review before broader production claims",
-      "MCP client feedback and interoperability beyond the tested setup",
+      {
+        icon: "computer",
+        title: "Smoother first-time setup",
+        copy: "Test installation on more fresh macOS and Linux systems, including Docker setup, and improve guidance wherever people get stuck.",
+      },
+      {
+        icon: "settings_backup_restore",
+        title: "Reliable backup and restore",
+        copy: "Test recovery across supported hosting options and make it easier to restore both the database and saved screenshots.",
+      },
+      {
+        icon: "cloud_upload",
+        title: "More hosting checks",
+        copy: "Expand testing of published Docker images and Fly.io deployments so the guides cover more real installation scenarios.",
+      },
+      {
+        icon: "speed",
+        title: "Larger sites and more AI clients",
+        copy: "Improve performance testing for large scans and reports, keep dependencies current, and use feedback from real MCP integrations to improve compatibility.",
+      },
     ],
+    href: "/docs/reference/verification/",
+    linkLabel: "Read the testing guide",
+    footer: "These are ongoing priorities. Test a new deployment with your own site before depending on it for regular audits.",
   },
   {
-    tag: "Planned",
+    id: "future",
+    number: "04",
+    status: "Future ideas",
+    legend: "Future ideas",
+    countLabel: "possible directions",
+    icon: "lightbulb",
     tone: "outline",
-    title: "Future product work",
+    title: "Help shape what comes next",
+    description:
+      "We’re exploring these ideas based on feedback. They are not available yet and do not have release dates.",
     items: [
-      "Link-check coverage feedback before adding scheduling or JavaScript-rendered extraction",
-      "MCP diagnostics, origin policies, or session support when client needs justify them",
-      "Deferred: OAuth, scoped keys, write tools, and multi-user authentication",
+      {
+        icon: "travel_explore",
+        title: "Broader link coverage",
+        copy: "Scheduled checks and support for links added by JavaScript could help teams monitor more of their sites.",
+      },
+      {
+        icon: "hub",
+        title: "Easier AI connections",
+        copy: "Clearer connection diagnostics and broader client support could make it easier to connect the assistant you already use.",
+      },
+      {
+        icon: "verified_user",
+        title: "Access for teams",
+        copy: "Explore OAuth, individual accounts, and keys with different permissions. Today, an MCP key and its write setting apply to the whole LIME installation.",
+      },
     ],
+    href: "/docs/user/mcp/",
+    linkLabel: "See how MCP works today",
+    footer: "Plans may change as we learn what helps teams most.",
   },
 ] as const;
 
-const toneClasses = {
-  green: "bg-[#1E7A4E] text-white",
-  yellow: "border border-black bg-[#FFED00] text-black",
-  outline: "border border-black/25 bg-white text-black",
+const cardTones = {
+  paper: "border-black/12 bg-white",
+  yellow: "border-black bg-[#FFED00]/12 shadow-[0_18px_45px_rgba(10,10,10,0.06)]",
+  outline: "border-dashed border-black/25 bg-[#FBFAF6]",
 } as const;
 
 export default function RoadmapPage() {
   return (
     <SiteShell active="roadmap">
-      <main className="site-container py-16">
-        <div className="mx-auto max-w-[860px]">
-          <span className="inline-flex rounded-full border border-black/15 bg-white px-3.5 py-[5px] text-[11px] font-bold tracking-[0.1em] uppercase">
-            Where LIME is going
-          </span>
-          <h1 className="mt-[18px] font-heading text-[clamp(2.25rem,5vw,3.25rem)] leading-none font-semibold tracking-[-0.035em]">
-            Roadmap
-          </h1>
-          <p className="mt-4 max-w-[600px] text-base leading-[1.6] text-black/65">
-            What is available in the current 1.x codebase, what still needs
-            validation, and what we may build next. Planned items are not
-            available features or release-date promises. Unreleased items describe
-            the current source work, not a deployed or published release.
-          </p>
+      <main>
+        <section className="border-b border-black/10 bg-[#f6f5f0]">
+          <div className="site-container py-14 sm:py-20 lg:py-24">
+            <div className="grid items-center gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:gap-16">
+              <div className="min-w-0">
+                <div className="section-kicker">Built in the open</div>
+                <h1 className="mt-6 font-heading text-[clamp(3.5rem,8vw,6.5rem)] leading-[0.95] font-semibold tracking-[-0.055em]">
+                  Road<span className="lime-mark">map</span>
+                </h1>
+                <p className="mt-7 max-w-[640px] text-lg leading-8 text-black/65 sm:text-xl sm:leading-9">
+                  See what’s available today, what we plan to improve next,
+                  and where LIME could go from here.
+                </p>
+                <p className="mt-4 max-w-[600px] text-sm leading-7 text-black/55">
+                  LIME 2.0 adds link checking, more ways to work with AI,
+                  and a refreshed dashboard. Here’s what comes next.
+                </p>
+                <a href={withBasePath("/docs/")} className="mt-7 inline-flex items-center gap-2 rounded-full border border-black/18 bg-white px-5 py-3 text-sm font-semibold no-underline transition-colors hover:bg-[#FFED00] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-black">
+                  Explore the documentation
+                  <MaterialSymbol name="arrow_forward" size={18} />
+                </a>
+              </div>
 
-          <div className="mt-11 flex flex-col gap-4">
-            {milestones.map((milestone) => (
-              <section
-                key={milestone.tag}
-                className="rounded-[20px] border border-black/10 bg-white px-5 py-6 sm:px-7 sm:py-[26px]"
-              >
-                <div className="flex flex-wrap items-center gap-3">
-                  <span
-                    className={cn(
-                      "inline-flex rounded-full px-[13px] py-1 text-[10.5px] font-bold tracking-[0.1em] uppercase",
-                      toneClasses[milestone.tone]
-                    )}
-                  >
-                    {milestone.tag}
-                  </span>
-                  <h2 className="m-0 font-heading text-2xl font-semibold tracking-[-0.02em]">
-                    {milestone.title}
-                  </h2>
+              <aside className="min-w-0 rounded-[26px] bg-[#0a0a0a] p-6 text-white shadow-[0_24px_65px_rgba(10,10,10,0.13)] sm:p-8" aria-label="Available features">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="font-mono text-[10px] font-semibold tracking-[0.12em] text-white/55 uppercase">Available now</span>
+                  <span className="rounded-full bg-[#FFED00] px-3 py-1.5 font-mono text-[10px] font-bold text-black">LIME 2.0 · CURRENT</span>
+                </div>
+                <div className="mt-9 grid size-12 place-items-center rounded-2xl border border-white/20 text-[#FFED00]">
+                  <MaterialSymbol name="route" size={27} />
+                </div>
+                <h2 className="mt-5 font-heading text-[clamp(1.9rem,3.5vw,2.8rem)] leading-[1.08] tracking-[-0.025em]">
+                  Accessibility and links.<br />Together in LIME 2.0.
+                </h2>
+                <p className="mt-4 text-sm leading-7 text-white/65">
+                  Check your site, review the findings, and work with your
+                  AI assistant from the first scan to the next fix.
+                </p>
+                <div className="mt-6 flex flex-wrap gap-2">
+                  {["Link Checker", "MCP integration", "One-line installation"].map((label) => (
+                    <span key={label} className="rounded-full border border-white/20 px-3 py-1.5 text-[11px] font-medium text-white/80">{label}</span>
+                  ))}
+                </div>
+                <a href="#current" className="mt-8 inline-flex items-center gap-2 text-sm font-semibold text-[#FFED00] no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#FFED00]">
+                  Explore LIME 2.0
+                  <MaterialSymbol name="arrow_downward" size={18} />
+                </a>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <div className="site-container py-10 sm:py-14 lg:py-16">
+          <nav aria-label="Roadmap status legend" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {stages.map((stage) => (
+              <a key={stage.id} href={`#${stage.id}`} className="group flex min-w-0 items-center gap-4 rounded-2xl border border-black/12 bg-white p-4 no-underline transition-colors hover:border-black/30 hover:bg-[#FFED00]/10 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-black sm:p-5">
+                <span className={cn("grid size-10 shrink-0 place-items-center rounded-full", stage.id === "current" ? "bg-[#FFED00] text-black" : "bg-black/[0.045] text-black/70")}>
+                  <MaterialSymbol name={stage.icon} size={21} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold">{stage.legend}</span>
+                  <span className="mt-1 block text-xs leading-5 text-black/55">{stage.items.length} {stage.countLabel}</span>
+                </span>
+                <MaterialSymbol name="arrow_downward" size={16} className="text-black/35 group-hover:text-black" />
+              </a>
+            ))}
+          </nav>
+
+          <div className="mt-10 grid items-start gap-5 lg:mt-14 lg:grid-cols-2 lg:gap-x-7 lg:gap-y-10">
+            {stages.map((stage, index) => (
+              <section key={stage.id} id={stage.id} aria-labelledby={`${stage.id}-title`} className={cn("min-w-0 scroll-mt-36 overflow-hidden rounded-[24px] border", cardTones[stage.tone], index % 2 === 0 && "lg:mt-10")}>
+                <div className="border-b border-black/10 p-6 sm:p-8">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className={cn("inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-[10px] font-bold tracking-[0.06em] uppercase", stage.id === "current" ? "bg-black text-[#FFED00]" : "border border-black/15 bg-white text-black/65")}>
+                      <MaterialSymbol name={stage.icon} size={15} />
+                      {stage.status}
+                    </span>
+                    <span aria-hidden="true" className="font-mono text-xs text-black/30">{stage.number}</span>
+                  </div>
+                  <h2 id={`${stage.id}-title`} className="mt-6 font-heading text-[clamp(1.75rem,3vw,2.35rem)] leading-[1.12] font-semibold tracking-[-0.025em]">{stage.title}</h2>
+                  <p className="mt-3 text-sm leading-7 text-black/60">{stage.description}</p>
                 </div>
 
-                <ul className="mt-4 flex list-none flex-col gap-[9px] p-0">
-                  {milestone.items.map((item) => (
-                    <li
-                      key={item}
-                      className="flex items-start gap-2.5 text-sm leading-[1.5] text-black/70"
-                    >
-                      <span
-                        aria-hidden="true"
-                        className="mt-[5px] size-2 shrink-0 rounded-full border-[1.5px] border-black bg-[#FFED00]"
-                      />
-                      <span>{item}</span>
+                <ul className="m-0 list-none space-y-6 p-6 sm:p-8">
+                  {stage.items.map((item) => (
+                    <li key={item.title} className="flex min-w-0 items-start gap-3.5 sm:gap-4">
+                      <span className={cn("mt-0.5 grid size-9 shrink-0 place-items-center rounded-xl", stage.id === "current" ? "border border-black/15 bg-[#FFED00]/60" : "bg-black/[0.045]")}>
+                        <MaterialSymbol name={item.icon} size={19} />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="font-sans text-sm font-semibold leading-6">{item.title}</h3>
+                        <p className="mt-1 text-[13px] leading-6 text-black/60">{item.copy}</p>
+                      </div>
                     </li>
                   ))}
                 </ul>
+
+                <div className="border-t border-black/10 px-6 py-5 sm:px-8 sm:py-6">
+                  <p className="text-xs leading-6 text-black/55">{stage.footer}</p>
+                  <a href={withBasePath(stage.href)} className="mt-3 inline-flex items-center gap-2 text-sm font-semibold no-underline hover:underline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-black">
+                    {stage.linkLabel}
+                    <MaterialSymbol name="arrow_forward" size={17} />
+                  </a>
+                </div>
               </section>
             ))}
           </div>
+
+          <aside className="mt-10 flex flex-col gap-5 rounded-[20px] border border-black/12 bg-white p-6 sm:p-8 lg:mt-14 lg:flex-row lg:items-center lg:justify-between" aria-label="Reading the roadmap">
+            <div className="flex min-w-0 items-start gap-4">
+              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[#FFED00]">
+                <MaterialSymbol name="info" size={21} />
+              </span>
+              <div className="max-w-[760px]">
+                <h2 className="font-heading text-xl tracking-[-0.02em]">Try LIME in your environment.</h2>
+                <p className="mt-2 text-sm leading-7 text-black/60">
+                  Before using a new deployment for regular audits, run a small scan,
+                  open its reports, and check your backup process. The testing guide
+                  covers the checks you can run yourself.
+                </p>
+              </div>
+            </div>
+            <a href={withBasePath("/docs/reference/verification/")} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full bg-black px-5 py-3 text-sm font-semibold text-white no-underline transition-colors hover:bg-[#FFED00] hover:text-black focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-black">
+              Open the testing guide
+              <MaterialSymbol name="arrow_forward" size={18} />
+            </a>
+          </aside>
         </div>
       </main>
     </SiteShell>

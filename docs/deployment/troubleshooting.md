@@ -1,6 +1,6 @@
 # Operational Troubleshooting
 
-Start with read-only checks and preserve logs before changing processes, settings, or storage. Use the dashboard origin for user-facing routes; the static marketing/docs site is a different app. These checks are source-reviewed guidance. Destructive recovery, migrations, external deployments, and production restore drills were not performed as part of this documentation audit.
+Start by checking service status and logs before changing settings or storage. Use the dashboard's URL for application and API requests; the marketing and documentation website is a separate app.
 
 ## Identify The Runtime
 
@@ -19,7 +19,7 @@ For release deployments, consistently include the actual `--env-file`, `-f`, pro
 
 ## Symptom Guide
 
-| Symptom | Read-only checks / likely boundary |
+| Symptom | What to check |
 |---------|-----------------------------------|
 | UI API requests return 500/502 | Confirm UI `SHOPKEEPER_URL` exists and reaches the backend from the UI runtime; browser localhost and container localhost differ |
 | API health works but dashboard pages fail | Both services need the same reachable `DATABASE_URL`; check UI DB errors and migration completion |
@@ -82,7 +82,7 @@ Current source/docs Compose sets the report URL; release Compose and Fly require
 
 PDF/CSV/LLM toggles and the PDF limiter apply through dashboard routes. Direct backend PDF downloads bypass those Next controls. Report metadata availability is not proof a file has already been generated.
 
-## Update Notice And Cache Expectations
+## Link checks, update notices, and caches
 
 For link-check problems, inspect the job's own status, `pages_failed`, `truncated`, result categories, and `error_kind`; accessibility completion does not mean its companion has completed. Use a complete webpage URL reachable from Shopkeeper, not a sitemap XML file or a browser-only login URL. Extraction is HTML-only and does not verify fragment anchors. Entered root origins are trusted and may be private; external discovered destinations and off-origin redirects are restricted. Keep job-creation access protected instead of removing policy to make a blocked target pass. [Link Checker Architecture](../architecture/link-checker.md) covers limits, lifecycle, source/reference paging, and safe evidence collection.
 
@@ -90,6 +90,6 @@ For link-check problems, inspect the job's own status, `pages_failed`, `truncate
 
 Score/issue caches use scan timestamps plus their TTL, and triage invalidates them. Server-wide UI settings can be cached for five seconds in another UI process. `reportDataCacheTtlSeconds` is reserved and does not currently cache report responses. Use [Performance And Caching](../performance.md) before tuning values or assuming a cached export exists.
 
-## Escalation Evidence
+## Reporting a problem
 
-Record the application version/commit, deployment type, time window, affected scan ID/status/viewport, expected versus actual behavior, browser and API response statuses, sanitized backend/UI logs, and whether the issue reproduces in the isolated `make verify-app` stack. Do not include raw MCP keys, passwords, sensitive HTML, or screenshot evidence without permission. Prefer the smallest reproducible authorized target; production data is not a disposable test fixture.
+Include the LIME version, deployment method, affected scan or check ID, expected result, actual result, and relevant logs. For scan problems, include the status and viewport; for request failures, include the HTTP response code. Note whether the issue also occurs in the isolated `make verify-app` stack. Remove credentials, private URLs, and sensitive page content before sharing, and use a small reproducible example when possible.

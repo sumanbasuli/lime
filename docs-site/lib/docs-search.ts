@@ -37,7 +37,7 @@ export function getDocsSearchEntries(): DocsSearchEntry[] {
     title: "API Reference",
     href: "/api",
     category: "API",
-    excerpt: "Typed API reference for scans, issues, reports, and settings.",
+    excerpt: "API endpoints for scans, link checks, issues, reports, and settings.",
     content: apiGroups
       .flatMap((group) => [
         group.title,

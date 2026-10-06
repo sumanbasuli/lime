@@ -1,6 +1,6 @@
 # Juicer (The Axe-Core Scanner)
 
-**Juicer** is the heavy-lifting execution module of the Shopkeeper system. It uses **chromedp** (Go bindings for Chrome DevTools Protocol) to run headless Chromium and evaluate web pages using the **axe-core** accessibility library.
+**Juicer** runs LIME's accessibility checks. It controls headless Chromium through **chromedp**, evaluates pages with **axe-core**, and captures screenshots of the findings.
 
 ## Implementation
 
@@ -24,10 +24,10 @@ func ScanPages(ctx, allocCtx context.Context, pages []PageInput, scanID string, 
 * **Politeness**: 500ms delay between requests, interruptible when the parent scan run is canceled.
 * **Progress Reporting**: Reports processed page attempts, including genuine failures, through `onProgress(scannedCount)`. A per-run synchronized callback prevents a lower count from overwriting a newer count; callbacks that arrive behind an already reported count are skipped. Resume/retry adds the existing processed-page count separately.
 * **Viewport Control**: Applies the scan's persisted viewport width/height before navigation so layout, screenshots, and rule evaluation all use the same deterministic rendering width.
-* **Visual Stabilization**: Uses a fuller settle wait before screenshots and as a best-effort step before rule execution, without treating every late-loading asset as a hard scan failure.
-* **Focused Issue Screenshots**: Juicer now saves two focused screenshot assets per capturable occurrence: a visible-viewport spotlight image for expanded viewing and a smaller preview cropped from that exact focused screenshot for inline issue cards.
+* **Page Loading**: Waits for the page to settle before checking rules and taking screenshots. A late-loading asset does not automatically fail an otherwise usable page.
+* **Focused Issue Screenshots**: Saves a highlighted screenshot for expanded viewing and a smaller preview cropped from the same image for issue cards.
 * **Exact Node Resolution**: Before screenshots, Juicer resolves a deterministic internal `capture_index` for each failing selector so duplicate selectors do not always collapse to the first DOM match.
-* **Interaction-Aware Capture**: Before capture, Juicer now scrolls the exact node into view, hovers the nearest visible ancestor when the target is initially hidden, moves the mouse to the target when possible, and applies focus for focusable controls.
+* **Preparing Elements For Capture**: Scrolls the matched node into view, hovers a visible ancestor if needed, and focuses controls where possible.
 * **Lighthouse-Style Node Details**: Juicer serializes failure summaries and a small set of related nodes from axe output. Sweetner persists audit outcomes as well as failed issue groups and occurrence evidence.
 
 ## System Constraints
@@ -75,15 +75,14 @@ An interrupted page is excluded from returned results rather than turned into a 
 
 ### Screenshot Reliability Notes
 
-- Juicer no longer captures screenshots immediately after `body` becomes available.
-- Juicer sets an explicit viewport before `Navigate(...)`, so scans no longer depend on Chromium's implicit startup viewport.
-- If the extra page-settle wait times out after the document is already usable, Juicer now logs a warning and still runs the accessibility rules instead of silently returning zero issues for that page.
-- Juicer’s accessibility run now follows Lighthouse’s accessibility gatherer more closely than the broad default axe run, which reduces mismatches caused by best-practice-only rules and preserves node-level failure context.
-- Issue screenshots now include a clean visible-viewport spotlight image plus a smaller preview cropped from that same focused image so the inline issue card matches the expanded lightbox view.
-- Juicer now renders the spotlight with a dedicated fixed overlay instead of mutating the target element’s inline styles, which keeps the highlight more consistent across selectors and avoids stale highlights leaking into later captures.
+- Juicer sets the saved viewport before `Navigate(...)` and waits for the page to settle before taking screenshots.
+- If that wait times out but the document is usable, Juicer logs a warning and continues with the accessibility checks.
+- The axe configuration follows Lighthouse's accessibility gatherer, including rule selection and node-level failure details.
+- The compact preview and expanded view come from the same highlighted image.
+- A dedicated overlay draws the highlight without modifying the target element's styles or leaving highlights behind for later captures.
 - When the failing selector matches multiple DOM nodes, Juicer resolves a best-effort exact match using the node HTML and selector order before it attempts screenshots.
 - When the failing node is initially hidden but a visible ancestor can expose it, Juicer tries a bounded `focus + hover` preparation pass before deciding that no focused screenshot is available.
-- Juicer still does not click/open interactive widgets during capture, so pseudo-elements, click-open menus, canvas-only controls, and similar cases can still end up with no focused screenshot.
+- Juicer does not click controls to open widgets. Some pseudo-elements, menus, and canvas controls may therefore have no focused screenshot.
 
 ## Operational Boundaries
 

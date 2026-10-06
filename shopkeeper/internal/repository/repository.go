@@ -733,10 +733,10 @@ func (r *Repository) GetStats(ctx context.Context) (*models.Stats, error) {
 func (r *Repository) GetMCPAuthSettings(ctx context.Context) (*models.MCPAuthSettings, error) {
 	settings := &models.MCPAuthSettings{}
 	err := r.pool.QueryRow(ctx,
-		`SELECT mcp_enabled, mcp_key_hash, mcp_sessions_revoked_at
+		`SELECT mcp_enabled, mcp_allow_writes, mcp_key_hash, mcp_sessions_revoked_at
 		 FROM app_settings
 		 WHERE key = 'global'`,
-	).Scan(&settings.Enabled, &settings.KeyHash, &settings.RevokedAt)
+	).Scan(&settings.Enabled, &settings.AllowWrites, &settings.KeyHash, &settings.RevokedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return &models.MCPAuthSettings{}, nil
@@ -833,6 +833,7 @@ func (r *Repository) GetMCPVisibleSettings(ctx context.Context) (*models.MCPVisi
 	var reportDataCacheTTLSeconds int
 	var reportGenerationConcurrency int
 	var mcpEnabled bool
+	var mcpAllowWrites bool
 	var mcpConfigured bool
 	var mcpKeyHint sql.NullString
 	var mcpKeyGeneratedAt sql.NullTime
@@ -850,6 +851,7 @@ func (r *Repository) GetMCPVisibleSettings(ctx context.Context) (*models.MCPVisi
 		   report_data_cache_ttl_seconds,
 		   report_generation_concurrency,
 		   mcp_enabled,
+		   mcp_allow_writes,
 		   mcp_key_hash IS NOT NULL,
 		   mcp_key_hint,
 		   mcp_key_generated_at
@@ -867,6 +869,7 @@ func (r *Repository) GetMCPVisibleSettings(ctx context.Context) (*models.MCPVisi
 		&reportDataCacheTTLSeconds,
 		&reportGenerationConcurrency,
 		&mcpEnabled,
+		&mcpAllowWrites,
 		&mcpConfigured,
 		&mcpKeyHint,
 		&mcpKeyGeneratedAt,
@@ -906,10 +909,11 @@ func (r *Repository) GetMCPVisibleSettings(ctx context.Context) (*models.MCPVisi
 		},
 		Integrations: map[string]any{
 			"mcp_enabled":          mcpEnabled,
+			"mcp_allow_writes":     mcpAllowWrites,
 			"mcp_configured":       mcpConfigured,
 			"mcp_key_hint":         keyHint,
 			"mcp_key_generated_at": keyGeneratedAt,
-			"mcp_mode":             "read_only",
+			"mcp_mode":             mcpAccessMode(mcpAllowWrites),
 		},
 	}, nil
 }
@@ -934,12 +938,20 @@ func defaultMCPVisibleSettings() *models.MCPVisibleSettings {
 		},
 		Integrations: map[string]any{
 			"mcp_enabled":          false,
+			"mcp_allow_writes":     false,
 			"mcp_configured":       false,
 			"mcp_key_hint":         nil,
 			"mcp_key_generated_at": nil,
 			"mcp_mode":             "read_only",
 		},
 	}
+}
+
+func mcpAccessMode(allowWrites bool) string {
+	if allowWrites {
+		return "read_write"
+	}
+	return "read_only"
 }
 
 // ListMCPScans returns a bounded list of scans for MCP clients.

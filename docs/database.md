@@ -1,6 +1,6 @@
 # Database Architecture
 
-LIME uses PostgreSQL as the shared durable store for scan configuration, progress, findings, audit outcomes, link checks/results, settings, and derived score/issue summaries. Screenshot pixels live on a separate filesystem volume, not in PostgreSQL.
+PostgreSQL stores LIME's scans, progress, findings, audit outcomes, link checks, settings, and cached summaries. Screenshot files are stored separately on a filesystem volume.
 
 ## Engine And Access Model
 
@@ -21,6 +21,7 @@ scans ── urls ── url_audits / url_audit_occurrences
   └── scan_score_summary_cache / scan_issue_summary_cache / scan_report_data_cache
 standalone link_checks (scan_id = null) ── link_check_results
 app_settings (one server-wide row, key = 'global')
+mcp_action_requests (durable request UUID reservations and replay responses)
 ```
 
 Scan, URL, and issue foreign keys use `ON DELETE CASCADE`. Shopkeeper's delete handler additionally removes the scan screenshot directory. Deleting a row manually does not perform that filesystem cleanup. Use the application lifecycle routes rather than editing scan/result rows during normal operation.
@@ -128,11 +129,17 @@ Current fields include:
 - summary cache TTL
 - report-data cache TTL
 - report generation concurrency cap
-- MCP enablement and hashed key metadata
+- MCP enablement, default-false write permission, and hashed key metadata
 
 The raw MCP key is never stored; only its hash and display hint are persisted.
 
-Defaults and input normalization are defined in `lime/src/lib/report-settings-config.ts` and `report-settings.ts`. MCP defaults to disabled; PDF/CSV/LLM exports default to enabled. Browser-only update-card preferences are stored in local storage, not this table. The raw MCP key cannot be recovered from a database backup; clients need a retained key or a newly generated one.
+Defaults and input normalization are defined in `lime/src/lib/report-settings-config.ts` and `report-settings.ts`. MCP defaults to disabled and `mcp_allow_writes` defaults false, preserving read-only access for existing keys after upgrade; PDF/CSV/LLM exports default to enabled. Browser-only update-card preferences are stored in local storage, not this table. The raw MCP key cannot be recovered from a database backup; clients need a retained key or a newly generated one.
+
+### `mcp_action_requests`
+
+Migration `000014_add_mcp_actions` adds default-false `app_settings.mcp_allow_writes` and the backend-owned durable new-job request ledger. `request_id` is a UUID primary key; the row stores the tool name, normalized argument hash, reserved timestamp, nullable response JSONB, and completion timestamp. The response and completion timestamp are either both absent or both present.
+
+Reservations occur before create/rescan/recheck execution. Identical completed retries replay saved data; a reused ID with another tool or argument hash rejects the call. An unfinished reservation may represent an in-flight action or a crash after creation, so it never automatically reruns. There is deliberately no expiry: removing an old reservation can allow the same ID to execute again. Preserve this table in backups and do not clear it as routine cleanup. Operators must inspect actual saved scans/checks before intentionally issuing another request UUID. See [MCP Integration](mcp.md#confirmations-and-durable-retries).
 
 ### `scan_score_summary_cache`
 
@@ -188,7 +195,7 @@ SELECT status, count(*) FROM scans GROUP BY status ORDER BY status;
 SELECT status, count(*) FROM urls GROUP BY status ORDER BY status;
 ```
 
-These are diagnostic reads, not recovery operations. Unreleased source includes `000013_add_link_checks` after `000012_add_report_data_cache`; inspect the checked-out release's files rather than assuming a fixed version forever. The new selection defaults to false for existing scan rows; adding the checker does not enable companions retroactively.
+These queries inspect the database without changing it. Migration `000013_add_link_checks` adds link checks, and `000014_add_mcp_actions` adds MCP write permissions and request tracking. Check the migration files for the release you are running. Existing scans keep `include_link_check` set to false; the migration does not create companion checks for past scans.
 
 ## Backup Boundary
 

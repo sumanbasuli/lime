@@ -28,6 +28,7 @@ const contentTypes = new Map([
   [".png", "image/png"],
   [".svg", "image/svg+xml"],
   [".txt", "text/plain; charset=utf-8"],
+  [".sh", "text/plain; charset=utf-8"],
   [".webp", "image/webp"],
   [".woff", "font/woff"],
   [".woff2", "font/woff2"],
@@ -88,7 +89,7 @@ const server = createServer((request, response) => {
 
   const extension = extname(filePath);
   response.writeHead(filePath.endsWith("404.html") ? 404 : 200, {
-    "Cache-Control": extension === ".html" ? "no-cache" : "public, max-age=31536000, immutable",
+    "Cache-Control": [".html", ".sh"].includes(extension) ? "no-cache" : "public, max-age=31536000, immutable",
     "Content-Type": contentTypes.get(extension) ?? "application/octet-stream",
   });
   createReadStream(filePath).pipe(response);

@@ -8,6 +8,7 @@ export const MCP_TOOL_NAMES = [
   "get_report_metadata", "get_settings",
   "list_link_checks", "get_link_check", "get_link_check_stats",
   "get_scan_link_check", "list_link_check_results", "list_link_check_sources",
+  "get_capabilities", "get_workspace_stats", "get_report", "get_screenshot", "get_link_check_export",
 ];
 
 export const MCP_LINK_TOOL_NAMES = [
@@ -101,7 +102,12 @@ export async function verifyMcpReadClient(url, key, scanId, options) {
   try {
     await client.ping();
     const tools = (await client.listTools()).tools;
-    assert.deepEqual(tools.map((tool) => tool.name).sort(), [...MCP_TOOL_NAMES].sort());
+    assert.ok(MCP_TOOL_NAMES.every((name) => tools.some((tool) => tool.name === name)), "All read tools are available");
+    assert.ok([17, 29].includes(tools.length), "Read-only or explicitly enabled full catalog");
+    for (const name of ["get_capabilities", "get_workspace_stats"]) {
+      await readMcpTool(client, name);
+      checked.push(name);
+    }
     const scans = await readMcpTool(client, "list_scans", { limit: 1 });
     checked.push("list_scans");
     await readMcpTool(client, "get_settings");

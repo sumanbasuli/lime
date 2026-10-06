@@ -45,10 +45,9 @@ func Setup(
 	})
 	r.Use(c.Handler)
 
-	r.Handle("/mcp", mcp.New(repo))
-
 	// Routes
-	r.Route("/api", func(r chi.Router) {
+	api := chi.NewRouter()
+	func(r chi.Router) {
 		r.Get("/health", h.HealthCheck)
 		r.Get("/version", h.Version)
 		r.Get("/stats", h.GetStats)
@@ -82,7 +81,11 @@ func Setup(
 		})
 
 		r.Get("/screenshots/{scanId}/{filename}", h.ServeScreenshot)
-	})
+	}(api)
+	r.Mount("/api", api)
+	// MCP invokes the same handlers in-process, keeping lifecycle and validation
+	// rules identical to the dashboard without a loopback network dependency.
+	r.Handle("/mcp", mcp.New(repo, api))
 
 	return r
 }

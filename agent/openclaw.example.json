@@ -1,0 +1,78 @@
+{
+  "auth": {
+    "profiles": { "openai:default": { "provider": "openai", "mode": "oauth" } },
+    "order": { "openai": ["openai:default"] }
+  },
+  "agents": {
+    "defaults": {
+      "workspace": "${LIME_AGENT_WORKSPACE}",
+      "skipBootstrap": true,
+      "model": { "primary": "openai/gpt-5.6-sol", "fallbacks": [] },
+      "models": { "openai/gpt-5.6-sol": { "agentRuntime": { "id": "openclaw" } } },
+      "heartbeat": { "every": "0m" },
+      "timeoutSeconds": 180
+    },
+    "list": [{
+      "id": "lime",
+      "name": "LIME",
+      "default": true,
+      "workspace": "${LIME_AGENT_WORKSPACE}",
+      "skills": ["lime-audit", "lime-operations", "lime-evidence"]
+    }]
+  },
+  "tools": {
+    "profile": "full",
+    "allow": [
+      "read", "session_status",
+      "lime__list_scans", "lime__get_scan", "lime__list_scan_issues", "lime__get_issue_detail",
+      "lime__get_report_metadata", "lime__get_settings", "lime__list_link_checks", "lime__get_link_check",
+      "lime__get_link_check_stats", "lime__get_scan_link_check", "lime__list_link_check_results",
+      "lime__list_link_check_sources", "lime__get_capabilities", "lime__get_workspace_stats",
+      "lime__get_report", "lime__get_screenshot", "lime__get_link_check_export"
+    ],
+    "deny": ["group:runtime", "write", "edit", "apply_patch", "group:web", "group:ui", "group:messaging", "group:automation", "group:nodes", "group:agents", "sessions_send", "sessions_spawn"],
+    "fs": { "workspaceOnly": true },
+    "elevated": { "enabled": false }
+  },
+  "mcp": {
+    "servers": {
+      "lime": {
+        "url": "${LIME_MCP_URL}",
+        "transport": "streamable-http",
+        "headers": { "Authorization": "Bearer ${LIME_MCP_KEY}" },
+        "enabled": true,
+        "connectionTimeoutMs": 10000,
+        "requestTimeoutMs": 60000,
+        "supportsParallelToolCalls": false,
+        "toolFilter": { "include": [
+          "list_scans", "get_scan", "list_scan_issues", "get_issue_detail", "get_report_metadata", "get_settings",
+          "list_link_checks", "get_link_check", "get_link_check_stats", "get_scan_link_check",
+          "list_link_check_results", "list_link_check_sources", "get_capabilities", "get_workspace_stats",
+          "get_report", "get_screenshot", "get_link_check_export"
+        ] }
+      }
+    }
+  },
+  "gateway": { "mode": "local", "bind": "loopback" },
+  "skills": { "allowBundled": [], "load": { "watch": false } },
+  "plugins": {
+    "allow": ["codex", "openai"],
+    "entries": {
+      "codex": {
+        "enabled": true,
+        "config": {
+          "codexDynamicToolsLoading": "direct",
+          "codexPlugins": { "enabled": false },
+          "computerUse": { "enabled": false },
+          "appServer": {
+            "homeScope": "agent",
+            "mode": "guardian",
+            "sandbox": "read-only",
+            "approvalPolicy": "on-request",
+            "approvalsReviewer": "user"
+          }
+        }
+      }
+    }
+  }
+}

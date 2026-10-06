@@ -80,6 +80,9 @@ function parseIntegrationPayload(
   if (isBoolean(candidate.mcpEnabled)) {
     nextSettings.mcpEnabled = candidate.mcpEnabled;
   }
+  if (isBoolean(candidate.mcpAllowWrites)) {
+    nextSettings.mcpAllowWrites = candidate.mcpAllowWrites;
+  }
 
   return nextSettings;
 }

@@ -38,6 +38,7 @@ function walkDocs(dir: string): string[] {
     const fullPath = path.join(dir, entry);
     const stat = statSync(fullPath);
     if (stat.isDirectory()) {
+      if (entry === "internal") return [];
       return walkDocs(fullPath);
     }
     if (entry.endsWith(".md")) {

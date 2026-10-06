@@ -18,3 +18,6 @@ await mkdir(outputDir, { recursive: true });
 for (const [source, target] of assets) {
   await copyFile(path.join(repoRoot, source), path.join(outputDir, target));
 }
+
+// Publish the canonical installer without maintaining a second script copy.
+await copyFile(path.join(repoRoot, "scripts", "install.sh"), path.join(docsSiteRoot, "public", "install.sh"));

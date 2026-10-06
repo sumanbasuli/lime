@@ -1,93 +1,96 @@
 # LIME Product Roadmap
 
-This roadmap separates the shipped 1.x product from work that still needs validation or implementation. It is not a release schedule or a claim that every deployment, client, public website, or large scan has been verified. See [Verification And Handoff](verification.md) for the tested baseline and its limits, and [CHANGELOG](../CHANGELOG.md) for release history.
+LIME 2.0 brings accessibility scans, link checking, and AI-assisted workflows together in one self-hosted workspace. This roadmap describes what's available and where the project is heading. Planned work has no fixed release date; see the [changelog](../CHANGELOG.md) for release history.
 
-## Current Shipped Baseline
+## Current Accessibility And Integration Capabilities
 
-The existing product includes:
+Available in LIME 2.0:
 
 - Sitemap and single-page scans with same-host profiling and viewport presets.
-- Configured WCAG A/AA axe-core checks, issue grouping, local ACT guidance, focused yellow-highlight screenshots, and distinct preview/full-image review.
+- WCAG A/AA axe-core checks, grouped findings, ACT guidance, and highlighted screenshots with compact previews and expanded views.
 - Pause/resume, startup recovery, failed-page retry within the same partial scan, and full rescans.
 - False-positive triage, score/cache updates, and inherited decisions for matching future scans.
 - Scan-level and issue-scoped PDF, CSV, and LLM exports, with reporting limits and export flags.
 - Server-wide Reporting, Performance, and Integrations settings stored in PostgreSQL.
 - PostgreSQL score/issue-summary read caches, paginated occurrence reads, request timing, and a dashboard PDF-generation concurrency cap.
-- A redesigned dashboard and static marketing website/docs.
-- A read-only MCP endpoint, one generated instance key, and six bounded tools for saved data.
+- A dashboard for managing scans and results, with a public website and documentation.
+- MCP support for reading findings and exports, managing scans and link checks, reviewing false positives, and changing reporting and performance settings. Connections are read-only by default, with write access enabled separately in Settings. Setup examples cover Codex, Claude Code, and OpenCode.
+- A LIME agent with reusable skills and an OpenClaw configuration example.
 - Source-built Docker development, published images/release bundles, and Docker, Fly.io, and Debian deployment/update helpers.
 - Contributor/security guidance and release publishing tied to `VERSION` and `CHANGELOG.md`.
 
-The deterministic verification suite covers existing dashboard/API/data workflows in an isolated production stack. MCP checks include pinned official SDK v1/v2 clients and a pinned local stdio bridge. These checks do not establish that every installed AI application or remote deployment has connected.
+See [Verification](verification.md) for the test suite and [MCP Integration](mcp.md) for supported tools and client setup.
 
-## Current Unreleased Feature
+## Current Link-Checking Capabilities
 
 ### Link Checker
 
-The source now replaces the earlier preview with standalone single-page and bounded same-origin crawl checks, saved destinations/source references, progress, cancellation, fresh rechecks, deletion, and CSV. A default-off **Include link check** checkbox creates a companion for normal accessibility scans; the companion runs after accessibility finishes and does not alter scoring, issue groups, reports, or screenshot evidence.
+Check a single page or follow links across the same site. Saved results show destinations, source references, progress, and response details. You can cancel a running check, recheck a saved result, delete it, or export CSV.
 
-This describes unreleased source, not a published image, remote deployment, or production-load claim. Read [Link Checker Architecture](architecture/link-checker.md) and the [user guide](https://lime.heysuman.com/docs/user/link-checker/) for HTTP-only extraction, fragment/network limitations, resource budgets, and lifecycle behavior. The dated [verification record](verification.md) is the authority for checks actually performed.
+Select **Include link check** when starting an accessibility scan to run both. The link check starts after accessibility finishes and has its own results; it does not affect the accessibility score. See the [user guide](https://lime.heysuman.com/docs/user/link-checker/) for instructions and [architecture reference](architecture/link-checker.md) for crawl limits and HTTP behavior.
 
 ## Next Validation And Hardening Priorities
 
 ### Repeatable Large-Site Measurement
 
-The performance foundations are implemented; larger workloads still need measured evidence. Add a repeatable benchmark that records data size, configured limits, hardware, concurrency, and timings for:
+The next performance priority is a repeatable benchmark for larger sites. It should measure:
 
 - Dashboard and scan score/coverage summaries.
 - Issue-page first render, summary chunks, and occurrence detail.
 - Full and scoped PDF, CSV, and LLM exports.
 - Concurrent reads and triage/report cache invalidation.
 
-Use the existing request timing and PostgreSQL read models first. Keep occurrence reads paginated and report generation bounded. The report-cache table and TTL setting are reserved infrastructure; current report loaders do not consume them. Implement and measure any report-input cache before describing it as active. Do not add Redis or distributed workers without measurements showing a problem the current architecture cannot address. See [Performance](performance.md).
+Record data size, limits, hardware, and concurrent work alongside the results so comparisons are useful. Start with the existing PostgreSQL summaries and request timings. Report caching is a possible improvement; its schema exists, but current report loaders do not use it. See [Performance](performance.md).
 
 ### Deployment And Release Validation
 
-Document target-specific fresh install, upgrade, backup, restore, and rollback checks. A local production-stack pass is not a Fly.io or Debian deployment pass, nor does a fresh disposable database prove an upgrade from an older release.
+Expand install and upgrade coverage across supported deployment methods, including migrations from older releases and recovery from backups.
 
-Before claiming a target is verified:
+For each deployment method:
 
 1. Record its release versions and configuration.
 2. Test migrations against representative existing data as well as a fresh database.
 3. Verify persisted scans, screenshots, settings, report generation, and MCP after upgrade.
 4. Exercise a recoverable backup/restore path; do not assume every update helper performs a backup.
-5. Record dependency/security review results and unresolved findings separately from functional tests.
+5. Review dependencies and record any issues that still need attention.
 
-See [Setup](setup.md), the [operator guides](index.md#for-operators), and [Verification And Handoff](verification.md).
+See [Setup](setup.md), the [operator guides](index.md#for-operators), and [Verification](verification.md).
 
 ### Client Interoperability And Diagnostics
 
-Current MCP behavior is stateless Streamable HTTP with JSON `POST` responses. A `GET` response of 405 and the absence of session IDs are intentional, not by themselves a compatibility defect.
+LIME uses stateless Streamable HTTP with JSON `POST` responses. It does not use MCP sessions or an SSE stream; `GET /mcp` returns 405.
 
-Collect evidence from real client/deployment combinations before extending the protocol. Possible follow-up work includes clearer connection diagnostics, configurable origin policies for non-local browser clients, and session/streaming support if a justified client workflow needs it. OAuth and scoped keys remain deferred; they are not part of the current static bearer-key contract. See [MCP Integration](mcp.md).
+Planned improvements include clearer connection diagnostics and broader client compatibility testing. Origin controls, sessions, and streaming may follow where clients need them. OAuth and scoped keys remain future work. See [MCP Integration](mcp.md).
 
 ## Future Product Work
 
 ### Broader Link-Checking Workflows
 
-Gather real-site feedback before expanding one-shot checking into scheduled monitoring, notifications, JavaScript-rendered extraction, authenticated crawling, or fragment-anchor verification. None of those follow automatically from HTTP reachability checking. Keep resource and network boundaries explicit when adding a new extraction mode.
+Possible additions include scheduled checks, notifications, JavaScript-rendered links, authenticated crawling, and fragment-anchor checks. These are not available yet. Feedback from current users will help set their priority.
 
 ### Integration Boundaries
 
-The current MCP tools read saved scans, scores, issue groups/details, report availability, and non-secret settings. They do not create scans, pause/resume/retry/delete/rescan, change false-positive state, mutate settings, or generate reports automatically.
+MCP gives AI clients access to saved results and, when write access is enabled, scan management, link checks, false-positive review, and reporting settings.
 
-Preserve these boundaries when refining the integration:
+Future integration work should preserve these controls:
 
 - Disabling MCP rejects new requests; rotating the instance key revokes the previous key.
+- Write access defaults false, including for existing keys after upgrade. Permission/key administration stays in the dashboard; MCP cannot enable its own access.
+- Require confirmation for deletion and settings changes. Keep durable request IDs for new-job actions; an uncertain interrupted reservation must not automatically launch another job.
 - Keep key material out of responses, shared configuration, logs, and screenshots except the one-time generation response shown to the operator.
 - Keep issue/group/occurrence pagination bounded.
 - Authenticate before dashboard score enrichment.
 - Return report/screenshot paths using the existing serving routes; do not imply that those ordinary HTTP routes inherit MCP authentication.
 
-The dashboard, ordinary HTTP APIs, reports, and saved screenshot routes do not have built-in user authentication. Protect a remotely reachable deployment externally. Adding multi-tenant identity or authorization would be a separate product/security design, not a consequence of enabling MCP.
+The dashboard, ordinary HTTP APIs, reports, and saved screenshots do not have built-in user authentication. Remote deployments need access controls at the network or reverse proxy. User accounts and multi-tenant access would require a separate authentication design.
 
 ## Deferred
 
 - Redis as a required production dependency.
 - Distributed scan workers.
 - OAuth-based MCP authorization and scoped instance keys.
-- MCP write/admin tools.
+- MCP key/permission administration, OAuth login, and per-client write scopes.
 - Multi-tenant authentication and authorization.
 - Profile/account management behind the sidebar identity display.
 
-Work step by step: establish the existing baseline, make one scoped change, verify the browser/API/data flow, and update the relevant user and developer guides before moving on.
+Contributions should include tests for the affected workflow and updates to the relevant user and developer guides.

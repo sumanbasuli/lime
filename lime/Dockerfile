@@ -39,7 +39,7 @@ ENV LIME_VERSION=${LIME_VERSION}
 ENV LIME_COMMIT=${LIME_COMMIT}
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
-COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 # Baked data catalog so the image works without bind mounts (Fly, standalone VPS).

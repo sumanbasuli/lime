@@ -89,6 +89,8 @@ export async function verifyMcpBridge(url, key, scanId, { linkCheckId, linkScanI
       };
       await read("list_scans", { limit: 1 });
       await read("get_settings");
+      await read("get_capabilities");
+      await read("get_workspace_stats");
       await read("get_scan", { scan_id: scanId });
       const groups = await read("list_scan_issues", { scan_id: scanId, limit: 1 });
       await read("get_report_metadata", { scan_id: scanId });

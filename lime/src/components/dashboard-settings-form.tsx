@@ -12,6 +12,12 @@ import {
   readUpdateNoticeEnabled,
   writeUpdateNoticeEnabled,
 } from "@/lib/update-notice-preference";
+import {
+  getMcpClientConfiguration,
+  MCP_CLIENT_OPTIONS,
+  MCP_KEY_PLACEHOLDER,
+  type McpClient,
+} from "@/lib/mcp-client-config";
 
 interface DashboardSettingsFormProps {
   initialSettings: SystemSettings;
@@ -30,7 +36,8 @@ type ReportSettingsBooleanKey =
   | "reporting.pdfReportsEnabled"
   | "reporting.csvReportsEnabled"
   | "reporting.llmReportsEnabled"
-  | "integrations.mcpEnabled";
+  | "integrations.mcpEnabled"
+  | "integrations.mcpAllowWrites";
 
 interface NumericFieldConfig {
   key: ReportSettingsNumericKey;
@@ -108,7 +115,12 @@ const integrationToggles: ToggleFieldConfig[] = [
   {
     key: "integrations.mcpEnabled",
     label: "Enable MCP",
-    description: "Allow read-only third-party MCP clients to connect. Save settings to apply this switch.",
+    description: "Allow third-party MCP clients to connect with your key. Save settings to apply this switch.",
+  },
+  {
+    key: "integrations.mcpAllowWrites",
+    label: "Allow MCP write actions",
+    description: "Let trusted clients run scans and link checks, triage and delete saved data, and change report settings. Off by default; save to apply. Applies to all clients using your key.",
   },
 ];
 
@@ -149,6 +161,8 @@ function getBooleanValue(settings: SystemSettings, key: ReportSettingsBooleanKey
       return settings.reporting.llmReportsEnabled;
     case "integrations.mcpEnabled":
       return settings.integrations.mcpEnabled;
+    case "integrations.mcpAllowWrites":
+      return settings.integrations.mcpAllowWrites;
   }
 }
 
@@ -211,18 +225,16 @@ export function DashboardSettingsForm({
   const [success, setSuccess] = useState<string | null>(null);
   const [updateNoticeEnabled, setUpdateNoticeEnabled] = useState(true);
   const [mcpEndpoint, setMcpEndpoint] = useState("");
+  const [mcpClient, setMcpClient] = useState<McpClient>("codex");
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const isBusy = saving || generatingKey;
+  const mcpAuthorization = `Authorization: Bearer ${generatedMcpKey || MCP_KEY_PLACEHOLDER}`;
   const mcpConnectionDetails = [
     "Transport: Streamable HTTP",
     `URL: ${mcpEndpoint || "https://your-lime-host/mcp"}`,
-    "Authorization: Bearer <YOUR_MCP_KEY>",
+    mcpAuthorization,
   ].join("\n");
-  const mcpConfig = [
-    "[mcp_servers.lime]",
-    `url = ${JSON.stringify(mcpEndpoint || "https://your-lime-host/mcp")}`,
-    'bearer_token_env_var = "LIME_MCP_KEY"',
-  ].join("\n");
+  const mcpConfig = getMcpClientConfiguration(mcpClient, mcpEndpoint, generatedMcpKey);
 
   useEffect(() => {
     setUpdateNoticeEnabled(readUpdateNoticeEnabled());
@@ -257,6 +269,9 @@ export function DashboardSettingsForm({
   };
 
   const handleToggleChange = (key: ReportSettingsBooleanKey, checked: boolean) => {
+    if (key === "integrations.mcpAllowWrites" && checked && !window.confirm(
+      "Allow all MCP clients using your key to run scans and link checks, triage or delete data, and change reporting/performance settings? Only enable this for trusted clients. Save settings to apply."
+    )) return;
     setSettings((current) => setBooleanValue(current, key, checked));
     setError(null);
     setSuccess(null);
@@ -268,6 +283,7 @@ export function DashboardSettingsForm({
       integrations: {
         ...current.integrations,
         mcpEnabled: DEFAULT_SYSTEM_SETTINGS.integrations.mcpEnabled,
+        mcpAllowWrites: DEFAULT_SYSTEM_SETTINGS.integrations.mcpAllowWrites,
       },
     }));
     setUpdateNoticeEnabled(true);
@@ -420,6 +436,7 @@ export function DashboardSettingsForm({
               <input
                 type="checkbox"
                 checked={getBooleanValue(settings, field.key)}
+                aria-label={field.label}
                 disabled={isBusy}
                 onChange={(event) =>
                   handleToggleChange(field.key, event.target.checked)
@@ -516,6 +533,7 @@ export function DashboardSettingsForm({
                   handleToggleChange(field.key, event.target.checked)
                 }
                 className="peer sr-only"
+                aria-label={field.label}
               />
               <span className="space-y-1">
                 <span className="block text-sm font-medium text-foreground">
@@ -571,9 +589,10 @@ export function DashboardSettingsForm({
             <div className="min-w-0 space-y-1.5">
               <h3 className="text-sm font-semibold text-foreground">Connect an AI tool</h3>
               <p className="text-xs leading-5 text-muted-foreground">
-                MCP can read scans, saved findings, report metadata, and saved
-                link checks with their destinations and source references. It cannot
-                create scans or change your data.
+                MCP reads saved results and returns reports and screenshots.
+                Enable write actions above to run and manage scans and link checks,
+                triage findings, delete saved data, and change report settings.
+                Keys and MCP permissions remain dashboard-only controls.
               </p>
             </div>
             <a
@@ -613,7 +632,7 @@ export function DashboardSettingsForm({
               header on every request. Client configuration fields may differ.
             </p>
             <code className="block break-all rounded-xl border border-black/10 bg-[#FBFAF6] p-3 text-xs text-foreground">
-              Authorization: Bearer &lt;YOUR_MCP_KEY&gt;
+              {mcpAuthorization}
             </code>
             <Button
               type="button"
@@ -629,26 +648,77 @@ export function DashboardSettingsForm({
           </div>
 
           <div className="space-y-2 border-t border-black/8 pt-4">
-            <p className="text-xs font-medium text-foreground">Codex configuration example (optional)</p>
-            <p className="text-xs leading-5 text-muted-foreground">
-              Set <code>LIME_MCP_KEY</code> to your generated key in the environment
-              that starts Codex. Add this to <code>~/.codex/config.toml</code>, then
-              reconnect or start a new session. Keep the key out of config files.
+            <label htmlFor="mcp-client" className="block text-xs font-medium text-foreground">
+              MCP client configuration
+            </label>
+            <select
+              id="mcp-client"
+              value={mcpClient}
+              onChange={(event) => {
+                setMcpClient(event.target.value as McpClient);
+                setCopyFeedback(null);
+              }}
+              aria-describedby="mcp-client-instructions mcp-client-key-note"
+              className="h-10 w-full max-w-sm rounded-xl border border-black/14 bg-white px-3 text-sm text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black"
+            >
+              {MCP_CLIENT_OPTIONS.map((client) => (
+                <option key={client.id} value={client.id}>{client.label}</option>
+              ))}
+            </select>
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+              <h4 className="text-xs font-semibold text-foreground">{mcpConfig.label} configuration</h4>
+              <a
+                href={mcpConfig.docsUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-foreground hover:underline"
+              >
+                Official client instructions
+                <MaterialSymbol name="open_in_new" size={14} />
+              </a>
+            </div>
+            <p id="mcp-client-instructions" className="text-xs leading-5 text-muted-foreground">
+              {mcpConfig.instructions}
             </p>
-            <pre className="whitespace-pre-wrap break-all rounded-xl border border-black/10 bg-[#FBFAF6] p-3 text-xs text-foreground">
-              <code>{mcpConfig}</code>
+            <p id="mcp-client-key-note" className="text-xs leading-5 text-muted-foreground">
+              {generatedMcpKey
+                ? "The key generated on this page is included where needed. Protect copied commands and configuration; do not commit secrets or share shell history."
+                : "Replace <YOUR_MCP_KEY> with your stored key. Existing keys cannot be shown again; you do not need to rotate one to use these examples."}
+              {" "}Copying an example does not configure or launch a client. LIME uses a bearer key, not OAuth.
+            </p>
+            <pre aria-label={`${mcpConfig.label} ${mcpConfig.format} configuration`} className="whitespace-pre-wrap break-all rounded-xl border border-black/10 bg-[#FBFAF6] p-3 text-xs text-foreground">
+              <code>{mcpConfig.config}</code>
             </pre>
             <Button
               type="button"
               variant="outline"
               size="sm"
               disabled={!mcpEndpoint}
-              onClick={() => void copyMcpValue(mcpConfig, "Codex config")}
+              onClick={() => void copyMcpValue(mcpConfig.config, `${mcpConfig.label} config`)}
               className="rounded-full border-black/14 bg-white"
             >
               <MaterialSymbol name="content_copy" size={15} />
-              Copy Codex config
+              Copy {mcpConfig.label} config
             </Button>
+            {mcpConfig.environmentCommand ? (
+              <div className="space-y-2 pt-2">
+                <p className="text-xs font-medium text-foreground">Key environment variable (macOS/Linux/WSL)</p>
+                <pre aria-label="Codex key environment command" className="whitespace-pre-wrap break-all rounded-xl border border-black/10 bg-[#FBFAF6] p-3 text-xs text-foreground">
+                  <code>{mcpConfig.environmentCommand}</code>
+                </pre>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!mcpEndpoint}
+                  onClick={() => void copyMcpValue(mcpConfig.environmentCommand!, "Key environment command")}
+                  className="rounded-full border-black/14 bg-white"
+                >
+                  <MaterialSymbol name="content_copy" size={15} />
+                  Copy key environment command
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
 

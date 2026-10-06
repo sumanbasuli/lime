@@ -1,6 +1,6 @@
 # Sweetner (Result Refiner)
 
-**Sweetner** is the final module in the Shopkeeper core pipeline, responsible for post-processing the raw results from Juicer.
+**Sweetner** groups and saves Juicer's results. It creates one issue per failed rule in each scan and records every affected page and element.
 
 ## Implementation
 
@@ -43,7 +43,7 @@ for each RawResult:
             create IssueOccurrence(issueID, urlID, htmlSnippet, screenshotPath)
 ```
 
-This means if "color-contrast" appears on 50 pages with 3 nodes each, we get 1 Issue record and 150 IssueOccurrence records.
+For example, if `color-contrast` fails on 50 pages with 3 affected elements each, Sweetner creates 1 issue and 150 occurrence records.
 
 The grouping map is per scan and seeded on resume/retry; this is not cross-scan deduplication. Needs-review grouping happens later in the read layer: when a failed group exists for a rule, the UI/reports/MCP suppress a duplicate needs-review card for that rule while keeping its incomplete audit evidence in storage.
 
@@ -57,7 +57,8 @@ The grouping map is per scan and seeded on resume/retry; this is not cross-scan 
 
 ## Output
 
-All data is persisted directly to the database via the repository layer. The Sweetner does not return data — it writes to:
+Sweetner saves results through the repository layer in these tables:
+
 - `issues` table — One row per unique violation type
 - `issue_occurrences` table — One row per affected URL+node combination
 - `url_audits` table — Rule outcome rows for completed pages

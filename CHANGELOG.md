@@ -5,8 +5,16 @@ section matching `VERSION` to populate GitHub Release notes.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-05
+
+- Expanded MCP to 29 tools: 17 read/evidence tools plus opt-in operational scan/link-check lifecycle, false-positive triage, deletion, and reporting/performance settings. Added canonical report/screenshot content, live permission checks, strict confirmations/argument validation, and durable job request IDs without changing existing backend lifecycle rules. Existing keys remain read-only after migration; key and permission administration stay dashboard-only.
+- Added a homepage-only one-command Mac/Linux installer with prerequisite checks, fresh-install safeguards, private local service bindings, readiness checks, and a side-effect-free `--help`/`-h` option; clarified that Fly.io/systemd deployments are separate workflows.
+- Added selectable Codex, Claude Code, and OpenCode MCP setup examples in dashboard settings.
+- Refreshed the API reference with formatted request examples, copy controls, response contracts, and expandable usage notes; redesigned the roadmap to distinguish current accessibility and connected workflows, validation, and future ideas.
+- Audited marketing and rendered guide copy for current feature availability, MCP client choices, audit/report limits, and version differences; fixed broken source-reference links and keyboard access to expanded marketing screenshots, and added repeatable content/browser checks.
+- Fixed frontend image ownership so public assets remain readable after installation with restrictive source-file permissions.
 - Replaced the Link Checker preview with persisted standalone page/crawl jobs, bounded HTTP destination checks, grouped source references, lifecycle actions, and link CSV exports; added an optional **Include link check** companion for normal scans without changing accessibility scoring or screenshot evidence.
-- Added link-checker user/API/architecture guidance and updated marketing/onboarding/roadmap copy with resource, network, rendering, and unreleased-version limitations.
+- Added link-checker user/API/architecture guidance and updated marketing/onboarding/roadmap copy with resource, network, rendering, and installed-version limitations.
 - Refined saved link-check results with local Bootstrap brand icons, compact destinations and full-URL evidence, structured source occurrence cards, all-outcome filters, run metadata, non-standard HTTP guidance, and source-page retry states that hide outdated rows.
 - Added six read-only Link Checker MCP tools for saved job history/details/statistics, scan companions, filtered destinations, and paginated retained source references; kept the existing six accessibility/settings tools, endpoint/key contract, scoring, and exports unchanged. Documented dashboard-relative link/CSV metadata, no/deleted-companion semantics, historical HTTP limitations, untrusted site evidence, and user prompt/paging recipes.
 - Refined all user, operator, and contributor documentation against current behavior; added troubleshooting/FAQ and backup/restore guides, audience-specific reading paths, and clearer operational and MCP limitations.
@@ -28,7 +36,7 @@ section matching `VERSION` to populate GitHub Release notes.
 - Restored the optional release-notice endpoint by escaping the App Router's private-folder prefix, and bounded its best-effort GitHub request to five seconds while preserving browser visibility and release-dismissal preferences.
 - Added isolated existing-feature end-to-end verification and a project handoff guide covering ownership, setup, lifecycle, reports, settings, MCP, and reproducible checks.
 - Redesigned the public marketing and documentation site to match the dashboard visual system, with responsive Material Symbol navigation, improved documentation reading layouts, and consistent product, API, screenshot, roadmap, and onboarding pages.
-- Added the original Link Checker design preview to the public documentation and reproducible screenshot set; the working checker replaces it in the unreleased source above.
+- Added the original Link Checker design preview to the public documentation and reproducible screenshot set; the working checker replaces it in the current 2.0 implementation above.
 - Hardened the docs refresh pipeline with deterministic dependency installs, preflight linting and target validation, automatic isolated-stack cleanup, browser/runtime error checks, screenshot integrity checks, and post-build internal-link and asset validation.
 
 ## [1.0.5] - 2026-05-14

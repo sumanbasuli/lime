@@ -1,6 +1,7 @@
 # Docker & Deployment
 
-The normal application deployment has three Docker surfaces:
+Choose the Compose configuration for your deployment:
+
 - `docker-compose.yml` for production-style local builds from source
 - `docker-compose.dev.yml` as the local development override for UI hot reload
 - `docker-compose.release.yml` for published runtime images
@@ -9,9 +10,10 @@ The normal application deployment has three Docker surfaces:
 
 The Makefile auto-detects either the Docker Compose plugin (`docker compose`) or the legacy standalone binary (`docker-compose`). Set `DOCKER_COMPOSE=docker-compose` explicitly if your server has only the legacy command and auto-detection cannot see it.
 
-The runtime model is intentionally split:
-- the UI still reads PostgreSQL directly for server-rendered pages
-- Shopkeeper still owns scan actions and API writes
+The services divide responsibilities as follows:
+
+- the UI reads PostgreSQL directly for server-rendered pages
+- Shopkeeper handles scan actions and API writes
 - the browser only talks to the UI origin
 - the Next server proxies `/api/...` to Shopkeeper at runtime through `SHOPKEEPER_URL`
 
@@ -21,7 +23,7 @@ That keeps the Docker images generic. They do not need a build-time public API U
 
 Use one Shopkeeper per database. Its active jobs, pause cancellation, and restart recovery are process-local; another backend can reset a job still running elsewhere. The screenshot volume is part of the durable application state and must be backed up with PostgreSQL.
 
-The source stack publishes PostgreSQL 5432, Shopkeeper 8080, and UI 3000 by default. The release stack publishes backend/UI ports by default too. Treat direct database/backend exposure as an operator choice, not a private-by-default guarantee: remove or restrict unnecessary mappings in your deployment copy and publish the UI behind your TLS/access-control proxy. Ordinary dashboard/API routes do not have an application login; MCP's key protects only MCP.
+The source stack publishes PostgreSQL on port 5432, Shopkeeper on 8080, and the UI on 3000. The release stack also publishes the backend and UI. Remove or restrict unnecessary port mappings, and put the UI behind a reverse proxy with TLS and access control. The dashboard and ordinary API routes have no built-in login; the MCP key protects only MCP.
 
 Replace development credentials for nonlocal use, protect `.env`, and ensure both services reach the same PostgreSQL database. A production database URL's TLS requirements depend on its provider; the local `sslmode=disable` example is not a recommendation for a remote database.
 
@@ -48,7 +50,8 @@ The root `.env` controls:
 - native local-development `SHOPKEEPER_URL`
 - bundled Postgres bootstrap values
 
-Important local detail:
+Local configuration:
+
 - the Docker services override `DATABASE_URL` and `SHOPKEEPER_URL` internally to use Docker service names (`db` and `shopkeeper`)
 - `make start-all` builds the production UI image and serves the built Next app
 - `make start-dev` applies `docker-compose.dev.yml` and runs the UI with NextJS hot reload
@@ -90,9 +93,9 @@ The workflow:
 - uses `scripts/publish-release-images.sh` for Docker publish logic
 - adds OCI labels for source, version, and revision
 - uses `scripts/publish-github-release.sh` to create or update the GitHub Release
-- uploads a release bundle asset like `lime-v0.1.0-release.tar.gz`
+- uploads a release bundle asset such as `lime-v2.0.0-release.tar.gz`
 
-No build-time `NEXT_PUBLIC_API_URL` is used in this workflow anymore.
+The workflow does not use a build-time `NEXT_PUBLIC_API_URL`.
 
 ## Published Image Deployment
 
@@ -168,11 +171,11 @@ Service-level `.dockerignore` files exclude local-only files such as:
 - build caches
 - editor artifacts
 
-This keeps build contexts small and prevents development noise from leaking into released images.
+This keeps build contexts small and excludes local files from release images.
 
 ## Shopkeeper Container Note
 
-Shopkeeper still runs Chromium inside Docker, so the container keeps `shm_size: 2gb` to avoid browser memory issues during scans.
+Shopkeeper runs Chromium inside Docker. The Compose configuration sets `shm_size: 2gb` for browser shared memory.
 
 The embedded axe library and image-baked catalogs work without outbound rule downloads; scan targets and the default-enabled GitHub release check still need their own network access. A scan target on `localhost` refers to the backend container itself, not the host/browser. Use a hostname reachable from that container for local fixtures.
 
@@ -180,4 +183,4 @@ The embedded axe library and image-baked catalogs work without outbound rule dow
 
 Keep stable Compose project names and volume identities when updating; a new project name can create an empty screenshot/database volume instead of reusing the old one. Changing PostgreSQL bootstrap variables does not recreate users/passwords in an already initialized data volume. Do not delete `pgdata` to resolve a credential mismatch.
 
-Use [Backup And Restore](backup-restore.md) for a matched database/screenshot recovery set, [Updating LIME](updates.md) for schema-aware version changes, and [Operational Troubleshooting](troubleshooting.md) for nonmutating checks. These operational procedures are source-reviewed guidance; they are not a claim that every external deployment provider has been exercised by the local verification suite.
+See [Backup And Restore](backup-restore.md) for backing up the database and screenshots together, [Updating LIME](updates.md) for upgrades and migration requirements, and [Operational Troubleshooting](troubleshooting.md) for diagnostics.

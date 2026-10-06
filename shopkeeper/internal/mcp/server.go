@@ -51,7 +51,8 @@ type Repository interface {
 }
 
 type Server struct {
-	repo Repository
+	repo    Repository
+	actions http.Handler
 }
 
 type rpcRequest struct {
@@ -73,8 +74,12 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-func New(repo Repository) *Server {
-	return &Server{repo: repo}
+func New(repo Repository, actions ...http.Handler) *Server {
+	s := &Server{repo: repo}
+	if len(actions) > 0 {
+		s.actions = actions[0]
+	}
+	return s
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -263,7 +268,11 @@ func (s *Server) dispatch(ctx context.Context, request rpcRequest) (any, *rpcErr
 	case "ping":
 		return map[string]any{}, nil
 	case "tools/list":
-		return map[string]any{"tools": tools()}, nil
+		definitions := append(append(tools(), capabilitiesTool()), dashboardReadTools()...)
+		if s.writesAllowed(ctx) && s.actions != nil {
+			definitions = append(definitions, actionTools()...)
+		}
+		return map[string]any{"tools": definitions}, nil
 	case "tools/call":
 		return s.handleToolCall(ctx, request.Params)
 	default:
@@ -284,14 +293,14 @@ func (s *Server) handleToolCall(ctx context.Context, raw json.RawMessage) (any, 
 	}
 	var arguments map[string]any
 	if len(params.Arguments) > 0 {
-		decoder := json.NewDecoder(strings.NewReader(string(params.Arguments)))
-		decoder.UseNumber()
-		if err := decoder.Decode(&arguments); err != nil || arguments == nil {
+		var err error
+		arguments, err = decodeArguments(params.Arguments)
+		if err != nil || arguments == nil {
 			return nil, &rpcError{Code: -32602, Message: "tool arguments must be an object"}
 		}
 	}
 	var definition map[string]any
-	for _, candidate := range tools() {
+	for _, candidate := range append(append(append(tools(), capabilitiesTool()), dashboardReadTools()...), actionTools()...) {
 		if candidate["name"] == params.Name {
 			definition = candidate
 			break
@@ -303,10 +312,26 @@ func (s *Server) handleToolCall(ctx context.Context, raw json.RawMessage) (any, 
 	if message := validateArguments(definition, arguments); message != "" {
 		return toolError(message), nil
 	}
+	if definition["annotations"].(map[string]any)["readOnlyHint"] == false {
+		// Check live settings even when a client cached an earlier tools/list.
+		if !s.writesAllowed(ctx) {
+			return toolError("MCP write access is disabled. An instance owner must enable write access in Settings > Integrations."), nil
+		}
+		if s.actions == nil {
+			return toolError("MCP actions are unavailable on this endpoint. Use the dashboard MCP endpoint."), nil
+		}
+		return s.handleAction(ctx, params.Name, arguments), nil
+	}
 
 	var result any
 	var err error
 	switch params.Name {
+	case "get_capabilities":
+		result = s.getCapabilities(ctx)
+	case "get_workspace_stats":
+		result, err = s.getWorkspaceStats(ctx)
+	case "get_report", "get_screenshot", "get_link_check_export":
+		return dashboardRequired(params.Name, arguments), nil
 	case "list_scans":
 		result, err = s.listScans(ctx, arguments)
 	case "get_scan":
@@ -540,11 +565,18 @@ func validateArguments(definition map[string]any, args map[string]any) string {
 		switch property["type"] {
 		case "string":
 			text, ok := value.(string)
-			if !ok || strings.TrimSpace(text) == "" || len(text) > 256 {
-				return key + " must be a non-empty string of at most 256 characters."
+			maximum := 256
+			if configured, ok := property["maxLength"].(int); ok {
+				maximum = configured
 			}
-			if _, hasPattern := property["pattern"]; hasPattern && !uuidPattern.MatchString(text) {
-				return key + " must be a UUID."
+			if !ok || strings.TrimSpace(text) == "" || len(text) > maximum {
+				return key + " must be a non-empty string of at most " + strconv.Itoa(maximum) + " characters."
+			}
+			if pattern, hasPattern := property["pattern"].(string); hasPattern && !regexp.MustCompile(pattern).MatchString(text) {
+				if pattern == uuidPattern.String() {
+					return key + " must be a UUID."
+				}
+				return key + " does not match its allowed format."
 			}
 			if allowed, ok := property["enum"].([]string); ok {
 				valid := false
@@ -554,6 +586,17 @@ func validateArguments(definition map[string]any, args map[string]any) string {
 				if !valid {
 					return key + " must be one of: " + strings.Join(allowed, ", ")
 				}
+			}
+			if property["format"] == "uri" && !validActionURL(text) {
+				return key + " must be an absolute HTTP/HTTPS URL without credentials."
+			}
+		case "boolean":
+			boolean, ok := value.(bool)
+			if !ok {
+				return key + " must be a boolean."
+			}
+			if required, ok := property["const"].(bool); ok && boolean != required {
+				return key + " must be true to confirm deletion."
 			}
 		case "integer":
 			number, ok := value.(json.Number)
@@ -567,6 +610,26 @@ func validateArguments(definition map[string]any, args map[string]any) string {
 		if key, ok := args["key"].(string); !ok || !uuidPattern.MatchString(key) {
 			return "key must be an issue UUID when kind is failed."
 		}
+	}
+	if definition["name"] == "get_screenshot" && strings.Contains(stringArg(args, "filename"), "..") {
+		return "filename must be a saved basename without '..'."
+	}
+	if definition["name"] == "get_report" {
+		_, hasKind := args["kind"]
+		_, hasKey := args["key"]
+		_, hasIssueID := args["issue_id"]
+		if hasKind != hasKey {
+			return "kind and key must be supplied together."
+		}
+		if hasIssueID && (hasKind || hasKey) {
+			return "Use either issue_id or kind/key, never both."
+		}
+		if args["kind"] == "failed" && !uuidPattern.MatchString(stringArg(args, "key")) {
+			return "key must be an issue UUID when kind is failed."
+		}
+	}
+	if definition["name"] == "update_settings" && len(args) < 2 {
+		return "At least one reporting or performance setting is required."
 	}
 	return ""
 }

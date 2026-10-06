@@ -9,6 +9,8 @@ import { chromium } from "playwright";
 import { connectMcp, readMcpTool, MCP_TOOL_NAMES, verifyMcpReadClient } from "./verify-mcp.mjs";
 import { verifyMcpBridge } from "./verify-mcp-bridge.mjs";
 import { verifyLinkMcp } from "./verify-link-mcp.mjs";
+import { handleFullMcpFixture, verifyFullMcp } from "./verify-full-mcp.mjs";
+import { verifyInstalledMcpClients } from "./verify-mcp-installed-clients.mjs";
 import { handleLinkFixture, verifyLinkChecks, waitForLinkCheck } from "./verify-links.mjs";
 
 function arg(name, fallback) {
@@ -56,6 +58,7 @@ const fixtureServer = createServer((request, response) => {
   const pathname = new URL(request.url, fixtureOrigin).pathname;
   requests.set(pathname, (requests.get(pathname) || 0) + 1);
   if (handleLinkFixture(request, response, { origin: fixtureOrigin, requests })) return;
+  if (handleFullMcpFixture(request, response, { origin: fixtureOrigin, renderPage: fixturePage })) return;
   if (pathname === "/index.xml") {
     response.writeHead(200, { "Content-Type": "application/xml" });
     response.end(`<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>${fixtureOrigin}/nested.xml</loc></sitemap><sitemap><loc>${fixtureOrigin}/nested.xml</loc></sitemap></sitemapindex>`);
@@ -734,7 +737,7 @@ try {
     assert.ok(!JSON.stringify(visible).includes(mcpKey), "Read tools do not expose the bearer key");
     assert.ok(!JSON.stringify(visible).includes("mcp_key_hash"), "Read tools do not expose the hash");
     const smoke = await verifyMcpReadClient(`${baseUrl}/mcp`, mcpKey, mcpScan.id);
-    assert.deepEqual([...smoke.checked].sort(), [...MCP_TOOL_NAMES].sort(), "The earlier pause/resume fixture already supplies saved companion results, so the smoke helper reads all twelve tools");
+    assert.deepEqual([...smoke.checked].sort(), MCP_TOOL_NAMES.filter((name) => !["get_report", "get_screenshot", "get_link_check_export"].includes(name)).sort(), "Saved fixtures supply fourteen smoke-tool calls; real artifacts have separate full-workflow coverage");
     mcpV2Evidence = await verifyMcpReadClient(`${baseUrl}/mcp`, mcpKey, mcpScan.id, { sdk: "v2" });
     assert.deepEqual([...mcpV2Evidence.checked].sort(), [...smoke.checked].sort(), "Both SDK generations exercise the same available data");
     assert.deepEqual(mcpV2Evidence.protocol, { era: "legacy", version: "2025-11-25" });
@@ -758,7 +761,7 @@ try {
     }
     for (const name of ["create_scan", "delete_scan", "save_settings", "mark_false_positive"]) {
       const data = await rpc("tools/call", { name, arguments: { scan_id: single.id } }, mcpKey);
-      assert.equal(data.error.code, -32602, "MCP cannot invoke mutation tools");
+      assert.ok(data.error?.code === -32602 || data.result?.isError === true, "Read-only MCP rejects unknown or write-gated mutation tools");
     }
     const headers = { Authorization: `Bearer ${mcpKey}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2025-11-25" };
     for (const endpoint of [`${baseUrl}/mcp`, `${apiUrl}/mcp`]) {
@@ -880,7 +883,7 @@ try {
       const bridge = await verifyMcpBridge(`${baseUrl}/mcp`, key, mcpScan.id, {
         linkCheckId: linkFixtures.single.id, linkScanId: companionScan.id,
       });
-      assert.deepEqual([...bridge.checked].sort(), [...MCP_TOOL_NAMES].sort(), "The real stdio bridge reads every one of the twelve saved-data tools");
+      assert.deepEqual([...bridge.checked].sort(), MCP_TOOL_NAMES.filter((name) => !["get_report", "get_screenshot", "get_link_check_export"].includes(name)).sort(), "The real stdio bridge calls fourteen saved-data/capability tools; artifacts have separate full-flow coverage");
       assert.equal(await snapshot(), beforeBridge, "Bridge reads do not change saved scans, link evidence or settings");
       await writeFile(path.join(outputDir, "link-mcp-client-results.json"), JSON.stringify({
         completedAt: new Date().toISOString(), tools: MCP_TOOL_NAMES, sdk, bridge,
@@ -889,6 +892,22 @@ try {
     } finally {
       await json(`${baseUrl}/api/settings`, jsonOptions("PUT", { integrations: { mcpEnabled: previousSettings.integrations.mcpEnabled } }));
     }
+  });
+
+  await check("Full MCP workflows: real SDK v1/v2, safe writes, reports, evidence and lifecycle", async () => {
+    await verifyFullMcp({
+      baseUrl, apiUrl, fixtureOrigin, verificationSql, json, request, page, navigate,
+      waitForScan, outputDir, requests,
+      verifyInstalledClients: process.env.LIME_VERIFY_INSTALLED_CLIENTS === "1" ? verifyInstalledMcpClients : undefined,
+      restartBackend: async () => {
+        await exec("docker", ["compose", "-p", "lime-verification", "-f", "docker-compose.docs.yml", "restart", "shopkeeper"], { cwd: repoRoot });
+        for (let attempt = 0; attempt < 60; attempt += 1) {
+          if (await fetch(`${apiUrl}/api/health`).then((response) => response.ok).catch(() => false)) return;
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        throw new Error("Isolated verification backend did not recover after restart");
+      },
+    });
   });
 
   await check("desktop/tablet/mobile routes, navigation, search and screenshot layout", async () => {

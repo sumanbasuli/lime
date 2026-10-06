@@ -49,6 +49,11 @@ for (const route of requiredRoutes) {
   }
 }
 
+const installerPath = path.join(outDir, "install.sh");
+if (!existsSync(installerPath) || !readFileSync(installerPath).equals(readFileSync(path.join(siteRoot, "..", "scripts", "install.sh")))) {
+  failures.push("Missing or stale /install.sh: exported installer must exactly match scripts/install.sh");
+}
+
 const htmlFiles = walk(outDir, ".html");
 const idsByFile = new Map();
 for (const htmlFile of htmlFiles) {

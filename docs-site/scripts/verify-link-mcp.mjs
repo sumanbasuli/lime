@@ -214,8 +214,7 @@ export async function verifyLinkMcp({
       }
       for (const [name, args] of invalid) await expectToolError(client, name, args);
       for (const name of WRITE_TOOLS) {
-        await assert.rejects(() => client.callTool({ name, arguments: { check_id: checkId } }),
-          (error) => error.code === -32602, `${name} cannot invoke a mutation through MCP`);
+        await expectToolError(client, name, { check_id: checkId });
       }
       assert.deepEqual([...called].sort(), [...MCP_LINK_TOOL_NAMES].sort(), "Both SDK versions really execute all six link tools");
       assert.ok(trace.some((entry) => entry.rpcMethod === "initialize" && entry.status === 200));

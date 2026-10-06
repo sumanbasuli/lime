@@ -21,6 +21,7 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+docker-compose.install.yml
 
 # Release and production build output
 dist/
@@ -35,3 +36,6 @@ lime-v*-release.tar.gz
 **/.cache/
 *.tsbuildinfo
 .claude/
+
+# Generated from the canonical installer by docs-site prepare-assets.
+/docs-site/public/install.sh

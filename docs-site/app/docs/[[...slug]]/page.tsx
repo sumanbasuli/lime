@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { MaterialSymbol } from "@/components/material-symbol";
 import { getAdjacentDocPages, getAllDocPages, getDocPage } from "@/lib/docs";
-import { withBasePath } from "@/lib/site";
+import { siteConfig, withBasePath } from "@/lib/site";
 
 interface DocsPageProps {
   params: Promise<{ slug?: string[] }>;
@@ -130,7 +130,7 @@ export default async function DocsPage({ params }: DocsPageProps) {
             ) : null}
           </nav>
 
-          {page.sourceFiles?.length ? (
+          {page.category !== "User Docs" && page.sourceFiles?.length ? (
             <section
               className="border-l-2 border-[#FFED00] py-1 pl-4"
               aria-label="Source references"
@@ -138,17 +138,18 @@ export default async function DocsPage({ params }: DocsPageProps) {
               <div className="mb-2 px-2 font-mono text-[9px] font-semibold uppercase tracking-[0.16em] text-black">
                 Source references
               </div>
+              <p className="px-2 text-[11px] leading-5 text-black/60">Related files in the LIME repository.</p>
               <div className="space-y-1">
                 {page.sourceFiles.map((source) => (
-                  <a
+                  <code
                     key={source}
-                    href={`https://github.com/sumanbasuli/lime/tree/main/${source}`}
-                    className="block break-words rounded-md px-2 py-1 font-mono text-[10px] leading-4 text-black/45 no-underline transition-colors hover:text-black"
+                    className="block break-all rounded-md px-2 py-1 font-mono text-[10px] leading-4 text-black/60"
                   >
                     {source}
-                  </a>
+                  </code>
                 ))}
               </div>
+              <a href={siteConfig.repoUrl} className="mt-2 inline-flex min-h-9 items-center gap-1 px-2 text-xs font-semibold text-black no-underline hover:underline">Browse the repository<MaterialSymbol name="arrow_outward" size={14} /></a>
             </section>
           ) : null}
         </div>

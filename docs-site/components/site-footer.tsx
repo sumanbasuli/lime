@@ -23,8 +23,8 @@ export function SiteFooter() {
               className="h-7 w-auto"
             />
           </a>
-          <span className="text-[11px] text-black/45">
-            Self-hosted accessibility scanner · GPL-2.0
+          <span className="text-[11px] text-black/60">
+            Self-hosted audits and link checks · GPL-2.0
           </span>
         </div>
         <nav className="flex flex-wrap gap-x-5 gap-y-2" aria-label="Footer navigation">

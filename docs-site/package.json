@@ -1,6 +1,6 @@
 {
   "name": "lime-docs-site",
-  "version": "1.0.5",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "predev": "npm run prepare-assets",
@@ -13,6 +13,11 @@
     "lint": "eslint",
     "docs:screenshots": "node scripts/capture-screenshots.mjs",
     "verify:browser": "node scripts/verify-browser.mjs",
+    "test:api-code": "node --test scripts/verify-api-code.mjs",
+    "verify:api-roadmap": "node scripts/verify-api-roadmap.mjs",
+    "verify:marketing": "node scripts/verify-marketing.mjs",
+    "test:mcp-errors": "node --test scripts/verify-full-mcp-errors.mjs",
+    "verify:mcp-full": "node scripts/verify-full-mcp-isolated.mjs",
     "test:docs-content": "node scripts/verify-content.mjs",
     "verify:mcp": "node scripts/verify-mcp.mjs",
     "validate": "npm run lint && npm run build"

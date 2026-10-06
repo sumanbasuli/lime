@@ -14,6 +14,7 @@ on:
       - "docs-site/**"
       - "docs/**"
       - "assets/**"
+      - "scripts/install.sh"
       - "README.md"
       - "CHANGELOG.md"
       - ".github/workflows/docs-pages.yml"

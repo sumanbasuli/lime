@@ -1,10 +1,12 @@
 # MCP Integration
 
-LIME includes a read-only MCP endpoint for connecting third-party AI tools to an existing LIME instance. It lets an AI client inspect scans, scores, issue groups, paginated occurrences, saved link checks and source references, report availability, and server settings without running inside the dashboard.
+Connect a compatible AI client to LIME to review accessibility findings, inspect link checks, and retrieve reports and screenshots. With write access enabled, the same connection can create and manage scans and link checks, mark false positives, and update reporting and performance settings.
 
-This page is both the operator guide and the client-connection guide. It documents the current endpoint, key handling, headers, tools, and client configuration.
+This guide covers setup, authentication, transport, available tools, and client configuration.
 
-For a first connection, [enable MCP](#enable-mcp-in-lime), [choose a connection method](#choose-a-connection-method), then [verify a connection](#verify-a-connection). Client examples are setup instructions; a successful configuration save is not proof that the client has connected. Contributors can use [Verification And Handoff](verification.md) for the isolated integration suite and dated evidence.
+To get started, [enable MCP](#enable-mcp-in-lime), [choose a connection method](#choose-a-connection-method), then [verify the connection](#verify-a-connection) by reading saved evidence. Contributors can find the isolated integration suite in [Testing LIME](verification.md).
+
+The [LIME agent and OpenClaw guide](agent.md) provides a ready-to-configure assistant workspace with audit, operations, and evidence skills. It uses the same MCP endpoint and permissions, starts read-only, and includes guidance for enabling actions and recovering interrupted requests.
 
 ## Status
 
@@ -16,22 +18,26 @@ The current implementation provides:
 - JSON-RPC request and response handling for MCP initialization, ping, tool listing, and tool calls.
 - `Authorization: Bearer <lime-mcp-key>` authentication.
 - Hashed MCP key storage; the raw key is only shown when generated.
-- Twelve read-only tools: six existing accessibility/settings tools and six tools for saved link-check jobs, statistics, scan companions, destinations, and retained source references.
+- Seventeen read tools on the canonical dashboard endpoint, preserving the original twelve saved-data tools and adding capabilities, workspace statistics, report, screenshot, and saved-link CSV access.
+- Twenty-nine tools when the operator enables MCP write access: scan/link lifecycle actions, false-positive triage, and reporting/performance changes.
+- Read-only access by default, including after upgrading an existing instance/key. `mcpAllowWrites` is an explicit shared operator setting, not inferred from key generation.
+- Required confirmations for deletion and settings changes, plus durable request IDs for actions that create a new scan or link-check job.
 - Bounded `limit` and `offset` pagination for large lists.
 
-Current limitations and planned hardening:
+Current limitations:
 
 - `GET /mcp` streaming is not enabled. LIME currently returns JSON responses to `POST /mcp`.
 - MCP session state is not currently used.
 - OAuth and scoped MCP keys are not implemented.
 - Origin validation currently accepts requests with no `Origin` header and localhost origins. Server-to-server clients and local bridges usually omit `Origin`; remote browser-origin clients are not currently supported.
-- MCP remains read-only. It does not create or retry scans, create/recheck/cancel/delete link checks, mutate settings, or change issue triage state.
+- Key generation/rotation, MCP enablement, and write-permission changes remain dashboard-only administration. MCP cannot promote itself from read-only to full access.
+- The key and write permission are instance-wide, not per-user scopes. Enable writes only for trusted clients and authorized target sites.
 
-The MCP key authenticates MCP requests only. The dashboard, ordinary HTTP APIs, report downloads, and saved screenshot URLs have no built-in user authentication. Protect a remotely reachable instance with an appropriate external access layer; do not treat a generated MCP key as protection for those routes. Report metadata provides existing download paths but does not generate or download a report.
+The MCP key authenticates MCP requests only. The dashboard, ordinary HTTP APIs, report downloads, and saved screenshot URLs have no built-in user authentication. Protect a remotely reachable instance with an appropriate external access layer; do not treat a generated MCP key as protection for those routes. `get_report_metadata` supplies paths without generating a report; the separate evidence tools fetch bounded content through authenticated MCP calls.
 
 ## Transport
 
-Use the dashboard origin for the complete integration: it supplies fresh scores using the dashboard's existing scorer, and relative report links resolve on the same origin. Shopkeeper remains the authenticated read-only tool owner.
+Use the dashboard origin for the complete integration: it supplies fresh scores using the existing scorer, materializes reports/screenshots/CSV, and handles reporting/performance settings changes after authentication. Shopkeeper owns authentication, saved-data reads, and scan/link/triage actions using the existing application handlers.
 
 Endpoint:
 
@@ -50,12 +56,16 @@ Use an AI client configuration that supports remote HTTP or Streamable HTTP MCP 
 - Clients send JSON-RPC messages with HTTP `POST`.
 - Clients send `Accept: application/json, text/event-stream` and `Content-Type: application/json`.
 - LIME currently returns JSON responses, not a long-lived Server-Sent Events stream.
-- LIME negotiates the `2025-03-26`, `2025-06-18`, and `2025-11-25` protocol versions. The pinned v1 SDK example uses `2025-11-25`; this is not an upgrade to the newer protocol generation.
+- LIME negotiates the `2025-03-26`, `2025-06-18`, and `2025-11-25` protocol versions. The v1 SDK example below uses `2025-11-25`.
 - LIME does not currently issue or require `MCP-Session-Id`.
 
-`GET /mcp` returning 405 and stateless JSON responses are valid for this transport; an always-open SSE stream and session IDs are not required. A legacy SSE-only client is not suitable. Direct Shopkeeper access (default `http://localhost:8080/mcp`, or your `LIME_API_PORT`) remains available, but its score summary can be null when the saved cache is cold or stale. Use dashboard `/mcp` for fresh scoring and usable report links. The static website/docs on port 3001 are not an MCP server. A remote client cannot reach your computer's localhost; it needs a reachable HTTPS dashboard endpoint.
+Stateless JSON responses and a `405` response to `GET /mcp` are valid for this transport; an SSE stream and session IDs are optional. Legacy SSE-only clients are not supported. Direct Shopkeeper access (default `http://localhost:8080/mcp`, or your `LIME_API_PORT`) remains available, but its score summary can be null when the saved cache is cold or stale. Use dashboard `/mcp` for fresh scores and report content. The static website and docs on port 3001 are not an MCP server. Clients running on another machine need a reachable HTTPS dashboard endpoint rather than your computer's localhost.
 
-The canonical proxy limits request bodies to 1 MiB and applies a 30-second deadline while reading the incoming body and fetching from Shopkeeper. An oversized body returns 413, an unreadable/canceled body returns 400, a proxy deadline returns 504, an unreachable backend returns 502, and invalid backend configuration returns 500. These transport failures can return a plain JSON `error` instead of a JSON-RPC tool result: check HTTP status before inspecting `isError`. The deadline is not a promise that score computation or report generation finishes within 30 seconds.
+The canonical proxy limits request bodies to 1 MiB and applies a 30-second deadline while reading the incoming body and fetching from Shopkeeper. An oversized body returns 413, an unreadable/canceled body returns 400, a proxy deadline returns 504, an unreachable backend returns 502, and invalid backend configuration returns 500. These transport failures can return a plain JSON `error` instead of a JSON-RPC tool result: check HTTP status before inspecting `isError`.
+
+Dashboard `get_scan` score and database reads share a 30-second deadline from request entry and respect caller abort. A blocked or expired read returns `isError: true`. Once Shopkeeper has authenticated and validated a dashboard-owned operation, artifact reads have a separate 30-second deadline covering access checks, queued read/report handlers, database reads, and content buffering. These are separate stages, not a single 30-second limit for every MCP request. Underlying queries or rendering may finish later, but late results and streams are discarded.
+
+For `update_settings`, the access check is followed by PostgreSQL transaction-local `lock_timeout = '5s'` and `statement_timeout = '20s'`, applied before inserting or locking the settings row. Authorization and write permission are checked again under the row lock. Success is returned only after commit; a database timeout rolls back the transaction before returning a tool error. These MCP-specific limits do not affect normal dashboard saves or pooled-connection defaults, and do not bound pool checkout, network waits, or total RPC duration. Settings commits are independent of the artifact-read deadline. If a response is lost, reread the settings before retrying.
 
 Reference:
 
@@ -74,7 +84,9 @@ The settings flow is:
 5. Add the endpoint URL and key to the AI tool's MCP configuration.
 6. Use **Enable MCP** and **Save settings** for later enable/disable changes.
 
-The connection card shows this dashboard's `/mcp` URL and provides **Copy MCP endpoint**, **Copy HTTP connection details**, and an optional **Copy Codex config** action. **Copy MCP key** is available only while the newly generated key is shown. If clipboard access fails, select and copy the displayed value manually. None of these actions installs a client or changes its configuration.
+Leave MCP write access off for saved-data analysis. To allow actions, the operator must separately enable **Allow MCP write actions** and select **Save settings**. Existing and newly generated keys do not bypass this setting. Turning write access off removes action tools and rejects later action calls; it does not cancel a scan or link check already accepted.
+
+The connection card shows your dashboard's `/mcp` URL, HTTP connection details, and configuration examples for **Codex**, **Claude Code**, **OpenCode 2.x**, and **OpenCode 1.x (legacy)**. Choose your client's format and copy the configuration and any displayed environment command into that client. **Copy MCP key** is available only while the newly generated key is shown; keep examples containing it private. If clipboard access fails, select and copy the displayed value manually. The [user MCP guide](https://lime.heysuman.com/docs/user/mcp/) includes version-specific OpenCode examples and other native clients.
 
 Generating/rotating a key does not save unrelated reporting/performance edits. Those drafts remain in the form until **Save settings**. Rotation asks for confirmation because every connected client must be updated immediately.
 
@@ -84,7 +96,7 @@ Key storage rules:
 - Regenerating the key immediately revokes the previous key.
 - Disabling MCP rejects new MCP requests.
 - There is one shared instance key, not per-user or per-scan scopes. Keys do not automatically expire; rotate or disable them when required.
-- MCP is read-only.
+- MCP write access defaults off. When enabled, every client using the instance key can execute the permitted action tools; this is not a per-client permission system.
 
 ## Authentication
 
@@ -126,7 +138,7 @@ AI tools use different MCP config file names, but remote HTTP MCP configuration 
 | Public HTTPS remote access | Use a reachable dashboard endpoint; localhost cannot be reached from another machine/cloud client |
 | OAuth-only connector or browser-origin-only client | Not currently supported by LIME's static-key contract |
 
-Field names and environment substitution vary by client; JSON does not universally expand `${LIME_MCP_KEY}`. Use the client-specific examples below. LIME does not configure user accounts automatically or guarantee every AI product's connector support. In particular, do not assume ChatGPT or Claude web connectors requiring OAuth can use this static bearer key.
+Field names and environment substitution vary by client; JSON does not universally expand `${LIME_MCP_KEY}`. Use the client-specific examples below. OAuth-only web connectors, including those in some ChatGPT and Claude configurations, cannot use LIME's static bearer key directly.
 
 If the AI tool has a UI instead of a JSON config file, enter:
 
@@ -143,7 +155,7 @@ Native HTTP client configuration does not require Node.js. The local bridge and 
 
 ## Client-Specific Configuration
 
-These are setup instructions, not proof that your installed client has connected. Check its tool list and call a saved scan before recording an integration pass. Do not commit a real key into a shared config file.
+After configuring a client, refresh its tool list and read a known saved scan to confirm the connection. Keep real keys out of shared configuration files and version control.
 
 ### Codex
 
@@ -161,7 +173,7 @@ Alternatively, run this command yourself:
 codex mcp add lime --url http://localhost:3000/mcp --bearer-token-env-var LIME_MCP_KEY
 ```
 
-The Codex process must receive `LIME_MCP_KEY` in its environment. An export in a terminal does not necessarily reach an already-running desktop process. Use your client/host's documented environment setup and restart or reconnect after configuration. LIME uses a bearer key, so `codex mcp login lime` is not an OAuth setup step for this server. These instructions do not automatically modify your Codex account or configuration. See [official OpenAI MCP documentation](https://developers.openai.com/codex/mcp/).
+The Codex process must receive `LIME_MCP_KEY` in its environment. An export in a terminal may not reach an already-running desktop process; use your host's documented environment setup, then restart or reconnect. LIME uses a bearer key, so `codex mcp login lime` is not needed for this server. See [official OpenAI MCP documentation](https://developers.openai.com/codex/mcp/).
 
 ### Claude Code
 
@@ -179,7 +191,7 @@ Claude Code's project `.mcp.json` supports environment expansion in HTTP headers
 }
 ```
 
-Set `LIME_MCP_KEY` in the Claude Code process environment, approve the project server when prompted, and inspect `/mcp` status and tools. This is Claude Code configuration, not a claim about Claude web's connector authentication. See [Claude Code's MCP guide](https://code.claude.com/docs/en/mcp).
+Set `LIME_MCP_KEY` in the Claude Code process environment, approve the project server when prompted, and inspect `/mcp` status and tools. This configuration applies to Claude Code, not Claude web. See [Claude Code's MCP guide](https://code.claude.com/docs/en/mcp).
 
 ### Cursor
 
@@ -222,9 +234,9 @@ For VS Code's `.vscode/mcp.json` format, use a `servers` object and a secret inp
 }
 ```
 
-Start the server through VS Code's MCP controls, supply the generated key, and verify the twelve tools are listed. Configuration formats and remote-host rules are documented in the [VS Code MCP reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
+Start the server through VS Code's MCP controls, supply the generated key, and verify the tools match the instance's reported capabilities. Configuration formats and remote-host rules are documented in the [VS Code MCP reference](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
 
-This secret-input example applies to VS Code's extension-host configuration. VS Code does not forward servers using interactive `${input:...}` values to Agent Host sessions. Agent Host also supports a separate portable `.mcp.json` format with `mcpServers`; follow the official reference for that workflow rather than assuming this example applies to every VS Code session.
+This secret-input example is for VS Code's extension-host configuration. Servers using interactive `${input:...}` values are not forwarded to Agent Host sessions. For Agent Host, use the portable `.mcp.json` format with `mcpServers` described in the official reference.
 
 ### Local Bridge Client
 
@@ -252,7 +264,7 @@ Use this pattern for AI tools that still require `stdio` MCP server entries:
 }
 ```
 
-This pins the bridge release tested with LIME. It requires Node.js and npx on the host client's `PATH`; its Undici dependency requires Node 20.18.1 or newer. The earlier isolated check used Node 24.18.0 and read the original six accessibility/settings tools, then confirmed the launcher exited and its callback port was released. That evidence predates the link-check tools; use the dated [verification record](verification.md) for the tool set actually exercised by a later run. It did not configure an installed desktop client or use OAuth. Use a supported Node release and review the third-party bridge/dependencies before deployment; pinning the bridge alone is not a security audit or a lock of its dependency tree.
+The example pins `mcp-remote` to version `0.14.3`. Node.js and npx must be on the client's `PATH`; the bridge's Undici dependency requires Node 20.18.1 or newer. Use a supported Node release and review this third-party bridge and its dependencies before deployment. Pinning the bridge version does not lock its full dependency tree.
 
 The URL is explicit: a subprocess argument does not perform shell expansion of `${LIME_MCP_URL}`. The bridge substitutes environment placeholders in custom headers; the no-space header argument also avoids launcher quoting problems. Use HTTPS for a remote dashboard. Non-localhost HTTP requires the bridge's `--allow-http` option and a trusted private network. The bridge is not a LIME application dependency. See the [bridge's own configuration documentation](https://github.com/punkpeye/mcp-remote#custom-headers).
 
@@ -265,7 +277,7 @@ npx --yes mcp-remote@0.14.3 http://localhost:3000/mcp \
   --header 'Authorization:${LIME_MCP_AUTH_HEADER}'
 ```
 
-Keep the header argument single-quoted: the bridge, not the shell, substitutes the environment value. This process expects MCP messages on stdin/stdout; running it alone is not a complete connection test and may wait quietly. The actual stdio bridge regression runs inside `make verify-app` with an isolated fixture key and temporary auth/cache directory, never your client configuration or normal-instance key.
+Keep the header argument single-quoted so the bridge substitutes the environment value. The process expects MCP messages on stdin/stdout and may wait quietly until a client connects. Contributors can check the bridge through `make verify-app`, which uses an isolated fixture key and temporary auth/cache directory rather than existing client configuration or normal-instance keys.
 
 ## Smoke Test With Curl
 
@@ -347,7 +359,7 @@ curl -s "$LIME_MCP_URL" \
 
 ## TypeScript Client Example
 
-This example is for documentation and integration testing. Prefer the configuration UI of your AI tool when possible.
+Use this minimal client to initialize a connection, list tools, and read recent scans. To connect an AI application, use its native MCP configuration instead.
 
 In an empty, separate integration directory, initialize a package and install the SDK and a pinned TypeScript runner:
 
@@ -403,7 +415,7 @@ LIME_MCP_KEY="lime_mcp_xxxxxxxxxxxxxxxxx" \
 npx --no-install tsx lime-mcp-client.mts
 ```
 
-This example pins the official v1 SDK generation for reproducible testing of LIME's initialization contract. See the [official SDK v1 source](https://github.com/modelcontextprotocol/typescript-sdk/tree/v1.x).
+The example pins the official v1 SDK for reproducible integration checks. See the [official SDK v1 source](https://github.com/modelcontextprotocol/typescript-sdk/tree/v1.x).
 
 For the SDK's v2 client generation, install its separately pinned client package:
 
@@ -422,11 +434,11 @@ const client = new Client(
 );
 ```
 
-The SDK generation and server protocol are different: this v2 setup uses the existing `2025-11-25` initialize contract, not modern `2026-07-28` discovery or capabilities. LIME has not upgraded its server to the modern protocol. See the [official split-package SDK](https://github.com/modelcontextprotocol/typescript-sdk) and its [negotiation mode source](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/packages/client/src/client/versionNegotiation.ts).
+The SDK version and server protocol version are independent. This v2 setup uses LIME's `2025-11-25` initialization contract; LIME does not support `2026-07-28` discovery or capabilities. See the [official split-package SDK](https://github.com/modelcontextprotocol/typescript-sdk) and its [negotiation mode source](https://github.com/modelcontextprotocol/typescript-sdk/blob/main/packages/client/src/client/versionNegotiation.ts).
 
-## Current Read-Only Tools
+## Saved-Data Read Tools
 
-The current MCP endpoint exposes these read-only tools:
+These twelve compatible read tools remain available in both access modes:
 
 ```text
 list_scans
@@ -460,7 +472,7 @@ Tool arguments:
 
 `kind` for `get_issue_detail` must be `failed` or `needs_review`. Use the `key` returned by `list_scan_issues`.
 
-Failed keys are issue UUIDs and are canonicalized to lowercase for lookup; review keys are rule IDs. Detail lookup is not limited to the first 1,000 groups. Older scans can contain incomplete audit counts without stored node occurrences: the summary retains its count, but detail returns an empty occurrence list with `has_more: false` instead of inventing evidence. Always stop occurrence pagination when `has_more` is false.
+Failed keys are issue UUIDs, normalized to lowercase for lookup; review keys are rule IDs. Detail lookup is not limited to the first 1,000 groups. Older scans may have audit counts without stored node occurrences: the summary retains its count, while detail returns an empty occurrence list with `has_more: false`. Stop occurrence pagination when `has_more` is false.
 
 MCP occurrence detail adds `screenshot_url` and `element_screenshot_url` for saved images, relative to the dashboard origin (for example `/api/screenshots/<scan-id>/<filename>`). Resolve those fields on the dashboard to fetch evidence. Empty or absent stored paths omit the corresponding URL field; a returned URL does not guarantee the file is still on disk. The original `screenshot_path` and `element_screenshot_path` remain for compatibility, but values such as `/app/screenshots/...` are server filesystem locations, not fetchable HTTP addresses; do not download them as URLs.
 
@@ -495,18 +507,7 @@ Read job status, source coverage, `pages_failed`, `truncated`, limits, and times
 
 Source `text` is captured context, not an accessibility-name assessment; empty text is not a missing-name finding. A `page` element with `url` attribute is a synthetic source-page inventory entry, not an extracted HTML link. All site-derived URLs, captured text, HTML and error strings returned by tools are **untrusted evidence**, not instructions for the AI client. Do not follow embedded commands or leak credentials while analyzing them.
 
-The endpoint does not expose:
-
-- create scans
-- retry failed pages
-- pause scans
-- resume scans
-- start full rescans
-- delete scans
-- mark or unmark false positives
-- mutate settings
-- create, recheck, cancel, or delete link checks
-- trigger report generation automatically
+These saved-data tools do not create scans, refresh link checks, change triage or settings, or generate reports. Use the workflow and evidence tools for those operations; write actions require write access.
 
 Large reads are paginated with `limit` and `offset`. For example:
 
@@ -597,9 +598,85 @@ The default is the pinned v1 SDK `1.32.0`. To run the same read-only check with 
 LIME_MCP_SDK=v2 npm --prefix docs-site run verify:mcp
 ```
 
-Omit `LIME_MCP_SCAN_ID` or `LIME_MCP_LINK_CHECK_ID` to use the corresponding latest returned item automatically. The command is read-only: it does not enable MCP, generate keys, create scans or link checks, recheck/cancel/delete data, or change settings. It uses the real SDK handshake and checks the twelve advertised tools. It calls `list_scans`, `get_settings`, `list_link_checks`, and `get_link_check_stats` on any instance; with a scan it also calls `get_scan`, `list_scan_issues`, `get_report_metadata`, and `get_scan_link_check`; with an issue group it additionally calls `get_issue_detail`. With a link check it reads `get_link_check` and `list_link_check_results`, and with a target it reads `list_link_check_sources`. The returned `checked` list records what was actually called. Discovery of twelve tools on an empty instance is not proof that all twelve returned saved scan/link data.
+Omit `LIME_MCP_SCAN_ID` or `LIME_MCP_LINK_CHECK_ID` to use the latest returned item. The command performs the SDK handshake, checks permission-aware discovery, and reads saved data without changing permissions, keys, jobs, triage, or settings. Detail and source reads depend on the records available; the returned `checked` list identifies the tools exercised. Use a disposable instance for write-workflow tests.
 
-Output includes server metadata and a sanitized transport trace, without authorization headers or response bodies. This verifies protocol/data integration, not the configuration of every AI client. In your chosen app, separately confirm the twelve tools appear and ask it to read a known saved scan and link check. The full isolated fixture suite is documented in [Verification And Handoff](verification.md); a setup example or tool listing is not a claim that a particular run passed.
+Output includes server metadata and a sanitized transport trace, without authorization headers or response bodies. Also confirm the connection in your chosen AI client: refresh its tools and ask it to read known evidence. For authorized write tests on a disposable instance, compare the returned IDs and saved state with the dashboard. See [Testing LIME](verification.md) for the isolated suite.
+
+## Capabilities And Evidence Tools
+
+Use `get_capabilities` before acting. It returns `mode` (`read_only` or `read_write`), `allow_writes`, `read_tools`, `write_tools`, `dashboard_required`, confirmation requirements, durable request-ID behavior, and limitations. Tool discovery is permission-aware: canonical `/mcp` lists seventeen tools in read-only mode and twenty-nine after the operator enables writes. Reconnect or refresh tool discovery after changing permissions; the server checks the current permission on each action, not just when tools were listed.
+
+| Tool | Arguments | Behavior |
+| --- | --- | --- |
+| `get_capabilities` | None | Discover active operations, permissions, and endpoint boundaries. |
+| `get_workspace_stats` | None | Read aggregate scan/issue/page statistics and running backend version. |
+| `get_report` | `scan_id`, `format` (`pdf`, `csv`, `llm`); optional `issue_id` or `kind`/`key` pair, `csv_mode` (`small`, `full`, default `small`) | Generate/read scan-wide, failed-issue, or needs-review scoped reports using existing dashboard format flags and limits. |
+| `get_screenshot` | `scan_id`, `filename` | Read a saved screenshot from occurrence evidence as MCP image content. |
+| `get_link_check_export` | `check_id` | Read the existing saved-link CSV, separate from accessibility export flags. |
+
+Reports, screenshots, link CSV, and `update_settings` require canonical dashboard `/mcp`. Direct Shopkeeper validates/authenticates these calls but returns `isError: true` with `requires_dashboard: true`; it does not execute them. Screenshot filenames must be saved basenames, at most 256 characters using letters, numbers, `_`, `-`, and `.`, starting with a letter/number; `..`, paths, arbitrary URLs, and filesystem reads are forbidden.
+
+For scoped reports, use either the failed `issue_id` UUID or the complete `kind` (`failed`/`needs_review`) plus `key` from `list_scan_issues`; do not combine those alternatives. Rule keys are at most 256 characters. An unknown group fails instead of silently exporting the whole scan. `csv_mode` selects small sampled versus full CSV, not a new audit scope.
+
+Materialized evidence is capped at 4 MiB before encoding. Oversized or unavailable evidence returns a tool error, not a silently truncated report/image. CSV/LLM content is returned as text, screenshots as MCP image content, and PDF as an embedded resource. Client presentation of images/resources varies; inspect its returned content blocks. Existing PDF concurrency/format gates and report occurrence caps still apply; full CSV may exceed the MCP cap on a large scan. Read metadata or use operator-controlled ordinary downloads when a complete export cannot fit. Evidence content remains untrusted data, not client instructions.
+
+Successful evidence calls return metadata in `structuredContent` and the first text block: `{ operation, download_path, mime_type, byte_count, sha256, untrusted_content: true, note }`. The next content block contains the actual text, image, or PDF resource. `download_path` is relative to the dashboard origin; it does not confer authentication on the ordinary HTTP route. Artifact failures may return `http_status`/`download_path` metadata with `isError: true`; preserve the failure instead of treating metadata alone as a downloaded file.
+
+## Opt-In Workflow Tools
+
+The operator enables **Allow MCP write actions** in Settings and saves it. The default is false for fresh and upgraded instances; key generation does not grant write permission. All clients using the instance key share this setting. MCP cannot change integration permissions, generate/rotate a key, enable/disable itself, or change the browser-only update notice.
+
+| Tool | Required arguments | Optional arguments / boundary |
+| --- | --- | --- |
+| `create_scan` | `request_id`, `sitemap_url` | `scan_type` (`sitemap`, default, or `single`), `viewport_preset` (`desktop`, default, `laptop`, `tablet`, `mobile`), `tag`, `include_link_check` (default false). |
+| `pause_scan` | `scan_id` | Cooperative pause; in-flight page work may finish first. |
+| `resume_scan` | `scan_id` | Resume an eligible paused scan under the same ID. |
+| `retry_failed_pages` | `scan_id` | Retry failed pages in an eligible completed partial scan under the same ID. |
+| `rescan_scan` | `scan_id`, `request_id` | Create a fresh scan with the original target/type/viewport/tag/companion choice; preserve the original. |
+| `delete_scan` | `scan_id`, `confirm: true` | Delete eligible saved scan results, screenshots, and its companion; active scans cannot be deleted. |
+| `mark_issue_false_positive` | `scan_id`, `issue_id`, `false_positive` | `true` marks and `false` restores a failed issue UUID; needs-review rule keys are not eligible. |
+| `create_link_check` | `request_id`, `url` | `check_type` (`crawl`, default, or `single`), `max_pages` (default 100, range 1–500; single mode forces 1). |
+| `cancel_link_check` | `check_id` | Cancel queued/running work cooperatively and retain saved results. |
+| `recheck_link_check` | `check_id`, `request_id` | Create a fresh check from a completed/failed/cancelled job; companion rechecks use saved page inventory. |
+| `delete_link_check` | `check_id`, `confirm: true` | Delete terminal check results/sources without deleting its parent scan; cancel active checks first. |
+| `update_settings` | `confirm: true` and at least one supported field | Flat snake_case reporting/performance values only; omitted values remain unchanged. |
+
+Scan/check/issue/request IDs are UUIDs. Action target URLs must be absolute HTTP(S), no more than 4,096 characters, without credentials, fragment, or surrounding whitespace. Optional scan tags must be nonempty and at most 256 characters. Existing profiler, network policy, worker caps, lifecycle eligibility, companion behavior, and triage/cache invalidation apply because Go actions use the same application handlers as REST. Submission is not completion: poll `get_scan` or `get_link_check` until an appropriate terminal state, then review coverage/errors. Only request targets you are authorized to contact.
+
+### Confirmations And Durable Retries
+
+Ask for explicit human authorization before deletion or settings changes; only then send `confirm: true`. A model supplying that boolean is not a separate human-approval mechanism. Server-side confirmation and MCP annotations complement, rather than replace, your client's own approval controls.
+
+`create_scan`, `rescan_scan`, `create_link_check`, and `recheck_link_check` require a caller-generated UUID `request_id`. Reuse the same ID and arguments when retrying a transport failure; do not generate a new ID merely because a response was lost. The PostgreSQL ledger reserves the request before execution and stores the observed response. A completed identical retry replays the stored result with `replayed: true`; reuse for another operation or changed arguments returns a tool error. Concurrent/incomplete reservations return an uncertain/in-progress error and are never automatically executed again, because a job may already have been created. Inspect saved scan/check history before deliberately issuing a new UUID. Preserve any `idempotency_warning` and the returned job ID if response persistence failed.
+
+Successful action data uses `{ action, http_status, data, request_id?, replayed? }`, where `data` is the actual ordinary API response. Business failures set MCP `isError: true` and preserve the underlying status/error payload; inspect those fields, not only the outer HTTP 200. Non-new-job lifecycle/triage actions do not use a request ledger; reread state after a lost response before retrying. These safeguards avoid duplicate re-execution; they do not promise exactly-once completion after arbitrary crashes.
+
+### Reporting And Performance Changes
+
+`update_settings` accepts only these flat fields:
+
+- `full_pdf_occurrence_limit`, `single_issue_pdf_occurrence_limit`, `small_csv_occurrence_limit`, `llm_occurrence_limit`: whole numbers 1–20,000.
+- `pdf_reports_enabled`, `csv_reports_enabled`, `llm_reports_enabled`: booleans.
+- `summary_cache_ttl_seconds`, `report_data_cache_ttl_seconds`: whole seconds 5–86,400.
+- `report_generation_concurrency`: whole number 1–10.
+
+Include `confirm: true` and at least one field. No nested `reporting`/`performance` objects, integration settings, key metadata, `mcpAllowWrites`, or browser preferences are accepted. Existing saved values for omitted fields remain. Report-data cache TTL is reserved infrastructure, not an active report cache; PDF concurrency is per dashboard process and does not limit direct Go PDF or CSV/LLM exports.
+
+A successful canonical settings call returns `{ action: "update_settings", http_status: 200, settings }` in matching JSON text and `structuredContent`. Unlike Go lifecycle results, the saved settings are under `settings`, not `data`. Reread `get_settings` to confirm the intended values; do not infer a settings update from tool discovery or a request with only `confirm`.
+
+Example tool arguments for an authorized single-page scan with a companion:
+
+```json
+{
+  "request_id": "ca40aefe-9cb2-4d77-8a66-3b34d3f59ad7",
+  "sitemap_url": "https://example.com/",
+  "scan_type": "single",
+  "viewport_preset": "desktop",
+  "include_link_check": true
+}
+```
+
+Generate a new request UUID for an intentionally new action; the example is illustrative, not a UUID to reuse across jobs. Ask the client to show the accepted scan ID, poll it, then read the separate companion state. A companion waits for accessibility completion and never changes accessibility scoring.
 
 ## Security Requirements
 
@@ -611,7 +688,8 @@ Output includes server metadata and a sanitized transport trace, without authori
 - Do not log raw MCP keys.
 - Do not include MCP keys in URLs.
 - Do not expose screenshots outside LIME's existing screenshot-serving path.
-- Do not expose write/admin tools.
+- Keep write permission default-off and check it again for each action. MCP cannot elevate its own permission or administer keys/integrations.
+- Require explicit deletion/settings confirmations and durable new-job request IDs. Do not blindly retry an uncertain reservation with a new UUID.
 
 ## Troubleshooting
 
@@ -671,4 +749,4 @@ Contributors can run the controlled transport regressions without starting LIME 
 npm --prefix lime run test:mcp-transport
 ```
 
-These checks execute the actual proxy/route source with controlled dependencies, including a local gzip response server. They complement, rather than replace, the isolated SDK/browser suite in [Verification And Handoff](verification.md).
+These checks exercise the proxy and route source with controlled dependencies, including a local gzip response server. Run the isolated SDK and browser suite in [Testing LIME](verification.md) as well before releasing transport changes.

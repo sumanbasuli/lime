@@ -1,6 +1,6 @@
 {
   "name": "lime",
-  "version": "1.0.5",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:mcp-transport": "node --test scripts/verify-mcp-transport.mjs",
+    "test:mcp-dashboard-tools": "node --test scripts/verify-mcp-dashboard-tools.mjs",
+    "test:mcp-client-config": "node --test scripts/verify-mcp-client-config.mjs",
     "test:update-notice": "node --test scripts/verify-update-notice.mjs",
     "test:link-check-api": "node --test scripts/verify-link-check-api.mjs",
     "test:link-presentation": "node --test scripts/verify-link-presentation.mjs"

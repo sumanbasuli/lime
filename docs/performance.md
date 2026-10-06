@@ -1,10 +1,10 @@
 # Performance And Caching Strategy
 
-LIME uses PostgreSQL-backed score and issue summaries to reduce repeated aggregation without adding another required service. This page distinguishes the implemented caches from reserved infrastructure; it is not a performance benchmark or a guarantee for a particular scan size.
+LIME caches score and issue summaries in PostgreSQL to speed up dashboard and report reads. This guide explains which caches are active, how they stay current, and how to measure changes in performance.
 
 ## Priorities
 
-The first optimization pass targets read and report latency:
+The main areas to measure are:
 
 - dashboard recent scans and score summaries
 - scan detail score and coverage summaries
@@ -12,11 +12,11 @@ The first optimization pass targets read and report latency:
 - issue chunk and detail endpoints
 - PDF, CSV, and LLM report input loading
 
-Scan throughput remains important, but it comes after the large-report read paths are bounded and measurable.
+Measure scan throughput separately from the time it takes to load and export saved results.
 
 ## Cache Model
 
-PostgreSQL is the durable cache/read-model layer.
+PostgreSQL stores the derived summaries used by dashboard and report reads.
 
 Derived data:
 
@@ -24,7 +24,7 @@ Derived data:
 - per-scan issue-card summaries for failed and needs-review checks
 - score cache rows written by the existing Next scorer, also read by direct Shopkeeper MCP when fresh
 
-`scan_report_data_cache` has a migration and Drizzle table definition, but there is currently no report-loader/route using it. Report data is queried and files generated on demand. `reportDataCacheTtlSeconds` is stored/exposed for that reserved cache, not an effective report-response TTL today.
+`scan_report_data_cache` is reserved for a future report cache. Reports currently query their data and generate files on demand, so `reportDataCacheTtlSeconds` does not affect report responses.
 
 Low-churn data also has process/request-local caching:
 
@@ -34,7 +34,7 @@ Low-churn data also has process/request-local caching:
 
 Settings are cached for five seconds per UI process. Saving through the settings route invalidates that process's copy; another UI process can observe the change after its local TTL. Catalog loaders use React's `cache`; do not assume an operator-edited JSON file will refresh every running process immediately. Restart/redeploy after replacing catalogs.
 
-Redis is intentionally deferred until profiling proves a concrete need that PostgreSQL read models and indexes cannot satisfy.
+LIME does not require Redis. Profile the PostgreSQL queries and indexes before adding another caching service.
 
 ## Invalidation
 
@@ -80,7 +80,7 @@ The HTTP link runner is separate from Juicer and the PDF limiter. It runs at mos
 
 Link history/results are SQL-paginated. Result lists preview at most five sources per destination; the source endpoint pages the retained JSONB references independently. Snapshots replace bounded target rows transactionally under the job's running-state guard. CSV reads a consistent bounded target/source snapshot in one SQL query and buffers the export; it is not the accessibility full-CSV streaming path. Retained references and repeated checks still consume database/storage/network resources and belong in representative-load measurements.
 
-See [Link Checker Architecture](architecture/link-checker.md) for exact budgets, truncation semantics, network trust, recovery, and schema. Do not call a bounded one-shot job a recurring monitor or a complete arbitrary-size site crawl.
+See [Link Checker Architecture](architecture/link-checker.md) for limits, partial coverage, network rules, recovery, and schema. Each check runs once and stops at its configured limits; it does not monitor the site continuously.
 
 ## Verification
 
@@ -94,7 +94,7 @@ Before and after optimization work, measure:
 - full PDF generation time
 - scoped issue PDF generation time
 
-Measure with a disposable representative scan/fixture or an authorized read-only production sample, and record scan/page/group/occurrence counts, hardware, runtime versions, warm/cold cache state, and concurrency. Do not generate destructive test data in the normal operator database. The deterministic `make verify-app` suite checks correctness; it is not a thousands-of-pages load test.
+Use representative test data in a separate database, or an authorized read-only production sample. Record the number of scans, pages, groups, and occurrences, along with hardware, runtime versions, cache state, and concurrent work. `make verify-app` checks correctness; use a separate benchmark to measure large-site performance.
 
 Set `LIME_PERF_LOG=true` on the UI process to log every instrumented hot-path timing as `[perf] <label> <milliseconds>`. With no flag, non-production builds log only slow operations above their route threshold (750ms by default); production stays quiet. `LIME_PERF_LOG=false` explicitly suppresses these timings. This is application timing, not PostgreSQL query tracing or browser navigation timing.
 

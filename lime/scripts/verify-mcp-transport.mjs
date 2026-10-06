@@ -22,6 +22,7 @@ async function loadSource(path, globals = {}, dependencies = {}) {
     exports, URL, Headers, Response, Request, AbortSignal, Buffer, JSON, Date,
     fetch, process: { env: { SHOPKEEPER_URL: "http://shopkeeper.invalid:8080" } },
     require: (name) => {
+      if (name === "@/lib/mcp-dashboard-tools" && !(name in dependencies)) return { runDashboardMcpTool: () => assert.fail("Unexpected dashboard operation") };
       assert.ok(name in dependencies, `Unexpected dependency: ${name}`);
       return dependencies[name];
     },
@@ -201,7 +202,7 @@ test("canonical get_scan retains numeric IDs and matching structured/text scores
       "@/lib/shopkeeper-proxy": { proxyShopkeeperRequest: async () => new Response(`{"jsonrpc":"2.0","id":${id},"result":{"structuredContent":{"scan":{"id":"fixture-scan","status":"completed"},"score_summary":null}}}`) },
       "@/lib/scan-score-data": { getScanScoreSummaries: async () => { reads++; return { "fixture-scan": { score: 81, hasScore: true } }; } },
     });
-    const result = await route.POST({ method: "POST" });
+    const result = await route.POST({ method: "POST", signal: new AbortController().signal });
     const text = await result.text();
     assert.ok(text.includes(`"id":${id}`), `Preserve request ID ${id}`);
     const data = JSON.parse(text);
@@ -218,7 +219,7 @@ test("canonical auth/protocol/method/notification errors never trigger scoring",
       "@/lib/shopkeeper-proxy": { proxyShopkeeperRequest: async () => new Response(status === 202 ? null : "upstream error", { status, headers: { "WWW-Authenticate": "Bearer", Allow: "POST" } }) },
       "@/lib/scan-score-data": { getScanScoreSummaries: () => assert.fail("Unauthorized/error response must not load scores") },
     });
-    const result = await route.POST({ method: "POST" });
+    const result = await route.POST({ method: "POST", signal: new AbortController().signal });
     assert.equal(result.status, status);
     assert.equal(result.headers.get("WWW-Authenticate"), "Bearer");
     assert.equal(result.headers.get("Allow"), "POST");
@@ -242,7 +243,7 @@ test("canonical Link Checker reads pass through unchanged without accessibility 
       "@/lib/shopkeeper-proxy": { proxyShopkeeperRequest: async () => new Response(body, { headers: { "Access-Control-Allow-Origin": "http://localhost:3002", "Cache-Control": "no-store" } }) },
       "@/lib/scan-score-data": { getScanScoreSummaries: () => assert.fail("Link data must not invoke the accessibility scorer") },
     });
-    const result = await route.POST({ method: "POST" });
+    const result = await route.POST({ method: "POST", signal: new AbortController().signal });
     assert.equal(await result.text(), body, "Keep raw outcomes, captured sources and large numeric IDs byte-for-byte");
     assert.equal(result.headers.get("Access-Control-Allow-Origin"), "http://localhost:3002");
     assert.equal(result.headers.get("Cache-Control"), "no-store");
@@ -254,7 +255,7 @@ test("canonical score failure is actionable, redacted and preserves request ID/C
     "@/lib/shopkeeper-proxy": { proxyShopkeeperRequest: async () => new Response('{"jsonrpc":"2.0","id":9007199254740993,"result":{"structuredContent":{"scan":{"id":"fixture-scan"},"score_summary":null}}}', { headers: { "Access-Control-Allow-Origin": "http://localhost:3002" } }) },
     "@/lib/scan-score-data": { getScanScoreSummaries: async () => { throw new Error("private SQL internals"); } },
   });
-  const result = await route.POST({ method: "POST" });
+  const result = await route.POST({ method: "POST", signal: new AbortController().signal });
   const text = await result.text();
   assert.ok(text.includes('"id":9007199254740993'));
   assert.ok(!text.includes("private SQL internals"));

@@ -156,7 +156,7 @@ try {
   }
 
   // Check the actual reading journey, not just that disconnected pages render.
-  const readingRoutes = ["first-scan", "dashboard", "scan-detail", "issues", "reports", "settings", "mcp", "troubleshooting", "link-checker"];
+  const readingRoutes = ["first-scan", "dashboard", "scan-detail", "issues", "reports", "settings", "mcp", "agent", "troubleshooting", "link-checker"];
   await interactionPage.goto(baseUrl + "/docs/user/" + readingRoutes[0] + "/", { waitUntil: "networkidle" });
   const activeGuide = interactionPage.getByRole("navigation", { name: "Documentation navigation" }).locator('[aria-current="page"]');
   if (await activeGuide.count() !== 1 || (await activeGuide.getAttribute("href"))?.replace(/\/$/, "") !== basePath + "/docs/user/first-scan") {

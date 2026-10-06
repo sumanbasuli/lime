@@ -1,6 +1,6 @@
 # Updating LIME
 
-Version changes are operator actions, not something the sidebar card installs. Before a planned update:
+The sidebar notice links to release notes; you install updates using the method for your deployment. Before updating:
 
 1. record the running version, Compose project/volume names or native paths, and deployment configuration
 2. let scans finish, or request **Pause** and wait for `paused`; prevent new writes during the maintenance window
@@ -19,7 +19,7 @@ An unpaused active scan is reset and rerun on backend startup, losing partial ev
 | Docker (from source) | clean checkout + `make start-all`, described below | take a manual recovery set first |
 | Debian systemd | `sudo ./scripts/debian-update.sh <tag>` or `make debian-update TAG=<tag>` | `/var/backups/lime/lime-pre-<tag>-<timestamp>.sql.gz` |
 
-These helper backups cover PostgreSQL only, not screenshot pixels, config, retention, encryption, or off-host storage. Fly does not create a backup in its update helper. See [Backup And Restore](backup-restore.md); for MPG, consult the current [backup command reference](https://fly.io/docs/flyctl/mpg-backup-create/) and installed CLI help rather than assuming a backup completed just because it was requested.
+The Docker and Debian helpers back up PostgreSQL only. Back up screenshots and configuration separately, and arrange retention, encryption, and off-host storage. The Fly helper creates no backup. See [Backup And Restore](backup-restore.md); for Fly Managed Postgres, use the [backup command reference](https://fly.io/docs/flyctl/mpg-backup-create/) and confirm that the backup has completed.
 
 ## Published Images
 
@@ -40,7 +40,7 @@ docker compose --env-file .env -f docker-compose.release.yml logs --tail=100 sho
 docker compose --env-file .env -f docker-compose.release.yml up -d --no-deps ui
 ```
 
-Include your actual project name/overrides consistently if you use them. Do not use `down -v`; it destroys screenshot volumes. Check the UI-origin health route, database-backed pages, an existing screenshot, and all enabled exports. This is reviewed operational guidance, not an automated rollback or a provider-specific deployment test.
+Include your project name and override files consistently in every command. Do not use `down -v`; it destroys screenshot volumes. After updating, check the dashboard's health route, load saved scans, open an existing screenshot, and try each enabled export format.
 
 ## Source Docker Checkout
 
@@ -57,9 +57,9 @@ The notice has two controls:
 1. Outbound best-effort release checks are enabled by default when `LIME_UPDATE_CHECK` is unset; normal/source and release Compose also default it to `true`. Set `LIME_UPDATE_CHECK=false` on the UI service to opt out, then restart/recreate the UI process with that environment. Existing explicit false values remain disabled. `LIME_GITHUB_REPO` selects the repository, defaulting to `sumanbasuli/lime`.
 2. Each browser can show or hide the sidebar card using **Settings > Update notice**. This browser preference defaults to on and takes effect immediately, without **Save settings**. It does not change server-wide settings or disable the operator's outbound check.
 
-The Next-owned `GET /_lime/update-check` endpoint returns `{ "enabled": false }` when the server check is disabled. When enabled, it checks `api.github.com` with a five-second timeout and compares the latest release against the UI version. Nonblank `LIME_VERSION` runtime/release-build overrides remain authoritative; when unset or blank, the route uses the packaged dashboard version rather than a development placeholder. Drafts, prereleases, and best-effort failures produce no update card. The card links to release notes; it never installs an update.
+`GET /_lime/update-check` returns `{ "enabled": false }` when release checks are disabled. When enabled, it requests the latest release from `api.github.com` with a five-second timeout and compares it with the dashboard version. Set `LIME_VERSION` to override that version; otherwise the packaged version is used. Drafts, prereleases, and failed requests do not show a card. The card links to release notes and never installs an update.
 
-The isolated `docker-compose.docs.yml` stack explicitly disables release checks for deterministic/offline documentation and verification. Turning off only the browser card does not prevent the server from contacting GitHub; use the environment opt-out for that.
+The isolated `docker-compose.docs.yml` stack disables release checks. To stop GitHub requests in another deployment, set `LIME_UPDATE_CHECK=false`; hiding the browser card only changes its visibility.
 
 The display preference is stored as `lime.updateNotice.enabled` in browser local storage. Dismissing a card stores its exact release tag as `lime.updateNotice.dismissed`, so the same release stays hidden after reload while a different newer release can appear. These choices belong to that browser and origin, not PostgreSQL or an account.
 

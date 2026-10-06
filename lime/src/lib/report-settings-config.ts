@@ -16,6 +16,7 @@ export interface PerformanceSettings {
 
 export interface IntegrationSettings {
   mcpEnabled: boolean;
+  mcpAllowWrites: boolean;
   mcpConfigured: boolean;
   mcpKeyHint: string | null;
   mcpKeyGeneratedAt: string | null;
@@ -53,6 +54,7 @@ export const DEFAULT_PERFORMANCE_SETTINGS: PerformanceSettings = {
 
 export const DEFAULT_INTEGRATION_SETTINGS: IntegrationSettings = {
   mcpEnabled: false,
+  mcpAllowWrites: false,
   mcpConfigured: false,
   mcpKeyHint: null,
   mcpKeyGeneratedAt: null,

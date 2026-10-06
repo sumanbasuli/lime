@@ -16,7 +16,7 @@ export function hrefForSlug(slug: string[]): string {
 }
 
 function docsForCategory(category: ProductDoc["category"]) {
-  const userReadingOrder = ["first-scan", "dashboard", "scan-detail", "issues", "reports", "settings", "mcp", "troubleshooting", "link-checker"];
+  const userReadingOrder = ["first-scan", "dashboard", "scan-detail", "issues", "reports", "settings", "mcp", "agent", "troubleshooting", "link-checker"];
   function readingIndex(doc: ProductDoc) {
     const index = userReadingOrder.indexOf(doc.slug[1]);
     return index < 0 ? userReadingOrder.length : index;
@@ -34,7 +34,7 @@ function docsForCategory(category: ProductDoc["category"]) {
 }
 
 const operatorItems = [
-  { title: "Setup", href: "/docs/reference/setup", description: "Install and run LIME from the repo docs." },
+  { title: "Setup", href: "/docs/reference/setup", description: "Install and run LIME." },
   { title: "Docker Deploy", href: "/docs/reference/deployment/docker", description: "Pinned images, release bundles, and persistence." },
   { title: "Debian Deploy", href: "/docs/reference/deployment/debian", description: "Native systemd install for Debian-family Linux." },
   { title: "Fly.io Deploy", href: "/docs/reference/deployment/fly", description: "Separate UI and backend apps with persistent storage." },
@@ -44,7 +44,7 @@ const operatorItems = [
 ];
 
 const contributorItems = [
-  { title: "Verification And Handoff", href: "/docs/reference/verification", description: "Run isolated feature checks and understand the verified project baseline." },
+  { title: "Testing LIME", href: "/docs/reference/verification", description: "Run product, integration, and documentation tests." },
   { title: "Docs Site Reference", href: "/docs/reference/docs-site", description: "Static docs architecture, screenshots, search, and GitHub Pages." },
 ];
 
@@ -58,7 +58,8 @@ const referenceItems = [
   { title: "Link Checker Architecture", href: "/docs/reference/architecture/link-checker", description: "Standalone checks, scan companions, network policy, and saved destinations." },
   { title: "UI Architecture", href: "/docs/reference/architecture/ui", description: "Next.js dashboard routes, data loading, and reports." },
   { title: "MCP Protocol Reference", href: "/docs/reference/mcp", description: "Transport, authentication, schemas, and integration checks." },
-  { title: "Roadmap Reference", href: "/docs/reference/roadmap", description: "Shipped baseline, validation priorities, and proposed work." },
+  { title: "LIME Agent Reference", href: "/docs/reference/agent", description: "Configure and maintain the LIME agent and its OpenClaw skills." },
+  { title: "Roadmap Reference", href: "/docs/reference/roadmap", description: "Released features, current priorities, and future plans." },
 ];
 
 export const navigationGroups: NavigationGroup[] = [
@@ -93,7 +94,7 @@ export const navigationGroups: NavigationGroup[] = [
       {
         title: "API Reference",
         href: "/api",
-        description: "Full method-grouped endpoint reference.",
+        description: "Endpoints, request examples, and response formats.",
       },
       ...docsForCategory("API"),
     ],

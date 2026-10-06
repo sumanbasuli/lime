@@ -12,9 +12,10 @@ LIME is a self-hosted accessibility scanner built with axe-core, Chromium, Postg
 | Host an instance for a team | [Docker deployment](deployment/docker.md), [Debian](deployment/debian.md), or [Fly.io](deployment/fly.md) | [Backups and restore](deployment/backup-restore.md), then [updates](deployment/updates.md) |
 | Fix an installation or scan problem | [Operator troubleshooting](deployment/troubleshooting.md) | [Setup diagnostics](setup.md) |
 | Connect an AI tool | [User MCP guide](https://lime.heysuman.com/docs/user/mcp/) | [MCP protocol and integration reference](mcp.md) |
+| Use the LIME agent | [User agent guide](https://lime.heysuman.com/docs/user/agent/) | [Agent and OpenClaw reference](agent.md) |
 | Check broken destinations | [User link-checker guide](https://lime.heysuman.com/docs/user/link-checker/) | [Link checker architecture and limits](architecture/link-checker.md) |
 | Change the code | [Contributing](../CONTRIBUTING.md) | [Architecture](architecture/shopkeeper.md) and [verification](verification.md) |
-| Improve the website or guides | [Docs site](docs-site.md) | [Verification and handoff](verification.md) |
+| Improve the website or guides | [Docs site](docs-site.md) | [Verification](verification.md) |
 
 ## For operators
 
@@ -29,9 +30,9 @@ LIME is a self-hosted accessibility scanner built with axe-core, Chromium, Postg
 ## For contributors
 
 - [Contributing](../CONTRIBUTING.md): development workflow and pull request expectations.
-- [Verification and handoff](verification.md): reproducible checks, recorded evidence, and known boundaries.
+- [Verification](verification.md): test commands, coverage, and how to check changes before release.
 - [Docs site](docs-site.md): content sources, local preview, search, screenshots, and publishing.
-- [Roadmap](roadmap.md): shipped foundations versus proposed work. A roadmap item is not an available feature.
+- [Roadmap](roadmap.md): available features and planned improvements.
 
 ## Technical reference
 
@@ -46,7 +47,8 @@ LIME is a self-hosted accessibility scanner built with axe-core, Chromium, Postg
 
 - [Database](database.md): schema, migrations, and data ownership.
 - [Performance and caching](performance.md): read models, cache invalidation, and report costs.
-- [MCP integration](mcp.md): read-only tools, authentication, client examples, and transport limits.
+- [MCP integration](mcp.md): evidence and opt-in workflow tools, authentication, permissions, client examples, and transport limits.
+- [LIME agent](agent.md): workflow skills and an OpenClaw setup example.
 - [API reference](https://lime.heysuman.com/api/): endpoint ownership, request examples, and responses.
 
 ## Keep the docs trustworthy

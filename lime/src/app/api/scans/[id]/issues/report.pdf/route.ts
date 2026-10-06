@@ -79,6 +79,7 @@ export async function GET(
               headers,
               cache: "no-store",
               redirect: "manual",
+              signal: request.signal,
             }),
           1000
         )

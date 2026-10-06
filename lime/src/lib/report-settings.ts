@@ -1,5 +1,5 @@
-import { eq } from "drizzle-orm";
-import { createHash, randomBytes } from "crypto";
+import { eq, sql } from "drizzle-orm";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { db } from "@/db";
 import { appSettings } from "@/db/schema";
 import {
@@ -114,6 +114,7 @@ function normalizeIntegrationSettings(
 ): IntegrationSettings {
   return {
     mcpEnabled: settings?.mcpEnabled ?? DEFAULT_INTEGRATION_SETTINGS.mcpEnabled,
+    mcpAllowWrites: settings?.mcpAllowWrites ?? DEFAULT_INTEGRATION_SETTINGS.mcpAllowWrites,
     mcpConfigured:
       settings?.mcpConfigured ?? DEFAULT_INTEGRATION_SETTINGS.mcpConfigured,
     mcpKeyHint: settings?.mcpKeyHint ?? DEFAULT_INTEGRATION_SETTINGS.mcpKeyHint,
@@ -157,6 +158,7 @@ function settingsFromRow(
     },
     integrations: {
       mcpEnabled: settings.mcpEnabled,
+      mcpAllowWrites: settings.mcpAllowWrites,
       mcpConfigured: Boolean(settings.mcpKeyHash),
       mcpKeyHint: settings.mcpKeyHint,
       mcpKeyGeneratedAt: settings.mcpKeyGeneratedAt?.toISOString() ?? null,
@@ -202,60 +204,85 @@ export async function getPerformanceSettings(): Promise<PerformanceSettings> {
 export async function saveReportSettings(
   nextSettings: Partial<ReportSettings>
 ): Promise<ReportSettings> {
-  const currentSettings = await getSystemSettings();
   const settings = await saveSystemSettings({
-    ...currentSettings,
-    reporting: {
-      ...currentSettings.reporting,
-      ...nextSettings,
-    },
+    reporting: nextSettings,
   });
 
   return settings.reporting;
 }
 
 export async function saveSystemSettings(
-  nextSettings: SystemSettingsPatch
+  nextSettings: SystemSettingsPatch,
+  mcpAuthorization?: string
 ): Promise<SystemSettings> {
-  const currentSettings = await getSystemSettings();
-  const normalizedSettings = normalizeSystemSettings({
-    reporting: {
-      ...currentSettings.reporting,
-      ...nextSettings.reporting,
-    },
-    performance: {
-      ...currentSettings.performance,
-      ...nextSettings.performance,
-    },
-    integrations: {
-      ...currentSettings.integrations,
-      ...nextSettings.integrations,
-    },
-  });
-  const now = new Date();
-
-  await db
-    .insert(appSettings)
-    .values({
-      key: REPORT_SETTINGS_KEY,
-      ...normalizedSettings.reporting,
-      ...normalizedSettings.performance,
-      mcpEnabled: normalizedSettings.integrations.mcpEnabled,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: appSettings.key,
-      set: {
-        ...normalizedSettings.reporting,
-        ...normalizedSettings.performance,
-        mcpEnabled: normalizedSettings.integrations.mcpEnabled,
-        updatedAt: now,
+  const normalizedSettings = await db.transaction(async (tx) => {
+    if (mcpAuthorization !== undefined) {
+      // Apply only to this MCP write transaction, never the pooled connection
+      // or normal dashboard saves. PostgreSQL aborts timed-out statements and
+      // Drizzle awaits rollback before this operation can report failure.
+      await tx.execute(sql`SET LOCAL lock_timeout = '5s'`);
+      await tx.execute(sql`SET LOCAL statement_timeout = '20s'`);
+    }
+    await tx.insert(appSettings).values({ key: REPORT_SETTINGS_KEY }).onConflictDoNothing();
+    // Merge partial changes against the locked, current row, not the UI cache.
+    // This also serializes permission revocation/key rotation with MCP writes.
+    const [row] = await tx.select().from(appSettings)
+      .where(eq(appSettings.key, REPORT_SETTINGS_KEY)).for("update");
+    if (mcpAuthorization !== undefined) {
+      if (nextSettings.integrations || !hasMcpAccess(row, mcpAuthorization, true)) {
+        throw new McpAccessError();
+      }
+    }
+    const currentSettings = settingsFromRow(row);
+    const normalized = normalizeSystemSettings({
+      reporting: {
+        ...currentSettings.reporting,
+        ...nextSettings.reporting,
+      },
+      performance: {
+        ...currentSettings.performance,
+        ...nextSettings.performance,
+      },
+      integrations: {
+        ...currentSettings.integrations,
+        ...nextSettings.integrations,
       },
     });
+    await tx.update(appSettings).set({
+      ...normalized.reporting,
+      ...normalized.performance,
+      mcpEnabled: normalized.integrations.mcpEnabled,
+      mcpAllowWrites: normalized.integrations.mcpAllowWrites,
+      updatedAt: new Date(),
+    }).where(eq(appSettings.key, REPORT_SETTINGS_KEY));
+    return normalized;
+  });
 
   invalidateSystemSettingsCache();
   return normalizedSettings;
+}
+
+export class McpAccessError extends Error {
+  constructor() { super("MCP access is disabled, revoked, or lacks write permission."); }
+}
+
+function hasMcpAccess(
+  row: typeof appSettings.$inferSelect | undefined,
+  authorization: string,
+  writes = false
+): boolean {
+  const match = /^Bearer ([^\s]{1,256})$/i.exec(authorization);
+  if (!row?.mcpEnabled || !match || !row.mcpKeyHash || !/^[a-f0-9]{64}$/.test(row.mcpKeyHash)) return false;
+  if (writes && !row.mcpAllowWrites) return false;
+  const hash = createHash("sha256").update(match[1]).digest();
+  return timingSafeEqual(hash, Buffer.from(row.mcpKeyHash, "hex"));
+}
+
+// Authorization must never use the five-second display-settings cache.
+export async function requireMcpAccess(authorization: string): Promise<void> {
+  const [row] = await db.select().from(appSettings)
+    .where(eq(appSettings.key, REPORT_SETTINGS_KEY)).limit(1);
+  if (!hasMcpAccess(row, authorization)) throw new McpAccessError();
 }
 
 export async function generateMcpKey(): Promise<{

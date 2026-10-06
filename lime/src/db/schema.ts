@@ -180,6 +180,7 @@ export const appSettings = pgTable("app_settings", {
     .notNull()
     .default(1),
   mcpEnabled: boolean("mcp_enabled").notNull().default(false),
+  mcpAllowWrites: boolean("mcp_allow_writes").notNull().default(false),
   mcpKeyHash: text("mcp_key_hash"),
   mcpKeyHint: text("mcp_key_hint"),
   mcpKeyGeneratedAt: timestamp("mcp_key_generated_at"),

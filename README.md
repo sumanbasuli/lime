@@ -35,7 +35,7 @@ Migrations apply on boot, interrupted scans recover on restart, and deployment h
 - **Pause and resume** - cooperatively pause an active scan and continue pending pages on the same scan.
 - **Scan recovery** - non-terminal scans resume after Shopkeeper restarts.
 - **Update notice** - enabled-by-default release checks and a sidebar banner when a newer GitHub release is available; server and browser controls let you opt out.
-- **Read-only MCP** - let compatible AI clients inspect saved scans, scores, issues, link-check jobs/destinations/source references, report availability, and settings with a generated bearer key; no scan or link-check mutation tools.
+- **Full MCP workflows** - compatible AI clients read saved evidence, reports and screenshots, then manage scan/link lifecycles, false-positive triage, and reporting/performance settings with operator-enabled write access. Existing keys stay read-only by default.
 - **Link checker (unreleased source)** - bounded single-page or same-origin crawl checks with saved destinations/source references and CSV; opt in with **Include link check** on a normal accessibility scan without changing its score or screenshots. Six additive MCP tools read its saved history, totals, companion status, targets, and paginated references through the existing endpoint/key.
 - **Three deploy targets** - Fly.io, Docker, and Debian systemd.
 
@@ -183,7 +183,9 @@ For the project handoff, feature verification matrix, isolated test workflow, an
 
 ## AI Client Integration
 
-Use the dashboard's `http://localhost:3000/mcp` locally, or its reachable HTTPS `/mcp` URL remotely. Generate a key in **Settings > Integrations**, then configure a client supporting Streamable HTTP with a bearer header (or a reviewed local stdio bridge). The [MCP guide](docs/mcp.md) covers Codex, Claude Code, Cursor, VS Code, key rotation, troubleshooting, and a read-only SDK smoke test. The integration exposes twelve read-only tools, including saved link-check history/statistics, companions, destinations, and full retained source paging. It does not create/change scans, link checks, triage or settings. Link dashboard/CSV metadata does not authorize those ordinary HTTP routes. Optional `LIME_MCP_LINK_CHECK_ID` selects saved evidence for the operator smoke test; its `checked` output distinguishes actual reads from tool discovery. OAuth-only connectors are not supported, and localhost is not reachable from a cloud client.
+Use the dashboard's `http://localhost:3000/mcp` locally, or its reachable HTTPS `/mcp` URL remotely. Generate a key in **Settings > Integrations**, then configure a client supporting Streamable HTTP with a bearer header (or a reviewed local stdio bridge). The [MCP guide](docs/mcp.md) covers Codex, Claude Code, OpenCode, Cursor, VS Code, permissions, key rotation, troubleshooting, and SDK smoke checks. Canonical MCP exposes seventeen read tools and twenty-nine tools with operator-enabled writes. Read scans/issues/link sources, reports/screenshots and non-secret settings; opt into scan/link lifecycles, false-positive triage, and reporting/performance changes. MCP cannot change its own permissions or key. Existing keys remain read-only until the operator explicitly allows writes; deletion/settings confirmation and durable new-job request IDs are required. Ordinary dashboard/download routes do not inherit MCP authentication. Optional `LIME_MCP_LINK_CHECK_ID` selects saved evidence for the read-only operator smoke test; its `checked` output distinguishes actual reads from discovery. OAuth-only connectors are not supported, and localhost is not reachable from a cloud client.
+
+Use the [LIME agent](agent/README.md) to review findings, check links, and manage scans from OpenClaw. It includes three skills and a setup guide, with read-only access by default. See the [agent reference](docs/agent.md) for configuration and maintenance.
 
 ## Contributing
 

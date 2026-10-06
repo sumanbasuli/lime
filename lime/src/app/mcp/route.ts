@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { proxyShopkeeperRequest } from "@/lib/shopkeeper-proxy";
 import { getScanScoreSummaries } from "@/lib/scan-score-data";
 import type { ScanScoreSummary } from "@/lib/scan-scoring";
+import { runDashboardMcpTool } from "@/lib/mcp-dashboard-tools";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,7 +30,24 @@ function mcpScoreSummary(summary: ScanScoreSummary) {
   };
 }
 
+async function boundedScoreRead<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  let abort = () => {};
+  try {
+    const value = await new Promise<T>((resolve, reject) => {
+      abort = () => reject(new Error("MCP score read timed out or caller disconnected"));
+      signal.addEventListener("abort", abort, { once: true });
+      work.then(resolve, reject);
+      if (signal.aborted) abort();
+    });
+    signal.throwIfAborted();
+    return value;
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+
 async function handleMcp(request: NextRequest): Promise<Response> {
+  const scoreReadSignal = AbortSignal.any([request.signal, AbortSignal.timeout(30_000)]);
   const upstream = await proxyShopkeeperRequest(request, {
     bodyLimit: 1024 * 1024,
     timeoutMs: 30_000,
@@ -50,6 +68,15 @@ async function handleMcp(request: NextRequest): Promise<Response> {
     },
   )).catch(() => null);
   const result = response?.result;
+  const marker = result?.structuredContent;
+  if (result?.isError === true && marker?.requires_dashboard === true && typeof marker.operation === "string" && marker.arguments && typeof marker.arguments === "object" && !Array.isArray(marker.arguments)) {
+    response.result = await runDashboardMcpTool(request, marker.operation, marker.arguments);
+    const headers = new Headers(upstream.headers);
+    headers.delete("content-length");
+    headers.delete("content-encoding");
+    headers.set("Cache-Control", "no-store");
+    return Response.json(response, { headers });
+  }
   const scan = result?.structuredContent?.scan;
   if (!scan?.id || result.isError || !("score_summary" in result.structuredContent)) {
     return upstream;
@@ -58,7 +85,10 @@ async function handleMcp(request: NextRequest): Promise<Response> {
   try {
     // Reuse the dashboard's scorer and cache freshness rules. MCP clients must
     // not need to visit a dashboard page to compute a new scan's score.
-    const summaries = await getScanScoreSummaries([{ id: scan.id, status: scan.status }]);
+    const summaries = await boundedScoreRead(
+      getScanScoreSummaries([{ id: scan.id, status: scan.status }]),
+      scoreReadSignal,
+    );
     const summary = summaries[scan.id];
     if (!summary) throw new Error("Scan no longer exists");
     const data = { ...result.structuredContent, score_summary: mcpScoreSummary(summary) };

@@ -36,9 +36,55 @@ const { renderMarkdown } = loadSource("lib/markdown.ts");
 const { getAllDocPages, getAdjacentDocPages } = loadSource("lib/docs.ts");
 const { navigationGroups } = loadSource("content/navigation.ts");
 const { productDocs } = loadSource("content/product-docs.ts");
+const { siteConfig } = loadSource("lib/site.ts");
 const previousBasePath = process.env.LIME_DOCS_BASE_PATH;
 process.env.LIME_DOCS_BASE_PATH = "";
 try {
+  const currentCopyFiles = [
+    "app/page.tsx", "app/get-started/page.tsx", "app/roadmap/page.tsx", "app/screenshots/page.tsx",
+    "content/api.ts", "content/product-docs.ts", "lib/site.ts", "components/site-footer.tsx",
+    "../docs/roadmap.md", "../docs/setup.md", "../docs/database.md", "../docs/architecture/link-checker.md",
+  ];
+  for (const source of currentCopyFiles) {
+    assert.doesNotMatch(readFileSync(path.join(siteRoot, source), "utf8"), /New\s*·\s*unreleased|2\.0\s*·\s*UNRELEASED|current unreleased source|this unreleased source|unreleased source changes|full axe-core ruleset/i, "Stale availability or audit claim: " + source);
+  }
+  assert.match(siteConfig.description, /broken links/);
+  assert.match(siteConfig.description, /AI assistant/);
+  const mcpGuide = productDocs.find((doc) => doc.slug.join("/") === "user/mcp");
+  for (const client of ["Codex", "Claude Code", "OpenCode 2.x", "OpenCode 1.x (legacy)"]) {
+    assert.ok(mcpGuide.markdown.includes(client), "Missing documented MCP client: " + client);
+  }
+  const mcpTools = [
+    "list_scans", "get_scan", "list_scan_issues", "get_issue_detail", "get_report_metadata", "get_settings",
+    "list_link_checks", "get_link_check", "get_link_check_stats", "get_scan_link_check", "list_link_check_results", "list_link_check_sources",
+    "get_capabilities", "get_workspace_stats", "get_report", "get_screenshot", "get_link_check_export",
+    "create_scan", "pause_scan", "resume_scan", "retry_failed_pages", "rescan_scan", "delete_scan", "mark_issue_false_positive",
+    "create_link_check", "cancel_link_check", "recheck_link_check", "delete_link_check", "update_settings",
+  ];
+  assert.equal(mcpTools.length, 29);
+  for (const tool of mcpTools) {
+    assert.ok(mcpGuide.markdown.includes("`" + tool + "`"), "Missing documented MCP operation: " + tool);
+  }
+  assert.match(mcpGuide.markdown, /Read-only access is the default, including after an upgrade/);
+  assert.match(mcpGuide.markdown, /17 read tools, or 29 tools/);
+  assert.match(mcpGuide.markdown, /4 MiB/);
+  assert.match(mcpGuide.markdown, /confirm: true/);
+  assert.match(mcpGuide.markdown, /request_id/);
+  assert.match(mcpGuide.markdown, /reuse that ID with the same arguments/);
+  assert.match(mcpGuide.markdown, /outcome is uncertain/);
+  const openCodeExamples = [...mcpGuide.markdown.matchAll(/```json\n([\s\S]*?)```/g)]
+    .map((match) => JSON.parse(match[1])).filter((example) => example.mcp?.servers?.lime || example.mcp?.lime);
+  assert.equal(openCodeExamples.length, 2, "Document both OpenCode configuration generations");
+  for (const example of openCodeExamples) {
+    const v2 = Boolean(example.mcp.servers);
+    const server = v2 ? example.mcp.servers.lime : example.mcp.lime;
+    assert.equal(server.type, "remote");
+    assert.equal(server.url, "http://localhost:3000/mcp");
+    assert.equal(server.headers.Authorization, "Bearer {env:LIME_MCP_KEY}");
+    assert.equal(server.oauth, false);
+    assert.equal(server[v2 ? "disabled" : "enabled"], !v2);
+    assert.equal(v2 ? "enabled" in server : "disabled" in server, false, "Do not mix OpenCode version fields");
+  }
   assert.equal(renderMarkdown("`[literal](https://example.com)`"), "<p><code>[literal](https://example.com)</code></p>");
   assert.match(renderMarkdown("[query](https://example.com/?a=1&b=2)"), /href="https:\/\/example\.com\/\?a=1&amp;b=2"/);
   assert.doesNotMatch(renderMarkdown("[query](https://example.com/?a=1&b=2)"), /amp;amp/);
@@ -55,6 +101,7 @@ try {
   process.env.LIME_DOCS_BASE_PATH = "";
 
   const pages = getAllDocPages();
+  assert.ok(pages.every((page) => !page.slug.includes("internal")), "Internal handoff records must not be published");
   const links = navigationGroups.flatMap((group) => [group.href, ...group.items.map((item) => item.href)]);
   assert.equal(new Set(pages.map((page) => page.href)).size, pages.length, "Duplicate documentation route");
   for (const page of pages) assert.ok(links.includes(page.href), "Page missing from navigation: " + page.href);

@@ -2,7 +2,7 @@
 
 LIME recovery needs PostgreSQL **and** the saved screenshot files. A SQL dump alone preserves scan findings/settings but cannot recreate image evidence. Keep backups outside `dist/`: `make clean` removes that directory and the normal Compose data volumes.
 
-This guide was checked against the repository's scripts, schema, and storage paths. The backup/restore commands below are operator procedures, not commands executed against user data during documentation verification. Rehearse recovery in a separate environment before an incident.
+Rehearse recovery in a separate environment before you need it. A useful backup must restore both the database and its matching screenshot files.
 
 ## Recovery Set
 
@@ -17,7 +17,7 @@ Keep these together, with the capture time and running application version/tag:
 
 Database backups contain site URLs, HTML snippets, settings, and the MCP key hash/hint. Screenshot and env backups can be sensitive too. Restrict access, encrypt/off-host copy according to your policy, and record retention. The raw MCP key is not recoverable from its hash; retain client credentials separately or generate a new key after recovery.
 
-## Quiesce For A Matched Snapshot
+## Prepare a consistent backup
 
 1. Schedule maintenance and prevent new scans, link checks, triage, and settings writes.
 2. Let active accessibility scans complete, or request **Pause** and wait until each is `paused` rather than merely `pause_requested`. Let independent/companion link checks settle or use **Cancel check**; accessibility Pause does not pause a link job that has already started.
@@ -25,7 +25,7 @@ Database backups contain site URLs, HTML snippets, settings, and the MCP key has
 4. Dump PostgreSQL, copy screenshots/config/catalogs, and inspect all command outcomes.
 5. Start the same services/version again and verify health/pages/evidence; resume paused scans only when ready.
 
-Stopping an unpaused active backend causes that scan's partial data/screenshots to be reset on its next startup. Pausing first preserves completed evidence. `pg_dump` itself takes a consistent database snapshot while the database is live, but that snapshot does not synchronize filesystem writes; the maintenance window supplies the cross-store boundary. [PostgreSQL dump guidance](https://www.postgresql.org/docs/17/backup-dump.html) explains the database snapshot and restore behavior.
+Stopping Shopkeeper during an active, unpaused scan causes that scan's partial data and screenshots to be reset on the next startup. Pause first to preserve completed evidence. Although `pg_dump` takes a consistent database snapshot, it does not coordinate with screenshot writes. Stopping both application services keeps the files and database in sync while you back them up. See [PostgreSQL's backup guide](https://www.postgresql.org/docs/17/backup-dump.html).
 
 ## Bundled Local Docker Example
 
@@ -94,6 +94,6 @@ Start the matching application release with both services pointed at the rehears
 
 ## Production Recovery Or Version Rollback
 
-Prefer a tested fresh database/volume plus deliberate cutover over mixing old SQL with live newer tables. Record the cutover's expected data loss: scans/triage/settings after the backup time will not be in the restored set. Preserve the current state before replacing anything, and obtain the operator's approval for the exact target.
+Restore to a separate database and volume, verify them, then switch the application to the restored data. Scans, review decisions, and settings changed after the backup will be lost. Preserve the current state and confirm the recovery destination before switching.
 
 Switching to an older image is not schema rollback. Startup runs forward migrations only; down files existing in the repository do not make a downgrade automatic or safe. Use a version compatible with the restored schema and catalog, verify the isolated restoration, then redirect both UI and Shopkeeper together. Never run `make clean`, `down -v`, forced migration versions, or broad recursive deletion as a recovery shortcut.
