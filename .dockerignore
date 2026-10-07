@@ -3,12 +3,20 @@
 .env
 .env.*
 !.env.example
+**/.env
+**/.env.*
+!**/.env.example
 
 # Build artifacts
 dist
 out
 coverage
 *.log
+**/*.log
+*.pem
+**/*.pem
+**/go.work
+**/go.work.sum
 
 # Go
 shopkeeper/.cache
