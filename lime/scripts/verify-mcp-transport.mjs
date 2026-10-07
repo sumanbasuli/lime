@@ -41,6 +41,37 @@ function proxyRequest(body, { method = "POST", signal = new AbortController().si
   };
 }
 
+test("catch-all API route forwards an ordinary scan body", async () => {
+  const body = '{"sitemap_url":"https://example.test/","scan_type":"single"}';
+  const proxy = await loadProxy({ fetch: async (url, init) => {
+    assert.equal(String(url), "http://shopkeeper.invalid:8080/api/scans");
+    assert.equal(init.body.toString(), body);
+    return new Response(null, { status: 201 });
+  } });
+  const route = await loadSource("../src/app/api/[...path]/route.ts", {}, { "@/lib/shopkeeper-proxy": proxy });
+  const request = proxyRequest(body);
+  request.nextUrl = new URL("http://dashboard.invalid:3000/api/scans");
+  assert.equal((await route.POST(request)).status, 201);
+});
+
+test("catch-all API route rejects an oversized chunked body before upstream fetch", async () => {
+  let cancelled = false;
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(1024 * 1024));
+      controller.enqueue(new Uint8Array(1));
+    },
+    cancel() { cancelled = true; },
+  });
+  const proxy = await loadProxy({ fetch: () => assert.fail("Must not fetch oversized body") });
+  const route = await loadSource("../src/app/api/[...path]/route.ts", {}, { "@/lib/shopkeeper-proxy": proxy });
+  const request = proxyRequest(body);
+  request.nextUrl = new URL("http://dashboard.invalid:3000/api/scans");
+  assert.equal(request.headers.get("Content-Length"), null);
+  assert.equal((await route.POST(request)).status, 413);
+  assert.equal(cancelled, true);
+});
+
 test("proxy preserves MCP auth, raw ID, protocol, status and CORS", async () => {
   const body = '{"jsonrpc":"2.0","id":9007199254740993,"method":"ping"}';
   const { proxyShopkeeperRequest } = await loadProxy({ fetch: async (url, init) => {

@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 async function proxyRequest(request: NextRequest): Promise<Response> {
-  return proxyShopkeeperRequest(request);
+  return proxyShopkeeperRequest(request, { bodyLimit: 1024 * 1024 });
 }
 
 export {

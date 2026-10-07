@@ -65,6 +65,51 @@ func TestCreateScanWithLinksRejectsCredentialsBeforePersisting(t *testing.T) {
 	}
 }
 
+func TestCreateScanAcceptsSmallChunkedBodyWithUnknownField(t *testing.T) {
+	repo := &selectionRepo{}
+	h := New(repo, nil, nil)
+	body := `{"sitemap_url":"https://example.test/","scan_type":"single","ignored":"value"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/scans", strings.NewReader(body))
+	req.ContentLength = -1
+	req.TransferEncoding = []string{"chunked"}
+	w := httptest.NewRecorder()
+
+	h.CreateScan(w, req)
+	if w.Code != http.StatusCreated || repo.legacyCalls != 1 {
+		t.Fatalf("small chunked scan status=%d repo calls=%d body=%s", w.Code, repo.legacyCalls, w.Body.String())
+	}
+}
+
+func TestCreateScanRejectsOversizedBodiesBeforePersisting(t *testing.T) {
+	large := strings.Repeat("x", 1<<20)
+	cases := []struct {
+		name    string
+		body    string
+		chunked bool
+	}{
+		{"known field", `{"sitemap_url":"https://example.test/","tag":"` + large + `"}`, false},
+		{"unknown field", `{"sitemap_url":"https://example.test/","ignored":"` + large + `"}`, true},
+		{"trailing bytes", `{"sitemap_url":"https://example.test/"}` + large, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &selectionRepo{}
+			h := New(repo, nil, nil)
+			req := httptest.NewRequest(http.MethodPost, "/api/scans", strings.NewReader(tc.body))
+			if tc.chunked {
+				req.ContentLength = -1
+				req.TransferEncoding = []string{"chunked"}
+			}
+			w := httptest.NewRecorder()
+
+			h.CreateScan(w, req)
+			if w.Code != http.StatusRequestEntityTooLarge || repo.legacyCalls != 0 || repo.linkCalls != 0 {
+				t.Fatalf("oversized scan status=%d repo calls=%d/%d body=%s", w.Code, repo.legacyCalls, repo.linkCalls, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestLinkPaginationAndUUIDValidation(t *testing.T) {
 	for _, query := range []string{"?limit=0", "?limit=201", "?limit=no", "?offset=-1", "?offset=1000001"} {
 		if _, _, ok := pagination(httptest.NewRequest("GET", "/"+query, nil)); ok {

@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -79,10 +82,22 @@ func (h *Handler) Version(w http.ResponseWriter, r *http.Request) {
 
 // CreateScan handles POST /api/scans.
 func (h *Handler) CreateScan(w http.ResponseWriter, r *http.Request) {
+	const maxCreateScanBodyBytes = 1 << 20
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxCreateScanBodyBytes))
 	var req models.CreateScanRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "Invalid request body",
+	if err == nil {
+		err = json.NewDecoder(bytes.NewReader(body)).Decode(&req)
+	}
+	if err != nil {
+		status := http.StatusBadRequest
+		message := "Invalid request body"
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			status = http.StatusRequestEntityTooLarge
+			message = "Request body too large"
+		}
+		writeJSON(w, status, map[string]string{
+			"error": message,
 		})
 		return
 	}
