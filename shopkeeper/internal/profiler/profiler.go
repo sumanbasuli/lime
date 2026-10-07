@@ -49,6 +49,13 @@ const (
 
 var httpClient = newHTTPClient()
 
+var errDifferentAuthority = errors.New("URL has different authority from root sitemap")
+
+type discovery struct {
+	allowedAuthority string
+	client           *http.Client
+}
+
 type requestProfile struct {
 	name      string
 	userAgent string
@@ -91,18 +98,76 @@ func newHTTPClient() *http.Client {
 	}
 }
 
+func newDiscovery(sitemapURL string) (*discovery, error) {
+	parsedURL, err := url.ParseRequestURI(sitemapURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse sitemap URL %s: %w", sitemapURL, err)
+	}
+	if !isHTTPURL(parsedURL) {
+		return nil, fmt.Errorf("sitemap URL %s must use HTTP or HTTPS", sitemapURL)
+	}
+
+	allowedAuthority := normalizedAuthority(parsedURL)
+	if allowedAuthority == "" {
+		return nil, fmt.Errorf("sitemap URL %s has no host", sitemapURL)
+	}
+
+	// Each discovery uses its own redirect policy while retaining the configured
+	// transport and other settings (including the client supplied by tests).
+	client := *httpClient
+	previousCheckRedirect := client.CheckRedirect
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if !isAllowedURL(req.URL, allowedAuthority) {
+			return fmt.Errorf("%w: %s", errDifferentAuthority, req.URL)
+		}
+		if previousCheckRedirect != nil {
+			return previousCheckRedirect(req, via)
+		}
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		return nil
+	}
+
+	return &discovery{allowedAuthority: allowedAuthority, client: &client}, nil
+}
+
+func isHTTPURL(u *url.URL) bool {
+	return u != nil && (u.Scheme == "http" || u.Scheme == "https")
+}
+
+func isAllowedURL(u *url.URL, allowedAuthority string) bool {
+	return isHTTPURL(u) && normalizedAuthority(u) == allowedAuthority
+}
+
+func (d *discovery) checkURL(rawURL string) error {
+	parsedURL, err := url.ParseRequestURI(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL %s: %w", rawURL, err)
+	}
+	if !isAllowedURL(parsedURL, d.allowedAuthority) {
+		return fmt.Errorf("%w: %s", errDifferentAuthority, rawURL)
+	}
+	return nil
+}
+
 // Discover fetches a sitemap URL and recursively extracts all page URLs.
 // It handles both <sitemapindex> (nested sitemaps) and <urlset> (direct URLs).
 // Returns a deduplicated, validated slice of URL strings.
 func Discover(ctx context.Context, sitemapURL string) ([]string, error) {
-	seen := make(map[string]bool)
-	var result []string
-
-	if err := discoverRecursive(ctx, sitemapURL, seen, &result, 0); err != nil {
+	d, err := newDiscovery(sitemapURL)
+	if err != nil {
 		return nil, err
 	}
 
-	eligibleURLs, summary, err := filterEligibleURLs(ctx, sitemapURL, result)
+	seen := make(map[string]bool)
+	var result []string
+
+	if err := d.discoverRecursive(ctx, sitemapURL, seen, &result, 0); err != nil {
+		return nil, err
+	}
+
+	eligibleURLs, summary, err := d.filterEligibleURLs(ctx, result)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +186,7 @@ func Discover(ctx context.Context, sitemapURL string) ([]string, error) {
 
 const maxDepth = 10
 
-func discoverRecursive(ctx context.Context, sitemapURL string, seen map[string]bool, result *[]string, depth int) error {
+func (d *discovery) discoverRecursive(ctx context.Context, sitemapURL string, seen map[string]bool, result *[]string, depth int) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -130,7 +195,7 @@ func discoverRecursive(ctx context.Context, sitemapURL string, seen map[string]b
 		return fmt.Errorf("exceeded maximum sitemap nesting depth (%d)", maxDepth)
 	}
 
-	body, err := fetchURL(ctx, sitemapURL)
+	body, err := d.fetchURL(ctx, sitemapURL)
 	if err != nil {
 		return fmt.Errorf("failed to fetch sitemap %s: %w", sitemapURL, err)
 	}
@@ -145,7 +210,7 @@ func discoverRecursive(ctx context.Context, sitemapURL string, seen map[string]b
 			if loc == "" {
 				continue
 			}
-			if err := discoverRecursive(ctx, loc, seen, result, depth+1); err != nil {
+			if err := d.discoverRecursive(ctx, loc, seen, result, depth+1); err != nil {
 				log.Printf("Profiler: warning: failed to process nested sitemap %s: %v", loc, err)
 				nestedErrs = append(nestedErrs, fmt.Errorf("%s: %w", loc, err))
 			}
@@ -180,11 +245,15 @@ func discoverRecursive(ctx context.Context, sitemapURL string, seen map[string]b
 	return fmt.Errorf("could not parse %s as either sitemapindex or urlset", sitemapURL)
 }
 
-func fetchURL(ctx context.Context, rawURL string) ([]byte, error) {
+func (d *discovery) fetchURL(ctx context.Context, rawURL string) ([]byte, error) {
+	if err := d.checkURL(rawURL); err != nil {
+		return nil, err
+	}
+
 	var lastErr error
 
 	for i, profile := range sitemapFetchProfiles {
-		body, statusCode, err := fetchURLWithRetries(ctx, rawURL, profile)
+		body, statusCode, err := d.fetchURLWithRetries(ctx, rawURL, profile)
 		if err == nil {
 			if i > 0 {
 				log.Printf("Profiler: fetched %s using %s profile after upstream blocked the default scanner profile", rawURL, profile.name)
@@ -204,7 +273,7 @@ func fetchURL(ctx context.Context, rawURL string) ([]byte, error) {
 	return nil, lastErr
 }
 
-func fetchURLWithRetries(ctx context.Context, rawURL string, profile requestProfile) ([]byte, int, error) {
+func (d *discovery) fetchURLWithRetries(ctx context.Context, rawURL string, profile requestProfile) ([]byte, int, error) {
 	var lastErr error
 	var lastStatusCode int
 
@@ -213,7 +282,7 @@ func fetchURLWithRetries(ctx context.Context, rawURL string, profile requestProf
 			return nil, 0, err
 		}
 
-		body, statusCode, shouldRetry, err := fetchURLOnce(ctx, rawURL, profile)
+		body, statusCode, shouldRetry, err := d.fetchURLOnce(ctx, rawURL, profile)
 		if err == nil {
 			return body, statusCode, nil
 		}
@@ -230,7 +299,7 @@ func fetchURLWithRetries(ctx context.Context, rawURL string, profile requestProf
 	return nil, lastStatusCode, lastErr
 }
 
-func fetchURLOnce(ctx context.Context, rawURL string, profile requestProfile) ([]byte, int, bool, error) {
+func (d *discovery) fetchURLOnce(ctx context.Context, rawURL string, profile requestProfile) ([]byte, int, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("failed to create request: %w", err)
@@ -240,9 +309,9 @@ func fetchURLOnce(ctx context.Context, rawURL string, profile requestProfile) ([
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("User-Agent", profile.userAgent)
 
-	resp, err := httpClient.Do(req)
+	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, 0, true, err
+		return nil, 0, !errors.Is(err, errDifferentAuthority), err
 	}
 	defer resp.Body.Close()
 
@@ -264,28 +333,17 @@ func isValidURL(rawURL string) bool {
 	if err != nil {
 		return false
 	}
-	return u.Scheme == "http" || u.Scheme == "https"
+	return isHTTPURL(u)
 }
 
-func filterEligibleURLs(
+func (d *discovery) filterEligibleURLs(
 	ctx context.Context,
-	sitemapURL string,
 	discovered []string,
 ) ([]string, urlEligibilitySummary, error) {
 	var summary urlEligibilitySummary
 
 	if len(discovered) == 0 {
 		return []string{}, summary, nil
-	}
-
-	parsedSitemapURL, err := url.Parse(sitemapURL)
-	if err != nil {
-		return nil, summary, fmt.Errorf("failed to parse sitemap URL %s: %w", sitemapURL, err)
-	}
-
-	allowedAuthority := normalizedAuthority(parsedSitemapURL)
-	if allowedAuthority == "" {
-		return nil, summary, fmt.Errorf("sitemap URL %s has no host", sitemapURL)
 	}
 
 	workerCount := resolveURLWorkerCount
@@ -302,7 +360,7 @@ func filterEligibleURLs(
 		go func() {
 			defer wg.Done()
 			for candidate := range jobs {
-				outcome, err := evaluateURLEligibility(ctx, candidate, allowedAuthority)
+				outcome, err := d.evaluateURLEligibility(ctx, candidate)
 				if err != nil {
 					return
 				}
@@ -359,28 +417,39 @@ func filterEligibleURLs(
 	return filtered, summary, nil
 }
 
-func evaluateURLEligibility(
+func (d *discovery) evaluateURLEligibility(
 	ctx context.Context,
 	candidate discoveredURL,
-	allowedAuthority string,
 ) (urlEligibilityOutcome, error) {
 	outcome := urlEligibilityOutcome{index: candidate.index}
+	if err := d.checkURL(candidate.rawURL); err != nil {
+		if errors.Is(err, errDifferentAuthority) {
+			outcome.external = true
+		} else {
+			outcome.unresolved = true
+		}
+		return outcome, nil
+	}
 
 	resolveCtx, cancel := context.WithTimeout(ctx, resolveURLTimeout)
 	defer cancel()
 
-	finalURL, err := resolveFinalURL(resolveCtx, candidate.rawURL)
+	finalURL, err := d.resolveFinalURL(resolveCtx, candidate.rawURL)
 	if err != nil {
 		if ctx.Err() != nil {
 			return outcome, ctx.Err()
 		}
-		outcome.unresolved = true
+		if errors.Is(err, errDifferentAuthority) {
+			outcome.external = true
+		} else {
+			outcome.unresolved = true
+		}
 		return outcome, nil
 	}
 
 	outcome.finalURL = canonicalizeURL(finalURL)
 	outcome.redirected = outcome.finalURL != canonicalizeURLString(candidate.rawURL)
-	if normalizedAuthority(finalURL) != allowedAuthority {
+	if normalizedAuthority(finalURL) != d.allowedAuthority {
 		outcome.external = true
 		return outcome, nil
 	}
@@ -389,7 +458,11 @@ func evaluateURLEligibility(
 	return outcome, nil
 }
 
-func resolveFinalURL(ctx context.Context, rawURL string) (*url.URL, error) {
+func (d *discovery) resolveFinalURL(ctx context.Context, rawURL string) (*url.URL, error) {
+	if err := d.checkURL(rawURL); err != nil {
+		return nil, err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -399,7 +472,7 @@ func resolveFinalURL(ctx context.Context, rawURL string) (*url.URL, error) {
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("User-Agent", sitemapFetchProfiles[1].userAgent)
 
-	resp, err := httpClient.Do(req)
+	resp, err := d.client.Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -24,7 +24,7 @@ For release deployments, consistently include the actual `--env-file`, `-f`, pro
 | UI API requests return 500/502 | Confirm UI `SHOPKEEPER_URL` exists and reaches the backend from the UI runtime; browser localhost and container localhost differ |
 | API health works but dashboard pages fail | Both services need the same reachable `DATABASE_URL`; check UI DB errors and migration completion |
 | Backend exits before listening | Inspect migration/connection error; confirm working directory includes `migrations/` and the DB role can apply it |
-| Scan stays profiling or has fewer pages than the XML | Inspect nested-sitemap failures and Profiler retained/cross-host/unresolved counts; eligibility makes GET requests and follows redirects |
+| Scan stays profiling or has fewer pages than the XML | Inspect nested-sitemap failures and Profiler retained/cross-host/unresolved counts; off-host URLs and redirects are not fetched |
 | `scanned_urls` equals total but coverage is partial | The counter includes attempted pages; check failed URL coverage and backend page errors |
 | Pausing takes time | It is cooperative; wait for `paused`, not just the requested flag; successful in-flight evidence is saved |
 | Restarted scan loses partial findings | Expected clean recovery for unpaused active scans; explicit pause/resume preserves completed evidence |
@@ -51,7 +51,7 @@ Capture migration errors and the version/dirty state before repair. Do not force
 
 ## Scan Network And Browser Checks
 
-Profiler and Chromium run from Shopkeeper, not from the browser viewing the dashboard. Targets using `localhost`, private DNS, authentication, redirects, bot protection, or blocked resources can behave differently there. Profiler resolves final page URLs by HTTP GET and skips cross-host/unresolved candidates; incomplete nested sitemap discovery fails the scan instead of silently taking a subset.
+Profiler and Chromium run from Shopkeeper, not from the browser viewing the dashboard. Targets using `localhost`, private DNS, authentication, redirects, bot protection, or blocked resources can behave differently there. Profiler only fetches sitemap and page URLs on the entered sitemap's authority; it refuses off-authority redirects before following them. Individual off-authority or unresolved pages are skipped, while an off-authority or failed nested sitemap fails discovery rather than silently producing a partial scan.
 
 Shopkeeper logs Chrome auto-detection at startup. Native installs need a supported Chrome/Chromium command on the service PATH, writable browser temporary storage, and a writable screenshot directory. The current allocator does not read `CHROMIUM_PATH` as a custom override despite a commented template example. `chrome failed to start` can indicate missing dependencies, permissions, memory pressure, or an interrupted operation; correlate it with parent pause/restart state before treating it as a target-page failure.
 

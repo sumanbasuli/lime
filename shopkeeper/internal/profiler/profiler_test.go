@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -166,7 +167,9 @@ func TestDiscoverHonorsCanceledContext(t *testing.T) {
 }
 
 func TestDiscoverFiltersCrossHostRedirectsAndCanonicalizesEligibleRedirects(t *testing.T) {
+	var externalRequests atomic.Int32
 	external := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		externalRequests.Add(1)
 		switch r.URL.Path {
 		case "/outside":
 			fmt.Fprint(w, "external")
@@ -219,10 +222,15 @@ func TestDiscoverFiltersCrossHostRedirectsAndCanonicalizesEligibleRedirects(t *t
 			t.Fatalf("unexpected URLs: got %v want %v", urls, expected)
 		}
 	})
+	if got := externalRequests.Load(); got != 0 {
+		t.Fatalf("external redirect target received %d requests, want zero", got)
+	}
 }
 
-func TestDiscoverUsesEnteredHostForEligibility(t *testing.T) {
+func TestDiscoverRejectsCrossAuthorityRootSitemapRedirect(t *testing.T) {
+	var redirectedRequests atomic.Int32
 	redirectedHost := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectedRequests.Add(1)
 		switch r.URL.Path {
 		case "/sitemap.xml":
 			w.Header().Set("Content-Type", "application/xml")
@@ -249,14 +257,103 @@ func TestDiscoverUsesEnteredHostForEligibility(t *testing.T) {
 	defer enteredHost.Close()
 
 	withTestHTTPClient(t, enteredHost.Client(), func() {
-		urls, err := Discover(context.Background(), enteredHost.URL+"/sitemap.xml")
+		_, err := Discover(context.Background(), enteredHost.URL+"/sitemap.xml")
+		if err == nil || !strings.Contains(err.Error(), "different authority") {
+			t.Fatalf("expected cross-authority redirect error, got %v", err)
+		}
+	})
+	if got := redirectedRequests.Load(); got != 0 {
+		t.Fatalf("redirected sitemap host received %d requests, want zero", got)
+	}
+}
+
+func TestDiscoverRejectsCrossAuthorityNestedSitemapLocBeforeFetch(t *testing.T) {
+	var externalRequests atomic.Int32
+	external := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		externalRequests.Add(1)
+		fmt.Fprint(w, `<urlset><url><loc>http://example.test/page</loc></url></urlset>`)
+	}))
+	defer external.Close()
+
+	mainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `<sitemapindex><sitemap><loc>%s/nested.xml</loc></sitemap></sitemapindex>`, external.URL)
+	}))
+	defer mainServer.Close()
+
+	withTestHTTPClient(t, mainServer.Client(), func() {
+		_, err := Discover(context.Background(), mainServer.URL+"/index.xml")
+		if err == nil || !strings.Contains(err.Error(), "different authority") {
+			t.Fatalf("expected cross-authority nested sitemap error, got %v", err)
+		}
+	})
+	if got := externalRequests.Load(); got != 0 {
+		t.Fatalf("external nested sitemap received %d requests, want zero", got)
+	}
+}
+
+func TestDiscoverRejectsCrossAuthorityNestedSitemapRedirect(t *testing.T) {
+	var externalRequests atomic.Int32
+	external := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		externalRequests.Add(1)
+		fmt.Fprint(w, `<urlset><url><loc>http://example.test/page</loc></url></urlset>`)
+	}))
+	defer external.Close()
+
+	mainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.xml":
+			fmt.Fprintf(w, `<sitemapindex><sitemap><loc>%s/nested.xml</loc></sitemap></sitemapindex>`, serverURL(t, r))
+		case "/nested.xml":
+			http.Redirect(w, r, external.URL+"/nested.xml", http.StatusFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mainServer.Close()
+
+	withTestHTTPClient(t, mainServer.Client(), func() {
+		_, err := Discover(context.Background(), mainServer.URL+"/index.xml")
+		if err == nil || !strings.Contains(err.Error(), "different authority") {
+			t.Fatalf("expected cross-authority nested redirect error, got %v", err)
+		}
+	})
+	if got := externalRequests.Load(); got != 0 {
+		t.Fatalf("external nested redirect target received %d requests, want zero", got)
+	}
+}
+
+func TestDiscoverSkipsCrossAuthorityPageLocBeforeFetch(t *testing.T) {
+	var externalRequests atomic.Int32
+	external := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		externalRequests.Add(1)
+		fmt.Fprint(w, "external")
+	}))
+	defer external.Close()
+
+	mainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/sitemap.xml":
+			fmt.Fprintf(w, `<urlset><url><loc>%s/page</loc></url><url><loc>%s/keep</loc></url></urlset>`, external.URL, serverURL(t, r))
+		case "/keep":
+			fmt.Fprint(w, "ok")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mainServer.Close()
+
+	withTestHTTPClient(t, mainServer.Client(), func() {
+		urls, err := Discover(context.Background(), mainServer.URL+"/sitemap.xml")
 		if err != nil {
 			t.Fatalf("Discover returned error: %v", err)
 		}
-		if len(urls) != 0 {
-			t.Fatalf("expected no eligible URLs, got %v", urls)
+		if want := []string{mainServer.URL + "/keep"}; !slices.Equal(urls, want) {
+			t.Fatalf("unexpected URLs: got %v want %v", urls, want)
 		}
 	})
+	if got := externalRequests.Load(); got != 0 {
+		t.Fatalf("external page loc received %d requests, want zero", got)
+	}
 }
 
 func withTestHTTPClient(t *testing.T, client *http.Client, fn func()) {

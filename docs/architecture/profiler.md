@@ -17,17 +17,17 @@ Profiler reads sitemaps, follows page redirects, and returns eligible pages on t
 * **Recursive Processing**: Handles both `<urlset>` (direct URLs) and `<sitemapindex>` (nested sitemaps). When a sitemapindex is found, each nested sitemap is fetched and parsed recursively.
 * **Max Depth**: Recursion is limited to 10 levels to prevent infinite loops.
 * **De-duplication**: Uses a `map[string]bool` to ensure URLs are unique before returning.
-* **Validation**: Each URL is validated using `url.ParseRequestURI` — only `http://` and `https://` schemes are accepted.
+* **Validation**: Each URL is validated using `url.ParseRequestURI` — only `http://` and `https://` schemes are accepted. Nested sitemaps and page URLs must have the entered sitemap's authority before Profiler requests them; redirects to another authority are not followed.
 * **Fetch Retries**: Sitemap requests retry transient fetch failures before giving up.
 * **Complete Discovery Requirement**: Shopkeeper does not continue into scanning with a partial sitemap index. If any nested sitemap still fails after retries, discovery returns an error and the scan fails instead of silently scanning an incomplete URL set.
 * **Response Limit**: Reads up to 50 MiB per sitemap through `io.LimitReader`. The XML must parse successfully; there is no separate Content-Length validation.
 
 ### Page Eligibility After XML Discovery
 
-Profiler makes a browser-profile HTTP **GET**, not HEAD, for each distinct discovered page to follow redirects. It uses up to 12 resolution workers and a 10-second context deadline per candidate. It does not run JavaScript during this step or read the page into Chromium.
+Profiler makes a browser-profile HTTP **GET**, not HEAD, for each distinct discovered page on the entered sitemap's authority to follow allowed redirects. It uses up to 12 resolution workers and a 10-second context deadline per candidate. It does not run JavaScript during this step or read the page into Chromium.
 
 - The final page authority must match the original sitemap authority. Hostnames are case-normalized; default HTTP/HTTPS ports are normalized away, while nondefault ports remain significant.
-- Cross-host redirects and unresolved requests are skipped. Successful redirected URLs are canonicalized, fragments removed, and deduplicated again; the retained order follows XML discovery order.
+- Off-authority page URLs are skipped without a request. Redirects to another authority are refused before following them; unresolved requests are skipped. Successful same-authority redirects are canonicalized, fragments removed, and deduplicated again; the retained order follows XML discovery order.
 - HTTP error status alone does not exclude a candidate if a final response URL is available. A network/redirect-resolution failure does.
 - Logs report unique discovered, retained, redirected, cross-host, and unresolved counts. `total_urls` reflects the retained set, not every `<loc>` in the XML.
 
@@ -49,7 +49,7 @@ type urlSet struct {
 
 * Timeout: 30 seconds per request
 * Up to 3 attempts for transient sitemap failures (network/read errors, HTTP 429, and 5xx), with 400ms/800ms backoff
-* Uses a dedicated `http.Client` configuration for sitemap requests
+* Uses a dedicated `http.Client` configuration for sitemap requests, with a per-discovery redirect guard
 * Starts with the LIME scanner user agent; a 403 switches once to a browser-profile user agent
 * Receives the parent scan-run context so a pause can cancel in-flight discovery/resolution requests
 

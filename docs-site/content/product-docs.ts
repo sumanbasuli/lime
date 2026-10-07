@@ -110,7 +110,7 @@ If you selected **Include link check**, the scan detail page also shows a **Link
 
 ## If the target redirects
 
-For sitemap scans, LIME follows collected URLs to their final destination and retains eligible URLs on the entered sitemap's host and port. Off-host, unresolved, and duplicate destinations can be left out. For example, a sitemap on \`example.com\` whose pages redirect to \`www.example.com\` can produce less coverage than you expect. Submit the sitemap for the intended final host and compare the discovered count with your expected pages.
+For sitemap scans, LIME checks pages on the entered sitemap's host and follows redirects only while they stay on that host. Custom ports must also match; switching between HTTP and HTTPS on their usual ports is allowed. LIME skips off-host page URLs and redirects without requesting their destinations. For example, a sitemap on \`example.com\` whose pages redirect to \`www.example.com\` can produce less coverage than you expect. An off-host nested sitemap stops profiling so the scan does not silently use an incomplete page list. Submit the sitemap for the intended final host and compare the discovered count with your expected pages.
 `,
   },
   {
