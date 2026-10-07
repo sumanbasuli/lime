@@ -38,7 +38,7 @@ SHOPKEEPER_LDFLAGS := -s -w \
        build-docker build-docker-ui build-docker-shopkeeper \
        publish-release-images \
        backup-db update update-release debian-install debian-update require-linux host-info \
-       docs docs-run docs-dev docs-build docs-site-build docs-check-source docs-verify verify-app \
+       docs docs-run docs-dev docs-build docs-site-build docs-check-source docs-verify verify-app verify-debian-env \
        clean
 
 # ---- Host detection ----
@@ -194,7 +194,10 @@ docs-build docs-site-build: docs-check-source
 docs-verify: docs-build
 	npm --prefix docs-site run verify:browser
 
-verify-app:
+verify-debian-env:
+	bash ./scripts/verify-debian-env.sh
+
+verify-app: verify-debian-env
 	bash ./scripts/verify-app.sh
 
 # ---- Backup + update ----

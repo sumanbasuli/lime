@@ -85,7 +85,7 @@ sudo LIME_INSTALL_ROOT=/srv/lime \
 
 The generated systemd units are rewritten to match the configured install and config roots.
 
-This is an in-place install: artifact directories are replaced (screenshots are preserved), and service units are overwritten. Existing env files are preserved, except the installer ensures the screenshot-root setting exists and refreshes `LIME_VERSION`. It enables services but does not start them or run a readiness check. Back up before rerunning it on a live deployment.
+This is an in-place install: artifact directories are replaced (screenshots are preserved), and service units are overwritten. Existing env file contents are preserved, while regular env files are changed to `root:lime` ownership and mode `0640`. The installer also ensures the screenshot-root setting exists and refreshes `LIME_VERSION`. It enables services but does not start them or run a readiness check. Back up before rerunning it on a live deployment.
 
 ## Configure
 
@@ -137,13 +137,17 @@ Or through Make:
 make debian-update TAG=v2.0.0
 ```
 
+When upgrading from a release whose Debian updater still sourced `shopkeeper.env`, first switch your checkout to the trusted new tag with `git fetch --tags` and `git checkout <new-tag>`, then run the updater from that checkout. The older updater reads the env file before it fetches the new code, so running it first would not apply this protection to that initial update.
+
 The updater:
 
-1. reads `DATABASE_URL` from `/etc/lime/shopkeeper.env`
+1. reads `DATABASE_URL` as data from `/etc/lime/shopkeeper.env` without executing the file as a shell script
 2. dumps Postgres to `/var/backups/lime/lime-pre-<tag>-<timestamp>.sql.gz`
 3. checks out the tag and runs `make build`
 4. reinstalls binaries via `scripts/debian-install.sh`
 5. restarts Shopkeeper, waits three seconds, then restarts the UI (a delay, not a migration/readiness gate)
+
+Keep `DATABASE_URL` on one line in the env file, with no shell escapes. A plain value or a value enclosed in single or double quotes is supported; URL-encode special characters in the connection string. The updater treats the value as data, not shell code. If an env file is a symlink, the installer leaves its target ownership unchanged and warns you to secure that target separately.
 
 The updater checks out the selected tag and runs `make build`, but does not install that release's npm dependencies. Review changes to the lockfile and required toolchains, install the matching dependencies, and keep the checkout clean before updating. Back up configuration and screenshots separately; the automatic dump covers only PostgreSQL.
 
@@ -157,8 +161,8 @@ Returning to a previous tag does not downgrade the schema. A previous binary may
     screenshots/         # writable by the lime user
   ui/                    # Next standalone server + data catalog
 /etc/lime/
-  shopkeeper.env         # 0640 lime:lime (installer's default)
-  ui.env                 # 0640 lime:lime (installer's default)
+  shopkeeper.env         # 0640 root:lime (installer's default)
+  ui.env                 # 0640 root:lime (installer's default)
 /etc/systemd/system/
   lime-shopkeeper.service
   lime-ui.service

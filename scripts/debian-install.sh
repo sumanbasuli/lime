@@ -153,8 +153,18 @@ install_env_template() {
     -e "s|/opt/lime|${INSTALL_ROOT}|g" \
     -e "s|/etc/lime|${CONFIG_ROOT}|g" \
     "${source_file}" > "${temp_file}"
-  install -o "${LIME_USER}" -g "${LIME_USER}" -m 0640 "${temp_file}" "${target_file}"
+  install -o root -g "${LIME_USER}" -m 0640 "${temp_file}" "${target_file}"
   rm -f "${temp_file}"
+}
+
+secure_env_file() {
+  local env_file="$1"
+  if [[ -L "${env_file}" ]]; then
+    echo "Warning: ${env_file} is a symlink; verify its target is root-owned and not service-writable." >&2
+    return
+  fi
+  chown "root:${LIME_USER}" "${env_file}"
+  chmod 0640 "${env_file}"
 }
 
 echo "==> Ensuring ${LIME_USER} system user"
@@ -167,8 +177,7 @@ install -d -o "${LIME_USER}" -g "${LIME_USER}" -m 0755 \
   "${INSTALL_ROOT}/shopkeeper" \
   "${INSTALL_ROOT}/shopkeeper/screenshots" \
   "${INSTALL_ROOT}/ui"
-install -d -m 0750 "${CONFIG_ROOT}"
-chgrp "${LIME_USER}" "${CONFIG_ROOT}"
+install -d -o root -g "${LIME_USER}" -m 0750 "${CONFIG_ROOT}"
 
 echo "==> Installing Shopkeeper artifacts"
 copy_tree "${DIST_DIR}/shopkeeper" "${INSTALL_ROOT}/shopkeeper" \
@@ -198,6 +207,11 @@ if [[ ! -f "${CONFIG_ROOT}/ui.env" ]]; then
   install_env_template "${SYSTEMD_SOURCE_DIR}/ui.env.example" "${CONFIG_ROOT}/ui.env"
   echo "    wrote ${CONFIG_ROOT}/ui.env (edit DATABASE_URL before starting)"
 fi
+
+# Existing installs used lime-owned files. Preserve their contents while
+# removing service-account write access before any further root maintenance.
+secure_env_file "${CONFIG_ROOT}/shopkeeper.env"
+secure_env_file "${CONFIG_ROOT}/ui.env"
 
 ensure_env_value \
   "${CONFIG_ROOT}/shopkeeper.env" \

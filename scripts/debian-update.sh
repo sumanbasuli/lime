@@ -85,15 +85,9 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   exit 1
 fi
 
-# shellcheck disable=SC1090
-set -a
-. "${ENV_FILE}"
-set +a
-
-if [[ -z "${DATABASE_URL:-}" ]]; then
-  echo "DATABASE_URL is not set in ${ENV_FILE}; cannot back up before update." >&2
-  exit 1
-fi
+# shellcheck source=scripts/debian-env.sh
+. "${ROOT_DIR}/scripts/debian-env.sh"
+DATABASE_URL="$(read_debian_database_url "${ENV_FILE}")"
 
 mkdir -p "${BACKUP_DIR}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
@@ -104,7 +98,7 @@ if ! command -v pg_dump >/dev/null 2>&1; then
   echo "pg_dump not found; install postgresql-client before running updates." >&2
   exit 1
 fi
-pg_dump "${DATABASE_URL}" | gzip -9 > "${BACKUP_FILE}"
+pg_dump --dbname="${DATABASE_URL}" | gzip -9 > "${BACKUP_FILE}"
 
 echo "==> Fetching tag ${TAG}"
 run_as_build_user git -C "${ROOT_DIR}" fetch --tags --prune
