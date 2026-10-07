@@ -80,7 +80,7 @@ The two internal URL directions are different:
 
 Current source/docs Compose sets the report URL; release Compose and Fly require an explicit operator override. Adding an env value that the Compose template never forwards does not change the container. For native colocated services the report default is `http://localhost:3000`. Custom UI ports/hosts must update the backend value too. An external login gateway must not replace the internal report page with a login screen, and reverse-proxy timeouts must accommodate PDF generation (backend render deadline is four minutes).
 
-PDF/CSV/LLM toggles and the PDF limiter apply through dashboard routes. Direct backend PDF downloads bypass those Next controls. Report metadata availability is not proof a file has already been generated.
+PDF/CSV/LLM toggles apply through dashboard routes; Shopkeeper also enforces the PDF toggle and render concurrency on direct backend PDF downloads. A 503 with `Retry-After` means the PDF queue or backend renderer is busy; retry shortly. Report metadata availability is not proof a file has already been generated.
 
 ## Link checks, update notices, and caches
 

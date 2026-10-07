@@ -463,7 +463,7 @@ Occurrence limits accept whole numbers from 1 to 20,000. They do not cap full CS
 
 - **Summary cache TTL** controls how long saved summaries can be reused; default 60 seconds.
 - **Report data cache TTL** is a reserved setting. Its value is saved, but reports do not currently use it; changing it does not make repeated exports faster.
-- **Report concurrency** limits PDF generation through each dashboard UI process; default 1. It does not limit CSV/LLM exports or direct backend PDF requests. Increasing it can increase server load.
+- **Report concurrency** limits simultaneous PDF renders in the backend and PDF requests sent by each dashboard process; default 1. Extra dashboard requests enter a bounded queue, while a busy backend asks direct callers to retry. CSV and LLM exports use separate paths. Increasing the limit can increase server load.
 
 Leave these at their defaults unless you are investigating a measured performance problem. The [Performance reference](/docs/reference/performance/) explains the current implementation and limits.
 
@@ -1249,7 +1249,7 @@ LIME uses PostgreSQL-backed score and issue summaries to reduce repeated aggrega
 - Group summary loading still assembles or reads the scan's summary list before slicing it. Its cost therefore grows with the number of issue groups.
 - Full CSV streams keyset-paged batches of 5,000 stored occurrences. It avoids one giant occurrence array but still does work proportional to the full export.
 - \`scan_report_data_cache\` is schema-only reserved infrastructure. \`reportDataCacheTtlSeconds\` persists a value, but no report loader consumes that cache today.
-- \`reportGenerationConcurrency\` bounds PDF upstream generation per UI process only. CSV/LLM do not use it, and direct Go PDF requests bypass it. It is not a database-wide semaphore.
+- \`reportGenerationConcurrency\` bounds Chromium PDF renders per backend process and requests admitted by each UI process. The dashboard queue is bounded and removes cancelled requests. Direct backend PDF requests obey the saved enablement and concurrency settings too; a busy renderer returns HTTP 503 with \`Retry-After\`. CSV/LLM exports do not use this limit. It is not a database-wide semaphore.
 
 ## Invalidation
 

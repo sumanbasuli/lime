@@ -80,7 +80,7 @@ GitHub will email you when a new tag is published.
 
 The helpers invoke Shopkeeper before UI, but their readiness guarantees differ: Docker polls `/api/health` after migration/recreation; Fly relies on its configured deploy health checks; Debian waits three seconds and does not gate UI restart on a successful migration/readiness check. None of these is a complete browser/database/screenshot/export test.
 
-Expect an interruption for the single backend. Do not run two Shopkeepers against one database to attempt zero downtime: recovery assumes the other process is gone, and filesystem evidence/cancellation state are not distributed. UI replicas do not change this backend constraint, and PDF limits are per UI process.
+Expect an interruption for the single backend. Do not run two Shopkeepers against one database to attempt zero downtime: recovery assumes the other process is gone, and filesystem evidence/cancellation state are not distributed. UI replicas do not change this backend constraint. PDF downloads have both a per-UI-process waiting limit and a per-Shopkeeper-process Chromium render limit.
 
 ## Migrations
 

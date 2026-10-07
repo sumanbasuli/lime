@@ -660,7 +660,7 @@ Successful action data uses `{ action, http_status, data, request_id?, replayed?
 - `summary_cache_ttl_seconds`, `report_data_cache_ttl_seconds`: whole seconds 5–86,400.
 - `report_generation_concurrency`: whole number 1–10.
 
-Include `confirm: true` and at least one field. No nested `reporting`/`performance` objects, integration settings, key metadata, `mcpAllowWrites`, or browser preferences are accepted. Existing saved values for omitted fields remain. Report-data cache TTL is reserved infrastructure, not an active report cache; PDF concurrency is per dashboard process and does not limit direct Go PDF or CSV/LLM exports.
+Include `confirm: true` and at least one field. No nested `reporting`/`performance` objects, integration settings, key metadata, `mcpAllowWrites`, or browser preferences are accepted. Existing saved values for omitted fields remain. Report-data cache TTL is reserved infrastructure, not an active report cache; PDF concurrency limits the dashboard's waiting flow and direct Go PDF renders per process, but does not limit CSV/LLM exports.
 
 A successful canonical settings call returns `{ action: "update_settings", http_status: 200, settings }` in matching JSON text and `structuredContent`. Unlike Go lifecycle results, the saved settings are under `settings`, not `data`. Reread `get_settings` to confirm the intended values; do not infer a settings update from tool discovery or a request with only `confirm`.
 

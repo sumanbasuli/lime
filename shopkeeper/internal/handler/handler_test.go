@@ -15,6 +15,8 @@ import (
 
 type stubRepo struct {
 	retryFailedURLs func(ctx context.Context, id string) (*models.Scan, int, error)
+	getScan         func(ctx context.Context, id string) (*models.Scan, error)
+	pdfPolicy       func(ctx context.Context) (*models.PDFReportPolicy, error)
 }
 
 func (s stubRepo) CreateScan(context.Context, string, string, *string, viewport.Settings) (*models.Scan, error) {
@@ -29,8 +31,18 @@ func (s stubRepo) ListScansByTag(context.Context, string) ([]models.Scan, error)
 	panic("unexpected ListScansByTag call")
 }
 
-func (s stubRepo) GetScan(context.Context, string) (*models.Scan, error) {
-	panic("unexpected GetScan call")
+func (s stubRepo) GetScan(ctx context.Context, id string) (*models.Scan, error) {
+	if s.getScan == nil {
+		panic("unexpected GetScan call")
+	}
+	return s.getScan(ctx, id)
+}
+
+func (s stubRepo) GetPDFReportPolicy(ctx context.Context) (*models.PDFReportPolicy, error) {
+	if s.pdfPolicy == nil {
+		panic("unexpected GetPDFReportPolicy call")
+	}
+	return s.pdfPolicy(ctx)
 }
 
 func (s stubRepo) GetScanIssues(context.Context, string) ([]models.IssueWithOccurrences, error) {

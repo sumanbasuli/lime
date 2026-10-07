@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -50,11 +51,41 @@ type IssueReportGenerator interface {
 	GenerateIssueReportPDF(ctx context.Context, scanID, kind, key string) ([]byte, error)
 }
 
+type pdfPolicyRepository interface {
+	GetPDFReportPolicy(ctx context.Context) (*models.PDFReportPolicy, error)
+}
+
+type pdfRenderLimiter struct {
+	mu     sync.Mutex
+	active int
+}
+
+func (l *pdfRenderLimiter) tryAcquire(limit int) (func(), bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if limit < 1 {
+		limit = 1
+	}
+	if l.active >= limit {
+		return nil, false
+	}
+	l.active++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			l.mu.Lock()
+			l.active--
+			l.mu.Unlock()
+		})
+	}, true
+}
+
 // Handler holds dependencies for HTTP handlers.
 type Handler struct {
 	repo       ScanRepository
 	scanner    ScanRunner
 	reporter   IssueReportGenerator
+	pdfLimiter pdfRenderLimiter
 	links      LinkRepository
 	linkRunner LinkRunner
 }
@@ -589,6 +620,27 @@ func (h *Handler) DownloadIssueReport(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	policyRepo, ok := h.repo.(pdfPolicyRepository)
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "PDF report policy is unavailable",
+		})
+		return
+	}
+	policy, err := policyRepo.GetPDFReportPolicy(r.Context())
+	if err != nil || policy == nil {
+		log.Printf("Failed to get PDF report policy: %v", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "PDF report policy is unavailable",
+		})
+		return
+	}
+	if !policy.Enabled {
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "PDF exports are disabled in settings",
+		})
+		return
+	}
 
 	scan, err := h.repo.GetScan(r.Context(), id)
 	if err != nil {
@@ -604,8 +656,21 @@ func (h *Handler) DownloadIssueReport(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	release, ok := h.pdfLimiter.tryAcquire(policy.Concurrency)
+	if !ok {
+		w.Header().Set("Retry-After", "1")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "PDF generation is busy; retry shortly",
+		})
+		return
+	}
+	defer release()
+	if r.Context().Err() != nil {
+		return
+	}
 
 	pdf, err := h.reporter.GenerateIssueReportPDF(r.Context(), id, kind, key)
+	release() // The render slot is no longer needed while a client receives the PDF.
 	if err != nil {
 		log.Printf("Failed to generate issue report PDF for scan %s: %v", id, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{

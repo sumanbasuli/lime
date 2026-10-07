@@ -66,9 +66,9 @@ Settings are persisted through the dashboard:
 |---------|---------|------------------|
 | Summary cache TTL | 60 seconds | Score/issue cache age limit; accepted UI range 5–86400 seconds |
 | Report-data cache TTL | 300 seconds | Reserved; no active report-data cache consumer |
-| Report generation concurrency | 1 | Bounds PDF upstream generation per UI process; accepted range 1–10 |
+| Report generation concurrency | 1 | Bounds PDF generation per Shopkeeper process and the dashboard's per-UI-process proxy; accepted range 1–10 |
 
-The PDF limiter is not a database-wide semaphore. Multiple UI processes each have their own limit, and direct Shopkeeper PDF requests bypass the Next settings/limiter. CSV/LLM generation does not use this PDF limiter. Use dashboard report endpoints for the documented controls.
+The dashboard has a bounded waiting queue per UI process. Shopkeeper independently checks the current PDF setting and admits up to the configured number of Chromium PDF renders per backend process, including direct backend requests. A busy backend returns 503 with `Retry-After`; retry rather than launching unlimited parallel renders. These are process-local guards, not a database-wide semaphore. CSV/LLM generation does not use the PDF limiter.
 
 Full PDF occurrence sampling defaults to 30 per group, scoped PDF to 2000, small CSV to 5, and LLM to 3. Limits are report samples, not scan-time limits and not deletion of saved evidence. Full CSV streams all occurrences in keyset-paged batches of 5000 rather than loading every occurrence into one array; it still performs work proportional to the full export and can be expensive for a large scan.
 

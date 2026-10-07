@@ -29,7 +29,7 @@ func dashboardWriteTools() []map[string]any {
 		"llm_reports_enabled":               booleanSchema("Enable LLM text reports.", true),
 		"summary_cache_ttl_seconds":         integerSchema("Summary cache TTL in seconds.", 5, 86400, 60),
 		"report_data_cache_ttl_seconds":     integerSchema("Report data cache TTL in seconds.", 5, 86400, 300),
-		"report_generation_concurrency":     integerSchema("Report generation concurrency per dashboard process.", 1, 10, 1),
+		"report_generation_concurrency":     integerSchema("Simultaneous PDF renders per backend process and requests per dashboard process.", 1, 10, 1),
 	}
 	return []map[string]any{writeTool("update_settings", "Update selected reporting/performance settings using the canonical dashboard MCP endpoint. Requires confirm:true and at least one field. Omitted fields remain unchanged. MCP keys, integration settings, and write permissions cannot be changed via MCP.", properties, false, true, false, "confirm")}
 }

@@ -186,6 +186,12 @@ type MCPVisibleSettings struct {
 	Integrations map[string]any `json:"integrations"`
 }
 
+// PDFReportPolicy is the current persisted policy enforced by the PDF renderer.
+type PDFReportPolicy struct {
+	Enabled     bool
+	Concurrency int
+}
+
 // MCPIssueSummary is a bounded issue group row for MCP clients.
 type MCPIssueSummary struct {
 	Kind            string  `json:"kind"`

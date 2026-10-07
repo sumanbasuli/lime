@@ -1,7 +1,10 @@
 import { NextRequest } from "next/server";
 import { getSystemSettings } from "@/lib/report-settings";
 import { measureServerAction } from "@/lib/performance-logging";
-import { reportGenerationLimiter } from "@/lib/report-generation-limiter";
+import {
+  ReportGenerationQueueFullError,
+  reportGenerationLimiter,
+} from "@/lib/report-generation-limiter";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -82,9 +85,19 @@ export async function GET(
               signal: request.signal,
             }),
           1000
-        )
+        ),
+      request.signal
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof ReportGenerationQueueFullError) {
+      return Response.json(
+        { error: "PDF report generation is busy. Please retry shortly." },
+        { status: 503, headers: { "Retry-After": "30" } }
+      );
+    }
+    if (request.signal.aborted) {
+      return new Response(null, { status: 499 });
+    }
     return Response.json(
       {
         error: `Failed to reach Shopkeeper at ${shopkeeperUrl}`,

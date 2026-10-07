@@ -820,6 +820,27 @@ func (r *Repository) GetMCPScanScoreSummary(ctx context.Context, scanID string) 
 	return &summary, nil
 }
 
+// GetPDFReportPolicy reads the live settings used to admit Chromium PDF work.
+func (r *Repository) GetPDFReportPolicy(ctx context.Context) (*models.PDFReportPolicy, error) {
+	policy := &models.PDFReportPolicy{}
+	err := r.pool.QueryRow(ctx,
+		`SELECT pdf_reports_enabled, report_generation_concurrency
+		 FROM app_settings WHERE key = 'global'`,
+	).Scan(&policy.Enabled, &policy.Concurrency)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return &models.PDFReportPolicy{Enabled: true, Concurrency: 1}, nil
+		}
+		return nil, fmt.Errorf("failed to get PDF report policy: %w", err)
+	}
+	if policy.Concurrency < 1 {
+		policy.Concurrency = 1
+	} else if policy.Concurrency > 10 {
+		policy.Concurrency = 10
+	}
+	return policy, nil
+}
+
 // GetMCPVisibleSettings returns non-sensitive reporting, performance, and MCP settings.
 func (r *Repository) GetMCPVisibleSettings(ctx context.Context) (*models.MCPVisibleSettings, error) {
 	var fullPDFOccurrenceLimit int
@@ -906,6 +927,7 @@ func (r *Repository) GetMCPVisibleSettings(ctx context.Context) (*models.MCPVisi
 			"report_generation_concurrency":   reportGenerationConcurrency,
 			"cache_storage":                   "postgres",
 			"report_generation_limiter_scope": "ui_process",
+			"report_generation_backend_scope": "shopkeeper_process",
 		},
 		Integrations: map[string]any{
 			"mcp_enabled":          mcpEnabled,
@@ -935,6 +957,7 @@ func defaultMCPVisibleSettings() *models.MCPVisibleSettings {
 			"report_generation_concurrency":   1,
 			"cache_storage":                   "postgres",
 			"report_generation_limiter_scope": "ui_process",
+			"report_generation_backend_scope": "shopkeeper_process",
 		},
 		Integrations: map[string]any{
 			"mcp_enabled":          false,
