@@ -187,7 +187,7 @@ Deletion requires a confirmation and removes the scan's saved results and screen
 
 Issue groups use the axe rule ID as their grouping contract. A failed issue group takes priority: if that rule also has incomplete outcomes elsewhere in the scan, the UI does not duplicate it as a separate needs-review card. The raw incomplete audits and occurrence records remain persisted. Review-only rules without a failed group appear as needs-review cards. Reports and MCP use the same grouping rule so their card/group counts align with the dashboard.
 
-Scoring removes false-positive rule IDs before building its audit summary. `excludedCount` (`excluded_count` in MCP) is retained for compatibility and does not count review decisions. Use each issue's `is_false_positive` flag and the filtered failure and score counts instead.
+Scoring removes false-positive rule IDs before building its audit summary. Only rule IDs explicitly present in the Lighthouse weight catalog receive a weight; unknown or forged IDs, including JavaScript object prototype names, remain unscored. `excludedCount` (`excluded_count` in MCP) is retained for compatibility and does not count review decisions. Use each issue's `is_false_positive` flag and the filtered failure and score counts instead.
 
 Marking or unmarking a false positive can move a group to a different sort position. The issue feed refreshes its loaded prefix after triage so later **Load more issues** requests use the updated order without skipping or duplicating a group. Group and occurrence APIs default to 12 and 25 items respectively; details stay paginated independently of the group list.
 

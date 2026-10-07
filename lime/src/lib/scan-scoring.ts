@@ -157,7 +157,9 @@ function createEmptyPageCounts(): Record<StoredAuditOutcome, number> {
 }
 
 export function getLighthouseAccessibilityWeight(ruleId: string): number {
-  return LIGHTHOUSE_AUDIT_WEIGHTS[ruleId] ?? 0;
+  return Object.prototype.hasOwnProperty.call(LIGHTHOUSE_AUDIT_WEIGHTS, ruleId)
+    ? LIGHTHOUSE_AUDIT_WEIGHTS[ruleId]
+    : 0;
 }
 
 export function getAccessibilityScoreBand(score: number): AccessibilityScoreBand {

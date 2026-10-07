@@ -14,7 +14,8 @@
     "test:link-check-api": "node --test scripts/verify-link-check-api.mjs",
     "test:link-presentation": "node --test scripts/verify-link-presentation.mjs",
     "test:issues-report-csv": "node --test scripts/verify-issues-report-csv.mjs",
-    "test:report-generation-limiter": "node --test scripts/verify-report-generation-limiter.mjs"
+    "test:report-generation-limiter": "node --test scripts/verify-report-generation-limiter.mjs",
+    "test:scan-scoring": "node --test scripts/verify-scan-scoring.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
