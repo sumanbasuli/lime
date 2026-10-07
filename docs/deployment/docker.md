@@ -86,7 +86,7 @@ Pushing a `VERSION` change to `main`, or manually dispatching it, triggers [rele
 The workflow:
 - reads `VERSION` and uses `v<VERSION>` as the release tag
 - requires a matching `CHANGELOG.md` section and uses it as the GitHub Release notes
-- refuses to overwrite an existing release tag that points at another commit
+- claims an absent remote release tag before building images, and refuses to publish if that tag points at another commit or the remote cannot be checked
 - installs the repo toolchains and runs `make build` as the release preflight
 - builds and pushes:
   - `ghcr.io/<repo-owner>/lime-shopkeeper:<release-tag>`
@@ -98,6 +98,10 @@ The workflow:
 - uploads a release bundle asset such as `lime-v2.0.0-release.tar.gz`
 
 The workflow does not use a build-time `NEXT_PUBLIC_API_URL`.
+
+For a manual image publish, `scripts/publish-release-images.sh` requires a clean checkout and checks `origin` before building. Tracked changes and non-ignored untracked files are rejected. Both pushed images use Dockerfiles and build recipes from a temporary archive of the commit being tagged, not the live checkout. Ignored local files are excluded from the Docker build context, and release builds use the standard `--pull` flag. The temporary archive is removed after publishing.
+
+If the version tag is absent, the script creates an annotated tag at that commit and pushes it without force; a same-commit tag is accepted on a retry. An unreachable remote is not treated as an absent tag. If an image build or push fails after the tag claim, fix the failure and rerun from the same commit; the tag may exist without a completed GitHub Release. Set `PUSH_IMAGES=false` only when you want local image builds from your checkout without any registry push or remote-tag claim.
 
 ## Published Image Deployment
 

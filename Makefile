@@ -25,6 +25,7 @@ LIME_UI_PORT ?= 3000
 LIME_DOCS_PORT ?= 3001
 LIME_IMAGE_TAG ?= v$(VERSION)
 DOCKER_BUILD_FLAGS ?= --pull
+DOCKER_BUILD_CONTEXT ?= .
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf 'docker-compose'; else printf 'docker compose'; fi)
 # The installer records this exact Compose file list in .env. Keep its
 # localhost-only port override last when switching that checkout to hot reload.
@@ -154,16 +155,16 @@ build-docker-shopkeeper:
 		--build-arg LIME_VERSION=$(VERSION) \
 		--build-arg LIME_COMMIT=$(GIT_COMMIT) \
 		--tag $(SHOPKEEPER_IMAGE):$(LIME_IMAGE_TAG) \
-		--file shopkeeper/Dockerfile \
-		.
+		--file "$(DOCKER_BUILD_CONTEXT)/shopkeeper/Dockerfile" \
+		"$(DOCKER_BUILD_CONTEXT)"
 
 build-docker-ui:
 	docker build $(DOCKER_BUILD_FLAGS) \
 		--build-arg LIME_VERSION=$(VERSION) \
 		--build-arg LIME_COMMIT=$(GIT_COMMIT) \
 		--tag $(UI_IMAGE):$(LIME_IMAGE_TAG) \
-		--file lime/Dockerfile \
-		.
+		--file "$(DOCKER_BUILD_CONTEXT)/lime/Dockerfile" \
+		"$(DOCKER_BUILD_CONTEXT)"
 
 publish-release-images:
 	LIME_IMAGE_REGISTRY="$(LIME_IMAGE_REGISTRY)" \
