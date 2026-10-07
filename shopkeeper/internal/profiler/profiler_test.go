@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -164,6 +165,315 @@ func TestDiscoverHonorsCanceledContext(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
+}
+
+func TestDiscoverFetchesRepeatedAndCyclicSitemapsOnlyOnce(t *testing.T) {
+	var indexRequests atomic.Int32
+	var childRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.xml":
+			indexRequests.Add(1)
+			fmt.Fprintf(w, `<sitemapindex>
+				<sitemap><loc>%s/index.xml</loc></sitemap>
+				<sitemap><loc>%s/child.xml</loc></sitemap>
+				<sitemap><loc>%s/child.xml</loc></sitemap>
+			</sitemapindex>`, serverURL(t, r), serverURL(t, r), serverURL(t, r))
+		case "/child.xml":
+			childRequests.Add(1)
+			fmt.Fprintf(w, `<urlset><url><loc>%s/page</loc></url></urlset>`, serverURL(t, r))
+		case "/page":
+			fmt.Fprint(w, "ok")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	withTestHTTPClient(t, server.Client(), func() {
+		urls, err := Discover(context.Background(), server.URL+"/index.xml")
+		if err != nil {
+			t.Fatalf("Discover returned error: %v", err)
+		}
+		if want := []string{server.URL + "/page"}; !slices.Equal(urls, want) {
+			t.Fatalf("unexpected URLs: got %v want %v", urls, want)
+		}
+	})
+	if got := indexRequests.Load(); got != 1 {
+		t.Fatalf("index fetched %d times, want once", got)
+	}
+	if got := childRequests.Load(); got != 1 {
+		t.Fatalf("repeated child fetched %d times, want once", got)
+	}
+}
+
+func TestDiscoverStopsAtAggregateRequestBudget(t *testing.T) {
+	var secondRequests atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/index.xml":
+			return testResponse(r, `<sitemapindex>
+				<sitemap><loc>https://example.invalid/first.xml</loc></sitemap>
+				<sitemap><loc>https://example.invalid/second.xml</loc></sitemap>
+			</sitemapindex>`), nil
+		case "/first.xml":
+			return testResponse(r, `<urlset><url><loc>https://example.invalid/page</loc></url></urlset>`), nil
+		case "/second.xml":
+			secondRequests.Add(1)
+			return testResponse(r, `<urlset><url><loc>https://example.invalid/page-2</loc></url></urlset>`), nil
+		default:
+			return nil, fmt.Errorf("unexpected request for %s", r.URL.Path)
+		}
+	})}
+	withTestHTTPClient(t, client, func() {
+		d, err := newDiscovery("https://example.invalid/index.xml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.requestLimit = 2
+		seen := make(map[string]bool)
+		var urls []string
+		err = d.discoverRecursive(context.Background(), "https://example.invalid/index.xml", seen, &urls, 0)
+		if !errors.Is(err, errDiscoveryBudget) {
+			t.Fatalf("expected request budget error, got %v", err)
+		}
+	})
+	if got := secondRequests.Load(); got != 0 {
+		t.Fatalf("second child fetched %d times after request budget, want zero", got)
+	}
+}
+
+func TestDiscoverStopsAtAggregateByteAndPageBudgets(t *testing.T) {
+	const root = "https://example.invalid/index.xml"
+	const twoPages = `<urlset><url><loc>https://example.invalid/one</loc></url><url><loc>https://example.invalid/two</loc></url></urlset>`
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return testResponse(r, twoPages), nil
+	})}
+	withTestHTTPClient(t, client, func() {
+		for _, test := range []struct {
+			name       string
+			byteLimit  int64
+			pageLimit  int
+			wantBudget bool
+		}{
+			{name: "bytes exceeded", byteLimit: int64(len(twoPages) - 1), pageLimit: maxDiscoveredURLs, wantBudget: true},
+			{name: "pages exceeded", byteLimit: maxSitemapBytes, pageLimit: 1, wantBudget: true},
+			{name: "exact limits accepted", byteLimit: int64(len(twoPages)), pageLimit: 2},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				d, err := newDiscovery(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				d.byteLimit = test.byteLimit
+				d.pageLimit = test.pageLimit
+				seen := make(map[string]bool)
+				var urls []string
+				err = d.discoverRecursive(context.Background(), root, seen, &urls, 0)
+				if test.wantBudget {
+					if !errors.Is(err, errDiscoveryBudget) {
+						t.Fatalf("expected budget error, got %v", err)
+					}
+				} else if err != nil || len(urls) != 2 {
+					t.Fatalf("expected both pages at exact limits, got URLs=%v error=%v", urls, err)
+				}
+			})
+		}
+	})
+}
+
+func TestDiscoverCountsBytesAcrossNestedSitemaps(t *testing.T) {
+	const root = "https://example.invalid/index.xml"
+	const index = `<sitemapindex><sitemap><loc>https://example.invalid/first.xml</loc></sitemap><sitemap><loc>https://example.invalid/second.xml</loc></sitemap></sitemapindex>`
+	const first = `<urlset><url><loc>https://example.invalid/one</loc></url></urlset>`
+	const second = `<urlset><url><loc>https://example.invalid/two</loc></url></urlset>`
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/index.xml":
+			return testResponse(r, index), nil
+		case "/first.xml":
+			return testResponse(r, first), nil
+		case "/second.xml":
+			return testResponse(r, second), nil
+		default:
+			return nil, fmt.Errorf("unexpected request for %s", r.URL.Path)
+		}
+	})}
+	withTestHTTPClient(t, client, func() {
+		for _, test := range []struct {
+			name       string
+			byteLimit  int64
+			wantBudget bool
+		}{
+			{name: "one byte over", byteLimit: int64(len(index) + len(first) + len(second) - 1), wantBudget: true},
+			{name: "exact total accepted", byteLimit: int64(len(index) + len(first) + len(second))},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				d, err := newDiscovery(root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				d.byteLimit = test.byteLimit
+				seen := make(map[string]bool)
+				var urls []string
+				err = d.discoverRecursive(context.Background(), root, seen, &urls, 0)
+				if test.wantBudget {
+					if !errors.Is(err, errDiscoveryBudget) {
+						t.Fatalf("expected cumulative byte budget error, got %v", err)
+					}
+				} else if err != nil || len(urls) != 2 || d.sitemapBytes != test.byteLimit {
+					t.Fatalf("expected two pages and exact byte usage, got URLs=%v bytes=%d error=%v", urls, d.sitemapBytes, err)
+				}
+			})
+		}
+	})
+}
+
+func TestDiscoverChargesPartialReadBytesBeforeRetry(t *testing.T) {
+	const root = "https://example.invalid/index.xml"
+	const partial = "abcdef"
+	var attempts atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		attempts.Add(1)
+		response := testResponse(r, "")
+		response.Body = io.NopCloser(&partialErrorReader{data: partial})
+		return response, nil
+	})}
+	withTestHTTPClient(t, client, func() {
+		d, err := newDiscovery(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.byteLimit = 2*int64(len(partial)) - 1
+		_, err = d.fetchURL(context.Background(), root)
+		if !errors.Is(err, errDiscoveryBudget) {
+			t.Fatalf("expected cumulative byte budget error after partial reads, got %v", err)
+		}
+		if d.sitemapBytes != int64(2*len(partial)) {
+			t.Fatalf("charged %d bytes, want both partial reads charged", d.sitemapBytes)
+		}
+	})
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("made %d attempts, want two before the byte budget stops retries", got)
+	}
+}
+
+func TestDiscoverRetryAfterPartialReadPreservesSuccessfulResult(t *testing.T) {
+	const root = "https://example.invalid/index.xml"
+	const partial = "oops"
+	const sitemap = `<urlset><url><loc>https://example.invalid/page</loc></url></urlset>`
+	var attempts atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if attempts.Add(1) == 1 {
+			response := testResponse(r, "")
+			response.Body = io.NopCloser(&partialErrorReader{data: partial})
+			return response, nil
+		}
+		return testResponse(r, sitemap), nil
+	})}
+	withTestHTTPClient(t, client, func() {
+		d, err := newDiscovery(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.byteLimit = int64(len(partial) + len(sitemap))
+		body, err := d.fetchURL(context.Background(), root)
+		if err != nil || string(body) != sitemap || d.sitemapBytes != d.byteLimit {
+			t.Fatalf("retry result=%q bytes=%d error=%v, want complete sitemap and exact charged bytes", body, d.sitemapBytes, err)
+		}
+	})
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("made %d attempts, want a partial failure followed by one success", got)
+	}
+}
+
+func TestDiscoverStopsWhenPageRedirectExceedsRequestBudget(t *testing.T) {
+	const root = "https://example.invalid/index.xml"
+	var finalRequests atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/index.xml":
+			return testResponse(r, `<urlset><url><loc>https://example.invalid/redirect</loc></url></urlset>`), nil
+		case "/redirect":
+			response := testResponse(r, "")
+			response.StatusCode = http.StatusFound
+			response.Header.Set("Location", "/final")
+			return response, nil
+		case "/final":
+			finalRequests.Add(1)
+			return testResponse(r, "ok"), nil
+		default:
+			return nil, fmt.Errorf("unexpected request for %s", r.URL.Path)
+		}
+	})}
+	withTestHTTPClient(t, client, func() {
+		d, err := newDiscovery(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.requestLimit = 2 // sitemap + page probe; redirect would be the third request
+		seen := make(map[string]bool)
+		var urls []string
+		if err := d.discoverRecursive(context.Background(), root, seen, &urls, 0); err != nil {
+			t.Fatal(err)
+		}
+		filtered, _, err := d.filterEligibleURLs(context.Background(), urls)
+		if !errors.Is(err, errDiscoveryBudget) || filtered != nil {
+			t.Fatalf("expected fatal request budget error without partial pages, got pages=%v error=%v", filtered, err)
+		}
+	})
+	if got := finalRequests.Load(); got != 0 {
+		t.Fatalf("redirect target fetched %d times after request budget, want zero", got)
+	}
+}
+
+func TestDiscoverCancellationUnblocksPageQueue(t *testing.T) {
+	const root = "https://example.invalid/index.xml"
+	allProbesStarted := make(chan struct{})
+	var pageCalls atomic.Int32
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/index.xml" {
+			var body strings.Builder
+			body.WriteString("<urlset>")
+			for i := 0; i <= resolveURLWorkerCount; i++ {
+				fmt.Fprintf(&body, "<url><loc>https://example.invalid/page-%d</loc></url>", i)
+			}
+			body.WriteString("</urlset>")
+			return testResponse(r, body.String()), nil
+		}
+		if !strings.HasPrefix(r.URL.Path, "/page-") {
+			return nil, fmt.Errorf("unexpected request for %s", r.URL.Path)
+		}
+		if pageCalls.Add(1) == resolveURLWorkerCount {
+			close(allProbesStarted)
+		}
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})}
+	withTestHTTPClient(t, client, func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			_, err := Discover(ctx, root)
+			done <- err
+		}()
+
+		select {
+		case <-allProbesStarted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("page probes did not all start")
+		}
+		cancel()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("expected cancellation, got %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("Discover remained blocked after cancellation")
+		}
+	})
 }
 
 func TestDiscoverFiltersCrossHostRedirectsAndCanonicalizesEligibleRedirects(t *testing.T) {
@@ -386,4 +696,28 @@ func containsAll(value string, substrings ...string) bool {
 
 func contains(value, substring string) bool {
 	return strings.Contains(value, substring)
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func testResponse(r *http.Request, body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    r,
+		Header:     make(http.Header),
+	}
+}
+
+type partialErrorReader struct {
+	data string
+}
+
+func (r *partialErrorReader) Read(p []byte) (int, error) {
+	n := copy(p, r.data)
+	return n, io.ErrUnexpectedEOF
 }

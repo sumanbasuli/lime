@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -45,15 +46,26 @@ const (
 	pageAcceptHeader      = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
 	resolveURLTimeout     = 10 * time.Second
 	resolveURLWorkerCount = 12
+	maxDiscoveryDuration  = 30 * time.Minute
+	maxDiscoveryRequests  = 20_000
+	maxSitemapBytes       = 128 << 20
+	maxDiscoveredURLs     = 10_000
 )
 
 var httpClient = newHTTPClient()
 
 var errDifferentAuthority = errors.New("URL has different authority from root sitemap")
+var errDiscoveryBudget = errors.New("sitemap discovery work budget exceeded")
 
 type discovery struct {
 	allowedAuthority string
 	client           *http.Client
+	visitedSitemaps  map[string]bool
+	requests         atomic.Int64
+	sitemapBytes     int64
+	requestLimit     int64
+	byteLimit        int64
+	pageLimit        int
 }
 
 type requestProfile struct {
@@ -115,21 +127,42 @@ func newDiscovery(sitemapURL string) (*discovery, error) {
 	// Each discovery uses its own redirect policy while retaining the configured
 	// transport and other settings (including the client supplied by tests).
 	client := *httpClient
+	d := &discovery{
+		allowedAuthority: allowedAuthority,
+		client:           &client,
+		visitedSitemaps:  make(map[string]bool),
+		requestLimit:     maxDiscoveryRequests,
+		byteLimit:        maxSitemapBytes,
+		pageLimit:        maxDiscoveredURLs,
+	}
 	previousCheckRedirect := client.CheckRedirect
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if !isAllowedURL(req.URL, allowedAuthority) {
 			return fmt.Errorf("%w: %s", errDifferentAuthority, req.URL)
 		}
 		if previousCheckRedirect != nil {
-			return previousCheckRedirect(req, via)
-		}
-		if len(via) >= 10 {
+			if err := previousCheckRedirect(req, via); err != nil {
+				return err
+			}
+		} else if len(via) >= 10 {
 			return errors.New("stopped after 10 redirects")
 		}
-		return nil
+		return d.reserveRequest()
 	}
 
-	return &discovery{allowedAuthority: allowedAuthority, client: &client}, nil
+	return d, nil
+}
+
+func (d *discovery) reserveRequest() error {
+	for {
+		used := d.requests.Load()
+		if used >= d.requestLimit {
+			return fmt.Errorf("%w: at most %d HTTP requests", errDiscoveryBudget, d.requestLimit)
+		}
+		if d.requests.CompareAndSwap(used, used+1) {
+			return nil
+		}
+	}
 }
 
 func isHTTPURL(u *url.URL) bool {
@@ -159,6 +192,8 @@ func Discover(ctx context.Context, sitemapURL string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, maxDiscoveryDuration)
+	defer cancel()
 
 	seen := make(map[string]bool)
 	var result []string
@@ -191,9 +226,17 @@ func (d *discovery) discoverRecursive(ctx context.Context, sitemapURL string, se
 		return err
 	}
 
+	if err := d.checkURL(sitemapURL); err != nil {
+		return err
+	}
+	key := canonicalizeURLString(sitemapURL)
+	if d.visitedSitemaps[key] {
+		return nil
+	}
 	if depth > maxDepth {
 		return fmt.Errorf("exceeded maximum sitemap nesting depth (%d)", maxDepth)
 	}
+	d.visitedSitemaps[key] = true
 
 	body, err := d.fetchURL(ctx, sitemapURL)
 	if err != nil {
@@ -211,6 +254,9 @@ func (d *discovery) discoverRecursive(ctx context.Context, sitemapURL string, se
 				continue
 			}
 			if err := d.discoverRecursive(ctx, loc, seen, result, depth+1); err != nil {
+				if errors.Is(err, errDiscoveryBudget) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return err
+				}
 				log.Printf("Profiler: warning: failed to process nested sitemap %s: %v", loc, err)
 				nestedErrs = append(nestedErrs, fmt.Errorf("%s: %w", loc, err))
 			}
@@ -235,6 +281,9 @@ func (d *discovery) discoverRecursive(ctx context.Context, sitemapURL string, se
 				continue
 			}
 			if !seen[loc] {
+				if len(seen) >= d.pageLimit {
+					return fmt.Errorf("%w: at most %d distinct page URLs", errDiscoveryBudget, d.pageLimit)
+				}
 				seen[loc] = true
 				*result = append(*result, loc)
 			}
@@ -300,6 +349,9 @@ func (d *discovery) fetchURLWithRetries(ctx context.Context, rawURL string, prof
 }
 
 func (d *discovery) fetchURLOnce(ctx context.Context, rawURL string, profile requestProfile) ([]byte, int, bool, error) {
+	if d.sitemapBytes >= d.byteLimit {
+		return nil, 0, false, fmt.Errorf("%w: at most %d sitemap bytes", errDiscoveryBudget, d.byteLimit)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("failed to create request: %w", err)
@@ -309,9 +361,12 @@ func (d *discovery) fetchURLOnce(ctx context.Context, rawURL string, profile req
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("User-Agent", profile.userAgent)
 
+	if err := d.reserveRequest(); err != nil {
+		return nil, 0, false, err
+	}
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, 0, !errors.Is(err, errDifferentAuthority), err
+		return nil, 0, !errors.Is(err, errDifferentAuthority) && !errors.Is(err, errDiscoveryBudget), err
 	}
 	defer resp.Body.Close()
 
@@ -320,7 +375,15 @@ func (d *discovery) fetchURLOnce(ctx context.Context, rawURL string, profile req
 			fmt.Errorf("HTTP %d for %s", resp.StatusCode, rawURL)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 50*1024*1024)) // 50MB limit
+	remaining := d.byteLimit - d.sitemapBytes
+	readLimit := min(int64(50*1024*1024), remaining+1)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, readLimit)) // 50 MiB per sitemap
+	// ReadAll can return both bytes and an error. Charge those bytes before a
+	// retry, otherwise repeated partial responses bypass the aggregate limit.
+	d.sitemapBytes += int64(len(body))
+	if int64(len(body)) > remaining {
+		return nil, resp.StatusCode, false, fmt.Errorf("%w: at most %d sitemap bytes", errDiscoveryBudget, d.byteLimit)
+	}
 	if err != nil {
 		return nil, resp.StatusCode, true, fmt.Errorf("failed to read response body: %w", err)
 	}
@@ -351,17 +414,25 @@ func (d *discovery) filterEligibleURLs(
 		workerCount = len(discovered)
 	}
 
+	workerCtx, cancelWorkers := context.WithCancel(ctx)
+	defer cancelWorkers()
 	jobs := make(chan discoveredURL)
 	results := make(chan urlEligibilityOutcome, len(discovered))
 
 	var wg sync.WaitGroup
+	var workerErr error
+	var firstError sync.Once
 	for workerIndex := 0; workerIndex < workerCount; workerIndex++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for candidate := range jobs {
-				outcome, err := d.evaluateURLEligibility(ctx, candidate)
+				outcome, err := d.evaluateURLEligibility(workerCtx, candidate)
 				if err != nil {
+					firstError.Do(func() {
+						workerErr = err
+						cancelWorkers()
+					})
 					return
 				}
 				results <- outcome
@@ -370,14 +441,16 @@ func (d *discovery) filterEligibleURLs(
 	}
 
 	for index, rawURL := range discovered {
-		if err := ctx.Err(); err != nil {
+		select {
+		case <-workerCtx.Done():
 			close(jobs)
 			wg.Wait()
-			close(results)
-			return nil, summary, err
+			if err := ctx.Err(); err != nil {
+				return nil, summary, err
+			}
+			return nil, summary, workerErr
+		case jobs <- discoveredURL{index: index, rawURL: rawURL}:
 		}
-
-		jobs <- discoveredURL{index: index, rawURL: rawURL}
 	}
 
 	close(jobs)
@@ -393,6 +466,9 @@ func (d *discovery) filterEligibleURLs(
 
 	if err := ctx.Err(); err != nil {
 		return nil, summary, err
+	}
+	if workerErr != nil {
+		return nil, summary, workerErr
 	}
 
 	seenFinalURLs := make(map[string]bool, len(outcomes))
@@ -439,6 +515,9 @@ func (d *discovery) evaluateURLEligibility(
 		if ctx.Err() != nil {
 			return outcome, ctx.Err()
 		}
+		if errors.Is(err, errDiscoveryBudget) {
+			return outcome, err
+		}
 		if errors.Is(err, errDifferentAuthority) {
 			outcome.external = true
 		} else {
@@ -472,6 +551,9 @@ func (d *discovery) resolveFinalURL(ctx context.Context, rawURL string) (*url.UR
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 	req.Header.Set("User-Agent", sitemapFetchProfiles[1].userAgent)
 
+	if err := d.reserveRequest(); err != nil {
+		return nil, err
+	}
 	resp, err := d.client.Do(req)
 	if err != nil {
 		return nil, err

@@ -16,11 +16,12 @@ Profiler reads sitemaps, follows page redirects, and returns eligible pages on t
 
 * **Recursive Processing**: Handles both `<urlset>` (direct URLs) and `<sitemapindex>` (nested sitemaps). When a sitemapindex is found, each nested sitemap is fetched and parsed recursively.
 * **Max Depth**: Recursion is limited to 10 levels to prevent infinite loops.
-* **De-duplication**: Uses a `map[string]bool` to ensure URLs are unique before returning.
+* **De-duplication**: Fetches each normalized sitemap URL once, including repeated and cyclic index entries. It also deduplicates discovered page URLs before eligibility checks and final redirect targets before returning.
 * **Validation**: Each URL is validated using `url.ParseRequestURI` — only `http://` and `https://` schemes are accepted. Nested sitemaps and page URLs must have the entered sitemap's authority before Profiler requests them; redirects to another authority are not followed.
 * **Fetch Retries**: Sitemap requests retry transient fetch failures before giving up.
 * **Complete Discovery Requirement**: Shopkeeper does not continue into scanning with a partial sitemap index. If any nested sitemap still fails after retries, discovery returns an error and the scan fails instead of silently scanning an incomplete URL set.
 * **Response Limit**: Reads up to 50 MiB per sitemap through `io.LimitReader`. The XML must parse successfully; there is no separate Content-Length validation.
+* **Discovery Budget**: One discovery may make at most 20,000 HTTP requests (including retries, page probes, and redirects), read 128 MiB of sitemap XML in total, collect 10,000 distinct page URLs, and run for 30 minutes. Reaching a limit returns an explicit error; it never passes a partial page list to Juicer. These limits apply only to sitemap profiling, not single-URL scans.
 
 ### Page Eligibility After XML Discovery
 
@@ -52,6 +53,7 @@ type urlSet struct {
 * Uses a dedicated `http.Client` configuration for sitemap requests, with a per-discovery redirect guard
 * Starts with the LIME scanner user agent; a 403 switches once to a browser-profile user agent
 * Receives the parent scan-run context so a pause can cancel in-flight discovery/resolution requests
+* Page-probe workers and their queue also stop on cancellation, so pausing during profiling can settle the scan instead of leaving its producer waiting for a worker
 
 ## Output
 
@@ -59,4 +61,4 @@ A deduplicated list of eligible URLs for **Juicer** to scan.
 
 ## Verification And Failure Diagnosis
 
-`shopkeeper/internal/profiler/profiler_test.go` covers sitemap parsing, retries/fallback, redirect eligibility, deduplication, and cancellation. When discovery fails, inspect Shopkeeper's `Profiler:` logs for the exact nested sitemap or filtering totals. A public browser successfully loading a URL does not prove the backend container can reach it; `localhost` in a scan target means the scanner's own runtime, not the user's browser machine.
+`shopkeeper/internal/profiler/profiler_test.go` covers sitemap parsing, retries/fallback, redirect eligibility, deduplication, aggregate limits, and cancellation while page probes are active. When discovery fails, inspect Shopkeeper's `Profiler:` logs and scan error for the exact nested sitemap, budget, or filtering totals. A public browser successfully loading a URL does not prove the backend container can reach it; `localhost` in a scan target means the scanner's own runtime, not the user's browser machine.
