@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { connect } from "node:net";
 import { createRequire } from "node:module";
 import { once } from "node:events";
 import vm from "node:vm";
@@ -73,6 +74,82 @@ test("catch-all API route rejects an oversized chunked body before upstream fetc
   assert.equal(cancelled, true);
 });
 
+test("catch-all API route sets an incoming-body deadline without timing out upstream work", async () => {
+  const route = await loadSource("../src/app/api/[...path]/route.ts", {}, {
+    "@/lib/shopkeeper-proxy": {
+      proxyShopkeeperRequest: async (_request, options) => {
+        assert.equal(options.bodyLimit, 1024 * 1024);
+        assert.equal(options.bodyTimeoutMs, 60_000);
+        assert.equal(options.timeoutMs, undefined);
+        return new Response(null, { status: 204 });
+      },
+    },
+    "@/lib/ordinary-api-origin": originHelper,
+  });
+  assert.equal((await route.POST(proxyRequest("{}"))).status, 204);
+});
+
+test("ordinary incoming-body deadline cancels a stalled upload before upstream fetch", async () => {
+  let cancelled = false;
+  const body = new ReadableStream({ cancel() { cancelled = true; } });
+  const { proxyShopkeeperRequest } = await loadProxy({ fetch: () => assert.fail("Must not fetch stalled body") });
+  const work = proxyShopkeeperRequest(proxyRequest(body), { bodyLimit: 1024, bodyTimeoutMs: 20 });
+  let timer;
+  const result = await Promise.race([
+    work,
+    new Promise((resolve) => { timer = setTimeout(() => resolve(null), 200); }),
+  ]);
+  clearTimeout(timer);
+  if (!result) {
+    await body.cancel().catch(() => {});
+    assert.fail("Ordinary body timeout did not stop request-body reading");
+  }
+  assert.equal(result.status, 408);
+  assert.equal(result.headers.get("Connection"), "close");
+  assert.equal(cancelled, true);
+});
+
+test("a partial HTTP upload gets a 408 and its keep-alive socket closes", async () => {
+  const { NextRequestAdapter, signalFromNodeResponse } = require("next/dist/server/web/spec-extension/adapters/next-request");
+  const { NodeNextRequest, NodeNextResponse } = require("next/dist/server/base-http/node");
+  const { sendResponse } = require("next/dist/server/send-response");
+  const { proxyShopkeeperRequest } = await loadProxy({ fetch: () => assert.fail("Must not fetch stalled body") });
+  const handlerErrors = [];
+  const server = createServer((incoming, outgoing) => {
+    void (async () => {
+      const nextRequest = new NodeNextRequest(incoming);
+      const request = NextRequestAdapter.fromNodeNextRequest(nextRequest, signalFromNodeResponse(outgoing));
+      const response = await proxyShopkeeperRequest(request, { bodyLimit: 1024, bodyTimeoutMs: 20 });
+      await sendResponse(nextRequest, new NodeNextResponse(outgoing), response);
+    })().catch((error) => {
+      handlerErrors.push(error);
+      outgoing.destroy(error);
+    });
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const socket = connect(server.address().port, "127.0.0.1");
+  let timer;
+  let wire = "";
+  socket.on("data", (chunk) => { wire += chunk.toString(); });
+  try {
+    await once(socket, "connect");
+    socket.write("POST /api/scans HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 100\r\nConnection: keep-alive\r\n\r\nx");
+    await Promise.race([
+      once(socket, "close"),
+      new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error("Timed-out upload socket stayed open")), 2_000); }),
+    ]);
+    assert.match(wire, /^HTTP\/1\.1 408 /);
+    assert.match(wire, /\r\nconnection: close\r\n/i);
+    assert.deepEqual(handlerErrors, []);
+  } finally {
+    clearTimeout(timer);
+    socket.destroy();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
 test("proxy preserves MCP auth, raw ID, protocol, status and CORS", async () => {
   const body = '{"jsonrpc":"2.0","id":9007199254740993,"method":"ping"}';
   const { proxyShopkeeperRequest } = await loadProxy({ fetch: async (url, init) => {
@@ -103,6 +180,7 @@ test("oversized body is cancelled before upstream fetch", async () => {
   const { proxyShopkeeperRequest } = await loadProxy({ fetch: () => assert.fail("Must not fetch oversized body") });
   const result = await proxyShopkeeperRequest(proxyRequest(body), { bodyLimit: 4 });
   assert.equal(result.status, 413);
+  assert.equal(result.headers.get("Connection"), "close");
   assert.equal(cancelled, true);
 });
 
@@ -122,6 +200,7 @@ test("MCP deadline bounds a stalled incoming body", async () => {
     assert.fail("MCP timeout did not stop request-body reading");
   }
   assert.equal(result.status, 504);
+  assert.equal(result.headers.get("Connection"), "close");
   assert.equal(cancelled, true);
 });
 

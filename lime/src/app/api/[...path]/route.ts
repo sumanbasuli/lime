@@ -10,6 +10,7 @@ async function proxyRequest(request: NextRequest): Promise<Response> {
   if (rejected) return rejected;
   return proxyShopkeeperRequest(request, {
     bodyLimit: 1024 * 1024,
+    bodyTimeoutMs: 60_000,
     omitBrowserOrigin: !["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase()),
   });
 }

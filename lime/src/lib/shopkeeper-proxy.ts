@@ -28,7 +28,7 @@ function getShopkeeperUrl(): URL {
 
 export async function proxyShopkeeperRequest(
   request: NextRequest,
-  options: { bodyLimit?: number; timeoutMs?: number; omitBrowserOrigin?: boolean } = {}
+  options: { bodyLimit?: number; bodyTimeoutMs?: number; timeoutMs?: number; omitBrowserOrigin?: boolean } = {}
 ): Promise<Response> {
   let targetUrl: URL;
 
@@ -60,8 +60,13 @@ export async function proxyShopkeeperRequest(
 
   const deadline = options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined;
   const signal = deadline ? AbortSignal.any([request.signal, deadline]) : request.signal;
-  const timeoutResponse = () => Response.json(
-    { error: "Shopkeeper request timed out" }, { status: 504 }
+  const bodyDeadline = options.bodyLimit && request.body && options.bodyTimeoutMs
+    ? AbortSignal.timeout(options.bodyTimeoutMs)
+    : undefined;
+  const bodySignal = bodyDeadline ? AbortSignal.any([signal, bodyDeadline]) : signal;
+  const timeoutResponse = (closeConnection = false) => Response.json(
+    { error: "Shopkeeper request timed out" },
+    { status: 504, ...(closeConnection ? { headers: { Connection: "close" } } : {}) }
   );
   const init: RequestInit = {
     method: request.method,
@@ -77,26 +82,30 @@ export async function proxyShopkeeperRequest(
       if (options.bodyLimit && request.body) {
         const reader = request.body.getReader();
         // Fetch's AbortSignal cannot cancel an incoming request body. Apply the
-        // same deadline while buffering, before any upstream request is made.
+        // relevant deadlines while buffering, before any upstream request is made.
         const cancelReader = () => { void reader.cancel().catch(() => {}); };
-        signal.addEventListener("abort", cancelReader, { once: true });
+        bodySignal.addEventListener("abort", cancelReader, { once: true });
         const chunks: Uint8Array[] = [];
         let size = 0;
         try {
-          signal.throwIfAborted();
+          if (bodySignal.aborted) cancelReader();
+          bodySignal.throwIfAborted();
           while (true) {
             const { done, value } = await reader.read();
-            signal.throwIfAborted();
+            bodySignal.throwIfAborted();
             if (done) break;
             size += value.byteLength;
             if (size > options.bodyLimit) {
               cancelReader();
-              return Response.json({ error: "Request body too large" }, { status: 413 });
+              return Response.json(
+                { error: "Request body too large" },
+                { status: 413, headers: { Connection: "close" } }
+              );
             }
             chunks.push(value);
           }
         } finally {
-          signal.removeEventListener("abort", cancelReader);
+          bodySignal.removeEventListener("abort", cancelReader);
           reader.releaseLock();
         }
         init.body = Buffer.concat(chunks);
@@ -105,7 +114,13 @@ export async function proxyShopkeeperRequest(
       }
     }
   } catch {
-    if (deadline?.aborted) return timeoutResponse();
+    if (deadline?.aborted) return timeoutResponse(true);
+    if (bodyDeadline?.aborted) {
+      return Response.json(
+        { error: "Request body timed out" },
+        { status: 408, headers: { Connection: "close" } }
+      );
+    }
     return Response.json({ error: "Unable to read request body" }, { status: 400 });
   }
 
