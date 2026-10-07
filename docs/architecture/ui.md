@@ -201,7 +201,7 @@ The `/reports/scans/[id]/issues` document is rendered by Shopkeeper's Chromium P
 
 Two internal URLs are required for split deployments: UI `SHOPKEEPER_URL` points to the backend, while backend `REPORT_BASE_URL` points to the dashboard document renderer. Protecting the public UI with an external login gateway must not prevent Shopkeeper from loading its configured internal report URL. There is no application login/tenant boundary for ordinary dashboard/API routes; MCP's bearer key protects `/mcp`, not the whole dashboard. Operators must choose appropriate network/reverse-proxy access controls.
 
-The PDF concurrency limiter is per UI process and only applies through the Next PDF endpoint. CSV full mode streams occurrences in 5000-row batches; small CSV, PDF, and LLM use configured samples. `scan_report_data_cache` and its TTL setting currently have no runtime consumer. See [Performance And Caching](../performance.md) for the implemented bounds.
+The PDF concurrency limiter is per UI process and only applies through the Next PDF endpoint. CSV full mode streams occurrences in 5000-row batches; small CSV, PDF, and LLM use configured samples. Both issue CSV modes use the same cell formatter: formula-like text from scanned pages is prefixed with an apostrophe before CSV quoting, while numeric columns remain numeric. Stored issue evidence and non-CSV reports are unchanged. `scan_report_data_cache` and its TTL setting currently have no runtime consumer. See [Performance And Caching](../performance.md) for the implemented bounds.
 
 ### Visual Conventions
 

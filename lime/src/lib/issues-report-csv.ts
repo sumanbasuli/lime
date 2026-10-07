@@ -39,16 +39,22 @@ interface OccurrenceCursor {
 function formatCsvCell(value: CsvValue): string {
   const text = value == null ? "" : String(value);
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Spreadsheet applications can treat attacker-controlled text as a formula.
+  // Keep numeric columns numeric, but force formula-like text columns to text.
+  const safeText =
+    typeof value === "string" && /^[\s]*[=+\-@]/u.test(normalized)
+      ? `'${normalized}`
+      : normalized;
 
   if (
-    normalized.includes(",") ||
-    normalized.includes("\"") ||
-    normalized.includes("\n")
+    safeText.includes(",") ||
+    safeText.includes("\"") ||
+    safeText.includes("\n")
   ) {
-    return `"${normalized.replace(/"/g, "\"\"")}"`;
+    return `"${safeText.replace(/"/g, "\"\"")}"`;
   }
 
-  return normalized;
+  return safeText;
 }
 
 function formatCsvRow(values: CsvValue[]): string {

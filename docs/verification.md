@@ -89,6 +89,8 @@ The runner removes its test containers and volumes when it finishes, including a
 
 Add a focused test when a bug depends on a particular site, large dataset, or deployment environment. See [Performance](performance.md) for guidance on measuring larger scans.
 
+For issue CSV spreadsheet safety without starting the full stack, run `npm --prefix lime run test:issues-report-csv`. It exercises the small and streaming formats with formula-like scan evidence.
+
 ## MCP and AI client checks
 
 For a read-only check against an already enabled instance:
