@@ -14,6 +14,7 @@
     "docs:screenshots": "node scripts/capture-screenshots.mjs",
     "verify:browser": "node scripts/verify-browser.mjs",
     "test:api-code": "node --test scripts/verify-api-code.mjs",
+    "test:static-preview": "node --test scripts/serve-static.test.mjs",
     "verify:api-roadmap": "node scripts/verify-api-roadmap.mjs",
     "verify:marketing": "node scripts/verify-marketing.mjs",
     "test:mcp-errors": "node --test scripts/verify-full-mcp-errors.mjs",
