@@ -104,6 +104,8 @@ Source pages use GET and require returned HTML/XHTML for extraction. Other unche
 
 The submitted root origin is explicitly trusted and may resolve to a private address for local/staging workflows, including `host.docker.internal`. This is intentional functionality, not a blanket public-only policy. Protect job-creation routes and trust the people allowed to submit root origins.
 
+The root's DNS answers are checked before each new connection. Mixed public and non-public answers are blocked. Once a public answer is seen, that job may use other public addresses but cannot later dial a private or reserved one. Roots that stay non-public remain available for local/staging checks. This policy is scoped to one job and does not change the checks for off-origin links.
+
 For discovered external origins and redirects outside the root, the runner requires globally routable destinations and refuses private/reserved addresses. It resolves a destination before the request and pins the selected IP for dialing, rather than resolving a validated hostname again at connect time. Redirect hops are revalidated. Ambient HTTP proxy environment variables are not used to bypass the checker's network policy.
 
 These network rules apply to the HTTP link checker, not the accessibility scanner. They do not replace access control or rate limiting. A blocked destination means the request was prevented by policy; it does not establish whether the link works. Review the submitted origin and network configuration before changing that policy.

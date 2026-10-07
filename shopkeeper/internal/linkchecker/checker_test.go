@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -285,6 +286,211 @@ func TestExternalDNSRebindingAndMixedAnswersNeverDial(t *testing.T) {
 				t.Fatalf("rebind/mixed allowed: %v dialed=%v calls=%d", err, dialed, calls)
 			}
 		})
+	}
+}
+
+func TestPublicRootDNSRebindingNeverDialsPrivate(t *testing.T) {
+	for _, mode := range []string{"extracted link", "same-origin redirect"} {
+		t.Run(mode, func(t *testing.T) {
+			var phase atomic.Int32
+			var privateDialed atomic.Bool
+			public := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/" {
+					t.Errorf("unexpected public request %s", r.URL.Path)
+					return
+				}
+				w.Header().Set("Connection", "close") // Force a new DNS lookup for /next.
+				phase.Store(1)
+				if mode == "same-origin redirect" {
+					http.Redirect(w, r, "/next", http.StatusFound)
+					return
+				}
+				w.Header().Set("Content-Type", "text/html")
+				fmt.Fprint(w, `<a href="/next">Next</a>`)
+			}))
+			defer public.Close()
+
+			c := New()
+			c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+				if phase.Load() == 0 {
+					return []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}}, nil
+				}
+				return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+			})
+			c.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+				if address == "127.0.0.1:80" {
+					privateDialed.Store(true)
+					return nil, errors.New("private address was dialed")
+				}
+				if address != "8.8.8.8:80" {
+					return nil, fmt.Errorf("unexpected address %s", address)
+				}
+				return (&net.Dialer{}).DialContext(ctx, network, public.Listener.Addr().String())
+			}
+
+			if mode == "same-origin redirect" {
+				r, err := c.newRun(models.LinkCheck{URL: "http://root.example/"}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer r.client.Transport.(*http.Transport).CloseIdleConnections()
+				_, redirects, err := r.request(context.Background(), "http://root.example/", http.MethodGet)
+				if !errors.Is(err, errBlocked) || redirects != 1 || privateDialed.Load() {
+					t.Fatalf("redirect rebind: err=%v redirects=%d privateDialed=%v", err, redirects, privateDialed.Load())
+				}
+				return
+			}
+
+			job, items, err := c.Run(context.Background(), models.LinkCheck{URL: "http://root.example/", CheckType: "single", MaxPages: 1, Status: "running"}, nil)
+			if err != nil || job.Status != "completed" || job.Summary.Blocked != 1 || privateDialed.Load() {
+				t.Fatalf("extracted-link rebind: job=%+v items=%+v err=%v privateDialed=%v", job, items, err, privateDialed.Load())
+			}
+			for _, item := range items {
+				if item.TargetURL == "http://root.example/next" && item.Status == "blocked" {
+					return
+				}
+			}
+			t.Fatalf("rebinding target was not blocked: %+v", items)
+		})
+	}
+}
+
+func TestPrivateRootLinksAndRedirectsStillWork(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, `<a href="/jump">Jump</a>`)
+		case "/jump":
+			http.Redirect(w, r, "/done", http.StatusFound)
+		case "/done":
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	job, items, err := New().Run(context.Background(), models.LinkCheck{URL: server.URL, CheckType: "single", MaxPages: 1, Status: "running"}, nil)
+	if err != nil || job.Status != "completed" || job.Summary.Redirected != 1 || job.Summary.Blocked != 0 {
+		t.Fatalf("private root failed: job=%+v items=%+v err=%v", job, items, err)
+	}
+	for _, item := range items {
+		if item.TargetURL == server.URL+"/jump" && item.Status == "redirected" {
+			return
+		}
+	}
+	t.Fatalf("private redirect was not checked: %+v", items)
+}
+
+func TestRootInitialMixedAnswersBlockedBeforeDial(t *testing.T) {
+	c := New()
+	c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}, {IP: net.ParseIP("127.0.0.1")}}, nil
+	})
+	var dialed atomic.Bool
+	c.DialContext = func(context.Context, string, string) (net.Conn, error) {
+		dialed.Store(true)
+		return nil, errors.New("mixed address was dialed")
+	}
+	r, err := c.newRun(models.LinkCheck{URL: "http://root.example/"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.client.Transport.(*http.Transport).CloseIdleConnections()
+	_, _, err = r.request(context.Background(), "http://root.example/", http.MethodHead)
+	if !errors.Is(err, errBlocked) || dialed.Load() {
+		t.Fatalf("mixed root answer allowed: err=%v dialed=%v", err, dialed.Load())
+	}
+}
+
+func TestRootCannotReturnToPrivateAfterPublicAnswer(t *testing.T) {
+	public := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer public.Close()
+	var phase atomic.Int32
+	var firstPrivateDialed, laterPrivateDialed atomic.Bool
+	c := New()
+	c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+		address := "127.0.0.1"
+		switch phase.Load() {
+		case 1:
+			address = "8.8.8.8"
+		case 2:
+			address = "169.254.169.254"
+		}
+		return []net.IPAddr{{IP: net.ParseIP(address)}}, nil
+	})
+	c.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		switch address {
+		case "127.0.0.1:80":
+			firstPrivateDialed.Store(true)
+			return nil, errors.New("initial private connection unavailable")
+		case "8.8.8.8:80":
+			return (&net.Dialer{}).DialContext(ctx, network, public.Listener.Addr().String())
+		case "169.254.169.254:80":
+			laterPrivateDialed.Store(true)
+			return nil, errors.New("later private address was dialed")
+		default:
+			return nil, fmt.Errorf("unexpected address %s", address)
+		}
+	}
+	r, err := c.newRun(models.LinkCheck{URL: "http://root.example/"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.client.Transport.(*http.Transport).CloseIdleConnections()
+	_, _, err = r.request(context.Background(), "http://root.example/first", http.MethodGet)
+	if err == nil || errors.Is(err, errBlocked) || !firstPrivateDialed.Load() {
+		t.Fatalf("initial private root attempt: err=%v dialed=%v", err, firstPrivateDialed.Load())
+	}
+	phase.Store(1)
+	response, _, err := r.request(context.Background(), "http://root.example/second", http.MethodGet)
+	if err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("public root attempt: response=%v err=%v", response, err)
+	}
+	response.Body.Close()
+	phase.Store(2)
+	_, _, err = r.request(context.Background(), "http://root.example/third", http.MethodHead)
+	if !errors.Is(err, errBlocked) || laterPrivateDialed.Load() {
+		t.Fatalf("private return allowed: err=%v dialed=%v", err, laterPrivateDialed.Load())
+	}
+}
+
+func TestPublicRootMayChangeBetweenPublicAddresses(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Connection", "close")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	var phase atomic.Int32
+	c := New()
+	c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+		if phase.Load() == 0 {
+			return []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}}, nil
+		}
+		return []net.IPAddr{{IP: net.ParseIP("1.1.1.1")}}, nil
+	})
+	c.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		if address != "8.8.8.8:80" && address != "1.1.1.1:80" {
+			return nil, fmt.Errorf("unexpected address %s", address)
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+	}
+	r, err := c.newRun(models.LinkCheck{URL: "http://root.example/"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.client.Transport.(*http.Transport).CloseIdleConnections()
+	for _, target := range []string{"http://root.example/", "http://root.example/next"} {
+		response, _, err := r.request(context.Background(), target, http.MethodHead)
+		if err != nil || response.StatusCode != http.StatusOK {
+			t.Fatalf("public rotation failed: response=%v err=%v", response, err)
+		}
+		response.Body.Close()
+		phase.Store(1)
 	}
 }
 

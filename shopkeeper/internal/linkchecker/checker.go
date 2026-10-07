@@ -17,6 +17,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
@@ -35,7 +36,7 @@ const (
 	JobTimeout      = 10 * time.Minute
 )
 
-var errBlocked = errors.New("target is outside the entered origin and resolves to a non-public network")
+var errBlocked = errors.New("target resolves to a network address blocked by link-check policy")
 var errBudget = errors.New("HTTP request limit reached")
 var errRedirect = errors.New("redirect limit or loop reached")
 
@@ -115,15 +116,17 @@ func publicIP(ip net.IP) bool {
 }
 
 type run struct {
-	checker     *Checker
-	job         models.LinkCheck
-	root        *url.URL
-	client      *http.Client
-	requests    int
-	results     map[string]*models.LinkResult
-	order       []string
-	sourceCount int
-	sink        func(models.LinkCheck, []models.LinkResult) error
+	checker        *Checker
+	job            models.LinkCheck
+	root           *url.URL
+	rootDialMu     sync.Mutex
+	rootSeenPublic bool
+	client         *http.Client
+	requests       int
+	results        map[string]*models.LinkResult
+	order          []string
+	sourceCount    int
+	sink           func(models.LinkCheck, []models.LinkResult) error
 }
 
 func (c *Checker) newRun(job models.LinkCheck, sink func(models.LinkCheck, []models.LinkResult) error) (*run, error) {
@@ -135,6 +138,13 @@ func (c *Checker) newRun(job models.LinkCheck, sink func(models.LinkCheck, []mod
 	r := &run{checker: c, job: job, root: root, results: map[string]*models.LinkResult{}, sink: sink}
 	t := &http.Transport{Proxy: nil, MaxIdleConns: 8, MaxIdleConnsPerHost: 2, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: RequestTimeout, ResponseHeaderTimeout: RequestTimeout}
 	t.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		// A transport can start dials asynchronously. Serialize trusted-root dials
+		// so seeing a public answer makes the run public-only before another dial.
+		trusted, _ := ctx.Value(originKey{}).(bool)
+		if trusted {
+			r.rootDialMu.Lock()
+			defer r.rootDialMu.Unlock()
+		}
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			return nil, err
@@ -146,10 +156,24 @@ func (c *Checker) newRun(job models.LinkCheck, sink func(models.LinkCheck, []mod
 		if len(ips) == 0 {
 			return nil, errors.New("hostname has no addresses")
 		}
-		// The request URL is checked before every hop. Dialing validates again and
-		// pins the chosen IP, so a rebinding lookup cannot switch to a private IP.
-		trusted, _ := ctx.Value(originKey{}).(bool)
-		if !trusted {
+		if trusted {
+			public, nonPublic := false, false
+			for _, ip := range ips {
+				if publicIP(ip.IP) {
+					public = true
+				} else {
+					nonPublic = true
+				}
+			}
+			// A mixed answer cannot acquire private-root trust. Once any public
+			// answer is observed, a later non-public answer cannot regain it.
+			if (public && nonPublic) || (r.rootSeenPublic && nonPublic) {
+				return nil, errBlocked
+			}
+			if public {
+				r.rootSeenPublic = true
+			}
+		} else {
 			for _, ip := range ips {
 				if !publicIP(ip.IP) {
 					return nil, errBlocked
