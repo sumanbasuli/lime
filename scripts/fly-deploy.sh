@@ -34,6 +34,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHOPKEEPER_CFG="${ROOT_DIR}/deploy/fly/shopkeeper.fly.toml"
 UI_CFG="${ROOT_DIR}/deploy/fly/ui.fly.toml"
 
+if [[ "${DATABASE_URL:-}" == *$'\n'* || "${DATABASE_URL:-}" == *$'\r'* ]]; then
+  echo "DATABASE_URL must be a single-line value; URL-encode line breaks." >&2
+  exit 1
+fi
+
 if ! command -v flyctl >/dev/null 2>&1; then
   echo "flyctl not found. Install from https://fly.io/docs/flyctl/install/" >&2
   exit 1
@@ -75,6 +80,11 @@ secret_exists() {
   flyctl secrets list --app "${app}" --json 2>/dev/null | grep -q "\"Name\":\"${secret}\""
 }
 
+stage_database_url() {
+  local app="$1"
+  printf 'DATABASE_URL=%s\n' "${DATABASE_URL}" | flyctl secrets import --app "${app}" --stage
+}
+
 if [[ -z "${DATABASE_URL:-}" ]]; then
   if secret_exists "${SHOPKEEPER_APP}" "DATABASE_URL" && secret_exists "${UI_APP}" "DATABASE_URL"; then
     echo "==> DATABASE_URL is already present as a Fly secret on both apps"
@@ -109,10 +119,7 @@ fi
 
 if [[ -n "${DATABASE_URL:-}" ]]; then
   echo "==> Setting database secret on ${SHOPKEEPER_APP}"
-  flyctl secrets set \
-    --app "${SHOPKEEPER_APP}" \
-    --stage \
-    "DATABASE_URL=${DATABASE_URL}"
+  stage_database_url "${SHOPKEEPER_APP}"
 else
   echo "==> Keeping existing database secret on ${SHOPKEEPER_APP}"
 fi
@@ -123,7 +130,7 @@ ui_secrets=(
   "LIME_UPDATE_CHECK=${LIME_UPDATE_CHECK:-true}"
 )
 if [[ -n "${DATABASE_URL:-}" ]]; then
-  ui_secrets+=("DATABASE_URL=${DATABASE_URL}")
+  stage_database_url "${UI_APP}"
 fi
 flyctl secrets set \
   --app "${UI_APP}" \

@@ -44,11 +44,14 @@ npm --prefix docs-site ci
 | Go backend | `(cd shopkeeper && go test ./...)` |
 | Dashboard | `npm --prefix lime run lint` and `(cd lime && npx tsc --noEmit)` |
 | MCP routes and reports | `npm --prefix lime run test:mcp-transport` and `npm --prefix lime run test:mcp-dashboard-tools` |
+| Browser write boundary | `npm --prefix lime run test:ordinary-api-origin` and `(cd shopkeeper && go test ./internal/router)` |
+| Installer hot-reload ports | `node --test scripts/verify-start-dev.mjs` (Compose config check runs when the CLI is available; no daemon is used) |
 | MCP settings | `node --test lime/scripts/verify-mcp-settings-timeouts.mjs` |
 | Link-check client and presentation | `npm --prefix lime run test:link-check-api` and `npm --prefix lime run test:link-presentation` |
 | Update notices | `npm --prefix lime run test:update-notice` |
 | Agent configuration and skills | `npm --prefix agent test` |
 | Marketing and docs | `npm --prefix docs-site run lint` and `make docs-verify` |
+| Fly deployment helper | `bash scripts/verify-fly-deploy.sh` (fake `flyctl`; no Fly account or apps needed) |
 
 Run `make verify-app` for changes that affect product workflows. This builds and tests a complete LIME stack, including the dashboard, backend, database, MCP clients, and saved reports.
 

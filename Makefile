@@ -26,6 +26,12 @@ LIME_DOCS_PORT ?= 3001
 LIME_IMAGE_TAG ?= v$(VERSION)
 DOCKER_BUILD_FLAGS ?= --pull
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf 'docker-compose'; else printf 'docker compose'; fi)
+# The installer records this exact Compose file list in .env. Keep its
+# localhost-only port override last when switching that checkout to hot reload.
+DEV_COMPOSE_FILES := -f docker-compose.yml -f docker-compose.dev.yml
+ifeq ($(COMPOSE_FILE),docker-compose.yml:docker-compose.install.yml)
+DEV_COMPOSE_FILES += -f docker-compose.install.yml
+endif
 SHOPKEEPER_LDFLAGS := -s -w \
   -X github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo.Version=$(VERSION) \
   -X github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo.Commit=$(GIT_COMMIT)
@@ -77,8 +83,8 @@ start-ui: start-db
 	@echo "UI is starting on port $(LIME_UI_PORT)..."
 
 start-dev: start-db
-	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml up -d --build shopkeeper
-	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml up -d --build --force-recreate ui
+	$(DOCKER_COMPOSE) $(DEV_COMPOSE_FILES) up -d --build shopkeeper
+	$(DOCKER_COMPOSE) $(DEV_COMPOSE_FILES) up -d --build --force-recreate ui
 	@echo "Development services starting with NextJS hot reload..."
 	@echo "  DB:         bundled local PostgreSQL on localhost:5432"
 	@echo "  Shopkeeper: http://localhost:$(LIME_API_PORT)"

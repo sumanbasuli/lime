@@ -56,7 +56,7 @@ Local configuration:
 
 - the Docker services override `DATABASE_URL` and `SHOPKEEPER_URL` internally to use Docker service names (`db` and `shopkeeper`)
 - `make start-all` builds the production UI image and serves the built Next app
-- `make start-dev` applies `docker-compose.dev.yml` and runs the UI with NextJS hot reload
+- `make start-dev` applies `docker-compose.dev.yml` and runs the UI with NextJS hot reload. In a checkout created by the one-line installer, it also keeps the generated `docker-compose.install.yml` override last, so database, API, and UI ports stay bound to localhost. Manual source checkouts retain their existing Compose behavior. If running Compose commands by hand in an installer checkout, include the generated override last as well.
 - `make dev-ui` overrides `SHOPKEEPER_URL` to `http://localhost:<LIME_API_PORT>` for native Next development
 - Shopkeeper's `REPORT_BASE_URL=http://ui:3000` lets Chromium render PDFs from the dashboard over the Docker network
 

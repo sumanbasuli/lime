@@ -89,7 +89,7 @@ The attach step writes `DATABASE_URL` into each app's secrets. You can find the 
 
 ### External PostgreSQL (Neon, Supabase, Crunchy Bridge, etc.)
 
-Set `DATABASE_URL` in the environment before running the deploy script. The helper stores it on both apps as a secret.
+Set `DATABASE_URL` in the environment before running the deploy script. The helper imports it into both apps as a staged secret without placing the URL in a `flyctl` command argument. Use a single-line URL; URL-encode any line breaks.
 
 ## Routing
 
