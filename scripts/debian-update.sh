@@ -17,6 +17,7 @@
 
 set -euo pipefail
 export LC_ALL=C
+umask 077
 
 require_debian_family_linux() {
   local kernel
@@ -89,16 +90,23 @@ fi
 . "${ROOT_DIR}/scripts/debian-env.sh"
 DATABASE_URL="$(read_debian_database_url "${ENV_FILE}")"
 
-mkdir -p "${BACKUP_DIR}"
+# shellcheck source=scripts/backup-safety.sh
+. "${ROOT_DIR}/scripts/backup-safety.sh"
+ensure_private_backup_dir "${BACKUP_DIR}"
+BACKUP_DIR="${LIME_PRIVATE_BACKUP_DIR}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_FILE="${BACKUP_DIR}/lime-pre-${TAG}-${TIMESTAMP}.sql.gz"
+if [[ -e "${BACKUP_FILE}" || -L "${BACKUP_FILE}" ]]; then
+  echo "Backup already exists: ${BACKUP_FILE}; refusing to overwrite it." >&2
+  exit 1
+fi
 
 echo "==> Backing up database to ${BACKUP_FILE}"
 if ! command -v pg_dump >/dev/null 2>&1; then
   echo "pg_dump not found; install postgresql-client before running updates." >&2
   exit 1
 fi
-pg_dump --dbname="${DATABASE_URL}" | gzip -9 > "${BACKUP_FILE}"
+( set -C; pg_dump --dbname="${DATABASE_URL}" | gzip -9 > "${BACKUP_FILE}" )
 
 echo "==> Fetching tag ${TAG}"
 run_as_build_user git -C "${ROOT_DIR}" fetch --tags --prune

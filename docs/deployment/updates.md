@@ -15,15 +15,17 @@ An unpaused active scan is reset and rerun on backend startup, losing partial ev
 | Target | Command | Backup location |
 |--------|---------|-----------------|
 | Fly.io | `./scripts/fly-update.sh <tag>` | none automatic; use the database provider's backup mechanism |
-| Docker (published images, repository helper) | `./scripts/docker-update.sh <tag>` or `make update-release TAG=<tag>` | `dist/backups/lime-pre-<tag>-<timestamp>.sql.gz` if bundled DB or host `pg_dump` is available; otherwise prompts to continue without a backup |
+| Docker (published images, repository helper) | `./scripts/docker-update.sh <tag>` or `make update-release TAG=<tag>` | `dist/backups/lime-pre-<tag>-<timestamp>.sql.gz` by default if bundled DB or host `pg_dump` is available; set `LIME_BACKUP_DIR` to keep it outside the checkout. Otherwise prompts to continue without a backup. |
 | Docker (from source) | clean checkout + `make start-all`, described below | take a manual recovery set first |
 | Debian systemd | `sudo ./scripts/debian-update.sh <tag>` or `make debian-update TAG=<tag>` | `/var/backups/lime/lime-pre-<tag>-<timestamp>.sql.gz` |
 
-The Docker and Debian helpers back up PostgreSQL only. Back up screenshots and configuration separately, and arrange retention, encryption, and off-host storage. The Fly helper creates no backup. See [Backup And Restore](backup-restore.md); for Fly Managed Postgres, use the [backup command reference](https://fly.io/docs/flyctl/mpg-backup-create/) and confirm that the backup has completed.
+The Docker and Debian helpers back up PostgreSQL only. They create dumps with restrictive permissions and reject a backup directory with a different owner, group/other write bits, or detected ACLs. Keep parent directories protected too, and use a private destination if an existing shared path fails the check. Back up screenshots and configuration separately, and arrange retention, encryption, and off-host storage. The Fly helper creates no backup. See [Backup And Restore](backup-restore.md); for Fly Managed Postgres, use the [backup command reference](https://fly.io/docs/flyctl/mpg-backup-create/) and confirm that the backup has completed.
 
 ## Published Images
 
 `scripts/docker-update.sh` is available in a repository checkout, not in the extracted release archive. It resolves its default `.env`, Compose file, and backups relative to the repository root. To operate another deployment, explicitly select its env/Compose paths and keep the same Compose project identity; confirm the selected containers/volumes before running. Its `COMPOSE_FILE` accepts one file, not a list of overrides.
+
+Set `LIME_BACKUP_DIR` in the shell or the selected env file to put the automatic dump outside `dist/`; an explicit shell value takes precedence. The path must be writable by the updater account and protected from writes by other local users.
 
 The helper sources the env file as shell code, changes `LIME_IMAGE_TAG`, pulls images, runs a migration-only container, recreates Shopkeeper, polls its liveness endpoint, then recreates UI. Use only a trusted, shell-compatible env file. It does not validate UI readiness or undo the changed tag/schema if an intermediate step fails. Preserve the previous tag/config and inspect the failing step before retrying. Its interactive no-backup branch uses Bash 4+ syntax; do not rely on that branch with macOS's older system Bash.
 
@@ -44,7 +46,7 @@ Include your project name and override files consistently in every command. Do n
 
 ## Source Docker Checkout
 
-The existing `make update TAG=…` target is not recommended as unattended update automation: it builds `lime-shopkeeper:v…`/`lime-ui:v…`, while source Compose has `build:` entries without those image names, and the target then starts services without rebuilding the Compose-selected images. Its `backup-db` pipeline also does not fail on a `pg_dump` error if gzip succeeds. Do not treat its success message as proof of an update or valid backup.
+The existing `make update TAG=…` target is not recommended as unattended update automation: it builds `lime-shopkeeper:v…`/`lime-ui:v…`, while source Compose has `build:` entries without those image names, and the target then starts services without rebuilding the Compose-selected images. The `backup-db` step now stops on a dump failure, but a successful database dump alone is not a complete recovery set. Do not treat the update message as proof that the intended images are running or screenshots are backed up.
 
 Instead, record a clean checkout (`git status --short`), pause/finish scans, take the recovery set, stop the application services without removing volumes, switch to the intended existing release tag, and rebuild with `make start-all`. Review tag-specific configuration changes before startup. Shopkeeper applies migrations on boot. Keep local/uncommitted work safe; do not reset or overwrite it as part of an update.
 

@@ -203,12 +203,19 @@ verify-app: verify-debian-env
 # ---- Backup + update ----
 
 backup-db:
-	@mkdir -p $(BACKUP_DIR)
-	@ts=$$(date +%Y%m%d-%H%M%S); \
-	backup_file=$(BACKUP_DIR)/lime-manual-$$ts.sql.gz; \
-	echo "Dumping bundled db service to $$backup_file"; \
-	$(DOCKER_COMPOSE) exec -T db pg_dump -U $${POSTGRES_USER:-lime} $${POSTGRES_DB:-lime_db} | gzip -9 > $$backup_file; \
-	echo "Backup written to $$backup_file"
+	@bash -euo pipefail -c '\
+		source ./scripts/backup-safety.sh; \
+		ensure_private_backup_dir "$(BACKUP_DIR)"; \
+		ts=$$(date +%Y%m%d-%H%M%S); \
+		backup_file="$$LIME_PRIVATE_BACKUP_DIR/lime-manual-$$ts.sql.gz"; \
+		if [[ -e "$$backup_file" || -L "$$backup_file" ]]; then \
+			echo "Backup already exists: $$backup_file; refusing to overwrite it." >&2; exit 1; \
+		fi; \
+		echo "Dumping bundled db service to $$backup_file"; \
+		set -C; \
+		$(DOCKER_COMPOSE) exec -T db pg_dump -U "$${POSTGRES_USER:-lime}" "$${POSTGRES_DB:-lime_db}" | gzip -9 > "$$backup_file"; \
+		echo "Backup written to $$backup_file" \
+	'
 
 # `make update TAG=v0.2.0` — rolling update for a local dev Docker stack.
 # Rebuilds images from source and recreates services one at a time.

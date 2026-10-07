@@ -56,7 +56,7 @@ docker compose start shopkeeper ui
 
 Also copy any deployment-specific override files and record the actual running images/commit; `VERSION` alone is not proof that a locally modified image matches a release. The dump uses the container's real bootstrap user/database, not hardcoded credentials. Keep stderr and inspect warnings. A failed command leaves a partial set that must not be labeled a successful backup; if the script exits before restart, recover service availability deliberately after inspecting the error.
 
-`make backup-db` creates a SQL gzip under `dist/backups`, but its current pipeline can report success if `pg_dump` fails and gzip succeeds. Use the `pipefail` procedure above and a restore rehearsal instead of trusting only a filename or success message. `gzip -t` checks compression integrity, not completeness of the SQL data.
+`make backup-db` creates a SQL gzip under `dist/backups` with restrictive permissions and now fails if `pg_dump` or compression fails. It rejects backup directories with a different owner, group/other write bits, or detected ACLs. Keep the entire path protected from other users' changes, including parent directories; choose a private location if a shared path fails. The command still backs up only the database, not screenshots. Use the complete procedure above and a restore rehearsal instead of trusting only a filename or success message. `gzip -t` checks compression integrity, not completeness of the SQL data. Older backups may retain their original permissions; check and restrict access to them separately.
 
 ## External Database And Native/Fly Storage
 

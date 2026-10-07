@@ -15,9 +15,11 @@
 # Environment:
 #   COMPOSE_FILE  - compose file to use (default docker-compose.release.yml)
 #   ENV_FILE      - env file consumed by compose (default .env)
+#   LIME_BACKUP_DIR - backup destination (default dist/backups)
 
 set -euo pipefail
 export LC_ALL=C
+umask 077
 
 if [[ $# -lt 1 ]]; then
   echo "usage: $0 <version-tag>" >&2
@@ -28,7 +30,7 @@ TAG="$1"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.release.yml}"
 ENV_FILE="${ENV_FILE:-.env}"
-BACKUP_DIR="${ROOT_DIR}/dist/backups"
+BACKUP_DIR_OVERRIDE="${LIME_BACKUP_DIR:-}"
 
 cd "${ROOT_DIR}"
 
@@ -60,21 +62,29 @@ set -a
 # shellcheck disable=SC1090
 . "${ENV_FILE}"
 set +a
+BACKUP_DIR="${BACKUP_DIR_OVERRIDE:-${LIME_BACKUP_DIR:-${ROOT_DIR}/dist/backups}}"
 OLD_TAG="${LIME_IMAGE_TAG:-unknown}"
 echo "    current LIME_IMAGE_TAG=${OLD_TAG}"
 echo "    target LIME_IMAGE_TAG=${TAG}"
 
 echo "==> Backing up database"
-mkdir -p "${BACKUP_DIR}"
+# shellcheck source=scripts/backup-safety.sh
+. "${ROOT_DIR}/scripts/backup-safety.sh"
+ensure_private_backup_dir "${BACKUP_DIR}"
+BACKUP_DIR="${LIME_PRIVATE_BACKUP_DIR}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_FILE="${BACKUP_DIR}/lime-pre-${TAG}-${TIMESTAMP}.sql.gz"
+if [[ -e "${BACKUP_FILE}" || -L "${BACKUP_FILE}" ]]; then
+  echo "Backup already exists: ${BACKUP_FILE}; refusing to overwrite it." >&2
+  exit 1
+fi
 
 if compose ps --services 2>/dev/null | grep -qx "db"; then
   echo "    dumping bundled db service"
-  compose exec -T db pg_dump -U "${POSTGRES_USER:-lime}" "${POSTGRES_DB:-lime_db}" | gzip -9 > "${BACKUP_FILE}"
+  ( set -C; compose exec -T db pg_dump -U "${POSTGRES_USER:-lime}" "${POSTGRES_DB:-lime_db}" | gzip -9 > "${BACKUP_FILE}" )
 elif [[ -n "${DATABASE_URL:-}" ]] && command -v pg_dump >/dev/null 2>&1; then
   echo "    dumping external database via host pg_dump"
-  pg_dump "${DATABASE_URL}" | gzip -9 > "${BACKUP_FILE}"
+  ( set -C; pg_dump "${DATABASE_URL}" | gzip -9 > "${BACKUP_FILE}" )
 else
   echo "    no bundled db and pg_dump unavailable on host; skipping automatic backup"
   echo "    (take a manual backup of your DATABASE_URL target before continuing)"
