@@ -32,6 +32,7 @@ async function loadSource(path, globals = {}, dependencies = {}) {
 }
 
 const loadProxy = (globals) => loadSource("../src/lib/shopkeeper-proxy.ts", globals);
+const originHelper = await loadSource("../src/lib/ordinary-api-origin.ts");
 function proxyRequest(body, { method = "POST", signal = new AbortController().signal, headers = {} } = {}) {
   return {
     nextUrl: new URL("http://dashboard.invalid:3000/mcp?probe=1"), method,
@@ -48,7 +49,7 @@ test("catch-all API route forwards an ordinary scan body", async () => {
     assert.equal(init.body.toString(), body);
     return new Response(null, { status: 201 });
   } });
-  const route = await loadSource("../src/app/api/[...path]/route.ts", {}, { "@/lib/shopkeeper-proxy": proxy });
+  const route = await loadSource("../src/app/api/[...path]/route.ts", {}, { "@/lib/shopkeeper-proxy": proxy, "@/lib/ordinary-api-origin": originHelper });
   const request = proxyRequest(body);
   request.nextUrl = new URL("http://dashboard.invalid:3000/api/scans");
   assert.equal((await route.POST(request)).status, 201);
@@ -64,7 +65,7 @@ test("catch-all API route rejects an oversized chunked body before upstream fetc
     cancel() { cancelled = true; },
   });
   const proxy = await loadProxy({ fetch: () => assert.fail("Must not fetch oversized body") });
-  const route = await loadSource("../src/app/api/[...path]/route.ts", {}, { "@/lib/shopkeeper-proxy": proxy });
+  const route = await loadSource("../src/app/api/[...path]/route.ts", {}, { "@/lib/shopkeeper-proxy": proxy, "@/lib/ordinary-api-origin": originHelper });
   const request = proxyRequest(body);
   request.nextUrl = new URL("http://dashboard.invalid:3000/api/scans");
   assert.equal(request.headers.get("Content-Length"), null);

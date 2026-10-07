@@ -47,6 +47,7 @@ func Setup(
 
 	// Routes
 	api := chi.NewRouter()
+	api.Use(rejectCrossOriginWrites)
 	func(r chi.Router) {
 		r.Get("/health", h.HealthCheck)
 		r.Get("/version", h.Version)

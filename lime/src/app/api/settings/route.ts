@@ -3,6 +3,7 @@ import {
   getSystemSettings,
   saveSystemSettings,
 } from "@/lib/report-settings";
+import { rejectCrossOriginWrite } from "@/lib/ordinary-api-origin";
 import type {
   IntegrationSettings,
   PerformanceSettings,
@@ -130,6 +131,8 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
+  const rejected = rejectCrossOriginWrite(request);
+  if (rejected) return rejected;
   const payload = parseSettingsPayload(await request.json().catch(() => null));
 
   if (payload === null) {
@@ -144,6 +147,8 @@ export async function PUT(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const rejected = rejectCrossOriginWrite(request);
+  if (rejected) return rejected;
   const payload = (await request.json().catch(() => ({}))) as {
     action?: string;
   };

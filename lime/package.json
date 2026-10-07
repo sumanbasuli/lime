@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:mcp-transport": "node --test scripts/verify-mcp-transport.mjs",
+    "test:ordinary-api-origin": "node --test scripts/verify-ordinary-api-origin.mjs",
     "test:mcp-dashboard-tools": "node --test scripts/verify-mcp-dashboard-tools.mjs",
     "test:mcp-client-config": "node --test scripts/verify-mcp-client-config.mjs",
     "test:update-notice": "node --test scripts/verify-update-notice.mjs",

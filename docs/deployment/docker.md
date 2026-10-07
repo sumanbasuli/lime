@@ -25,6 +25,8 @@ Use one Shopkeeper per database. Its active jobs, pause cancellation, and restar
 
 The source stack publishes PostgreSQL on port 5432, Shopkeeper on 8080, and the UI on 3000. The release stack also publishes the backend and UI. Remove or restrict unnecessary port mappings, and put the UI behind a reverse proxy with TLS and access control. The dashboard and ordinary API routes have no built-in login; the MCP key protects only MCP.
 
+Browser write requests to the ordinary API must come from the dashboard's origin. The existing trusted `http://localhost:<port>` development exception for direct Shopkeeper calls remains, as do non-browser clients without an `Origin` header; other cross-origin browser writes are rejected. A public reverse proxy must preserve the browser's `Origin` and `Host` headers and set `X-Forwarded-Proto` to the public request scheme, as in the [Debian nginx example](../../deploy/debian/nginx.conf.example), so same-origin dashboard writes are recognized. This browser protection does not replace the access control above.
+
 Replace development credentials for nonlocal use, protect `.env`, and ensure both services reach the same PostgreSQL database. A production database URL's TLS requirements depend on its provider; the local `sslmode=disable` example is not a recommendation for a remote database.
 
 ## Local Docker Stack

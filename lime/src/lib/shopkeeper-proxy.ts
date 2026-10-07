@@ -28,7 +28,7 @@ function getShopkeeperUrl(): URL {
 
 export async function proxyShopkeeperRequest(
   request: NextRequest,
-  options: { bodyLimit?: number; timeoutMs?: number } = {}
+  options: { bodyLimit?: number; timeoutMs?: number; omitBrowserOrigin?: boolean } = {}
 ): Promise<Response> {
   let targetUrl: URL;
 
@@ -51,6 +51,12 @@ export async function proxyShopkeeperRequest(
   headers.delete("host");
   headers.delete("connection");
   headers.delete("content-length");
+  // Only ordinary API routes opt in after checking the browser's Origin.
+  // MCP keeps forwarding Origin to its separate bearer/Origin boundary.
+  if (options.omitBrowserOrigin) {
+    headers.delete("origin");
+    headers.delete("sec-fetch-site");
+  }
 
   const deadline = options.timeoutMs ? AbortSignal.timeout(options.timeoutMs) : undefined;
   const signal = deadline ? AbortSignal.any([request.signal, deadline]) : request.signal;
