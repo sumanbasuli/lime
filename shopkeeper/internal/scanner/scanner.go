@@ -3,7 +3,6 @@ package scanner
 import (
 	"context"
 	"errors"
-	"log"
 	"os"
 	"sync"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/profiler"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
+	log "github.com/sumanbasuli/lime/shopkeeper/internal/safelog"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/screenshots"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/sweetner"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"

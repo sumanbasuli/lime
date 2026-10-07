@@ -8,7 +8,6 @@ import (
 	"image"
 	"image/draw"
 	"image/png"
-	"log"
 	"math"
 	"path/filepath"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
+	log "github.com/sumanbasuli/lime/shopkeeper/internal/safelog"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/screenshots"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
@@ -273,7 +273,7 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 			return result
 		}
 
-		result.Error = fmt.Sprintf("failed to navigate to %s: %v", page.URL, err)
+		result.Error = log.Text(fmt.Sprintf("failed to navigate to %s: %v", page.URL, err))
 		log.Printf("Juicer: %s", result.Error)
 		return result
 	}
@@ -297,14 +297,14 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 			return result
 		}
 
-		result.Error = fmt.Sprintf("failed to inject axe-core on %s: %v", page.URL, err)
+		result.Error = log.Text(fmt.Sprintf("failed to inject axe-core on %s: %v", page.URL, err))
 		log.Printf("Juicer: %s", result.Error)
 		return result
 	}
 
 	axeRunScript, err := lighthouseAxeRunScript()
 	if err != nil {
-		result.Error = fmt.Sprintf("failed to prepare accessibility script for %s: %v", page.URL, err)
+		result.Error = log.Text(fmt.Sprintf("failed to prepare accessibility script for %s: %v", page.URL, err))
 		log.Printf("Juicer: %s", result.Error)
 		return result
 	}
@@ -322,7 +322,7 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 			return result
 		}
 
-		result.Error = fmt.Sprintf("failed to run axe-core on %s: %v", page.URL, err)
+		result.Error = log.Text(fmt.Sprintf("failed to run axe-core on %s: %v", page.URL, err))
 		log.Printf("Juicer: %s", result.Error)
 		return result
 	}
@@ -330,7 +330,7 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	// Parse axe results
 	var axeRes axeResult
 	if err := json.Unmarshal([]byte(axeResultJSON), &axeRes); err != nil {
-		result.Error = fmt.Sprintf("failed to parse axe results for %s: %v", page.URL, err)
+		result.Error = log.Text(fmt.Sprintf("failed to parse axe results for %s: %v", page.URL, err))
 		log.Printf("Juicer: %s", result.Error)
 		return result
 	}

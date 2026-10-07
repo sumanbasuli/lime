@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -14,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	log "github.com/sumanbasuli/lime/shopkeeper/internal/safelog"
 )
 
 // sitemapIndex represents a <sitemapindex> XML element.
@@ -190,7 +191,7 @@ func (d *discovery) checkURL(rawURL string) error {
 func Discover(ctx context.Context, sitemapURL string) ([]string, error) {
 	d, err := newDiscovery(sitemapURL)
 	if err != nil {
-		return nil, err
+		return nil, log.Error(err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, maxDiscoveryDuration)
 	defer cancel()
@@ -199,12 +200,12 @@ func Discover(ctx context.Context, sitemapURL string) ([]string, error) {
 	var result []string
 
 	if err := d.discoverRecursive(ctx, sitemapURL, seen, &result, 0); err != nil {
-		return nil, err
+		return nil, log.Error(err)
 	}
 
 	eligibleURLs, summary, err := d.filterEligibleURLs(ctx, result)
 	if err != nil {
-		return nil, err
+		return nil, log.Error(err)
 	}
 
 	log.Printf(

@@ -106,6 +106,12 @@ The `scanner.Scanner` implements this interface. The handler launches scans asyn
 
 The async execution is backend-owned. Browser navigation only affects UI polling, not the actual scan job.
 
+### Credential-bearing target URLs
+
+Ordinary accessibility scans can currently use HTTP URL userinfo. The profiler passes it to Go's HTTP client, which can use it for Basic authentication; rescans reuse the saved target. New scan-pipeline diagnostics remove URL usernames and passwords before writing process logs, and returned profiler/Juicer error messages are redacted. This change does not scrub historical logs or alter network requests and saved scan data.
+
+This is only partial hardening. Existing and new credential-bearing targets can still appear in scan API and MCP responses, dashboard pages, report exports, and stored URL rows. Restrict dashboard, API, MCP, log, database, and export access accordingly; do not treat this log change as protection for those outputs. A complete fix needs a separate output-redaction design that preserves authenticated scans and rescans.
+
 ### Progress Ordering
 
 Juicer audits pages concurrently, but its synchronized per-run progress callback serializes updates and skips any older count arriving after a newer one. This keeps `scanned_urls` monotonic within a run: a slower callback for page 7 must not overwrite the saved count after page 8 finishes. Resumes and failed-page retries add the persisted processed-page count to the new callback count. The verification suite checks final coverage against the stored scan counter; callback ordering also has a deterministic backend regression check.

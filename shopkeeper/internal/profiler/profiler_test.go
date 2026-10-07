@@ -1,10 +1,12 @@
 package profiler
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -14,6 +16,57 @@ import (
 	"testing"
 	"time"
 )
+
+func TestDiscoverKeepsAuthenticatedSitemapFetchButRedactsDiagnostics(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/protected.xml":
+			username, password, ok := r.BasicAuth()
+			if !ok || username != "alice" || password != "s@cret" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			fmt.Fprintf(w, `<urlset><url><loc>%s/page</loc></url></urlset>`, serverURL(t, r))
+		case "/page":
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	var output bytes.Buffer
+	previous := log.Writer()
+	log.SetOutput(&output)
+	defer log.SetOutput(previous)
+
+	withTestHTTPClient(t, server.Client(), func() {
+		target := strings.Replace(server.URL, "://", "://alice:s%40cret@", 1) + "/protected.xml"
+		urls, err := Discover(context.Background(), target)
+		if err != nil {
+			t.Fatalf("authenticated sitemap fetch failed: %v", err)
+		}
+		if !slices.Equal(urls, []string{server.URL + "/page"}) {
+			t.Fatalf("unexpected discovered URLs: %v", urls)
+		}
+
+		badTarget := strings.Replace(server.URL, "://", "://eve:wrong@", 1) + "/protected.xml"
+		_, err = Discover(context.Background(), badTarget)
+		if err == nil || !strings.Contains(err.Error(), "HTTP 401") {
+			t.Fatalf("expected HTTP 401 from wrong credentials, got %v", err)
+		}
+		if strings.Contains(err.Error(), "eve") || strings.Contains(err.Error(), "wrong") {
+			t.Fatalf("credentials leaked in error: %v", err)
+		}
+	})
+
+	if strings.Contains(output.String(), "alice") || strings.Contains(output.String(), "s%40cret") || strings.Contains(output.String(), "eve") {
+		t.Fatalf("credentials leaked in profiler logs: %q", output.String())
+	}
+	if !strings.Contains(output.String(), server.URL+"/protected.xml") {
+		t.Fatalf("redacted target missing from profiler logs: %q", output.String())
+	}
+}
 
 func TestDiscoverRetriesTransientNestedSitemapFailures(t *testing.T) {
 	var mu sync.Mutex
