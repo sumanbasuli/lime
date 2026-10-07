@@ -5,13 +5,36 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/screenshots"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
+
+func TestServePrivateScreenshot(t *testing.T) {
+	t.Setenv("SHOPKEEPER_SCREENSHOT_DIR", filepath.Join(t.TempDir(), "screenshots"))
+	const scanID = "scan-1"
+	const filename = "page.png"
+	const image = "screenshot image bytes"
+	if err := screenshots.EnsureScanDir(scanID); err != nil {
+		t.Fatal(err)
+	}
+	if err := screenshots.WriteFile(screenshots.FilePath(scanID, filename), []byte(image)); err != nil {
+		t.Fatal(err)
+	}
+
+	router := chi.NewRouter()
+	router.Get("/api/screenshots/{scanId}/{filename}", (&Handler{}).ServeScreenshot)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/screenshots/"+scanID+"/"+filename, nil))
+	if response.Code != http.StatusOK || response.Body.String() != image {
+		t.Fatalf("private screenshot response = %d %q", response.Code, response.Body.String())
+	}
+}
 
 type stubRepo struct {
 	retryFailedURLs func(ctx context.Context, id string) (*models.Scan, int, error)

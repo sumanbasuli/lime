@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 User=lime
 Group=lime
+UMask=0077
 WorkingDirectory=/opt/lime/shopkeeper
 # EnvironmentFile must define DATABASE_URL and optionally SHOPKEEPER_PORT,
 # ACT_RULES_PATH, AXE_BUNDLE_PATH, CHROMIUM_PATH.

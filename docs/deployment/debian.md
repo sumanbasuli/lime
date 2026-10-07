@@ -87,6 +87,8 @@ The generated systemd units are rewritten to match the configured install and co
 
 This is an in-place install: artifact directories are replaced (screenshots are preserved), and service units are overwritten. Existing env file contents are preserved, while regular env files are changed to `root:lime` ownership and mode `0640`. The installer also ensures the screenshot-root setting exists and refreshes `LIME_VERSION`. It enables services but does not start them or run a readiness check. Back up before rerunning it on a live deployment.
 
+The default screenshot directory is owned by `lime` and restricted to that account (`0700`) on first install and every reinstall. New per-scan directories and images use `0700` and `0600`. Reinstalling protects older captures beneath the default directory without deleting or renaming them, although it does not change each older file's mode. If `SHOPKEEPER_SCREENSHOT_DIR` points elsewhere, secure that directory and its existing contents separately; the installer does not alter a custom path. Shopkeeper serves screenshots through the same API paths after this change, so keep access to the ordinary API restricted as described below.
+
 ## Configure
 
 Edit the env files:

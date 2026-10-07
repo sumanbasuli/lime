@@ -175,15 +175,17 @@ fi
 echo "==> Ensuring directories"
 install -d -o "${LIME_USER}" -g "${LIME_USER}" -m 0755 \
   "${INSTALL_ROOT}/shopkeeper" \
-  "${INSTALL_ROOT}/shopkeeper/screenshots" \
   "${INSTALL_ROOT}/ui"
+install -d -o "${LIME_USER}" -g "${LIME_USER}" -m 0700 \
+  "${INSTALL_ROOT}/shopkeeper/screenshots"
 install -d -o root -g "${LIME_USER}" -m 0750 "${CONFIG_ROOT}"
 
 echo "==> Installing Shopkeeper artifacts"
 copy_tree "${DIST_DIR}/shopkeeper" "${INSTALL_ROOT}/shopkeeper" \
   --exclude screenshots
+install -d -o "${LIME_USER}" -g "${LIME_USER}" -m 0700 \
+  "${INSTALL_ROOT}/shopkeeper/screenshots"
 install -d -o "${LIME_USER}" -g "${LIME_USER}" -m 0755 \
-  "${INSTALL_ROOT}/shopkeeper/screenshots" \
   "${INSTALL_ROOT}/shopkeeper/data"
 copy_tree "${ROOT_DIR}/data" "${INSTALL_ROOT}/shopkeeper/data"
 chown -R "${LIME_USER}:${LIME_USER}" "${INSTALL_ROOT}/shopkeeper"

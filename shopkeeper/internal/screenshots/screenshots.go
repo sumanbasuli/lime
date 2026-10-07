@@ -23,6 +23,16 @@ func ScanDir(scanID string) string {
 	return filepath.Join(BaseDir(), scanID)
 }
 
+// EnsureScanDir creates a scan's screenshot directory for the Shopkeeper process only.
+func EnsureScanDir(scanID string) error {
+	return os.MkdirAll(ScanDir(scanID), 0700)
+}
+
+// WriteFile creates new screenshot images with service-only permissions.
+func WriteFile(path string, data []byte) error {
+	return os.WriteFile(path, data, 0600)
+}
+
 func FilePath(scanID, filename string) string {
 	return filepath.Join(ScanDir(scanID), filename)
 }

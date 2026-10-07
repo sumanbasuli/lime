@@ -10,7 +10,6 @@ import (
 	"image/png"
 	"log"
 	"math"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -182,7 +181,7 @@ func ScanPages(ctx context.Context, allocCtx context.Context, pages []PageInput,
 
 	// Create screenshot directory for this scan
 	screenshotDir := screenshots.ScanDir(scanID)
-	if err := os.MkdirAll(screenshotDir, 0755); err != nil {
+	if err := screenshots.EnsureScanDir(scanID); err != nil {
 		log.Printf("Juicer: warning: could not create screenshot directory %s: %v", screenshotDir, err)
 	}
 
@@ -376,7 +375,7 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	} else if len(screenshot) > 0 {
 		filename := page.URLID + ".png"
 		screenshotPath := filepath.Join(screenshotDir, filename)
-		if err := os.WriteFile(screenshotPath, screenshot, 0644); err != nil {
+		if err := screenshots.WriteFile(screenshotPath, screenshot); err != nil {
 			log.Printf("Juicer: warning: failed to save screenshot for %s: %v", page.URL, err)
 		} else {
 			result.ScreenshotPath = screenshots.StoredPath(scanID, filename)
@@ -435,13 +434,13 @@ func captureViolationNodeScreenshots(ctx context.Context, violations []Violation
 			if len(elemScreenshot) >= elementScreenshotMinByteSize {
 				filename := fmt.Sprintf("%s_focus_%d.png", page.URLID, nodeIdx)
 				elemPath := filepath.Join(screenshotDir, filename)
-				if err := os.WriteFile(elemPath, elemScreenshot, 0644); err != nil {
+				if err := screenshots.WriteFile(elemPath, elemScreenshot); err != nil {
 					log.Printf("Juicer: warning: failed to save element screenshot: %v", err)
 				} else {
 					node.ElementScreenshotPath = screenshots.StoredPath(scanID, filename)
 
 					if len(previewScreenshot) >= elementScreenshotMinByteSize {
-						if err := os.WriteFile(focusedPreviewPath(elemPath), previewScreenshot, 0644); err != nil {
+						if err := screenshots.WriteFile(focusedPreviewPath(elemPath), previewScreenshot); err != nil {
 							log.Printf("Juicer: warning: failed to save preview screenshot: %v", err)
 						}
 					}
