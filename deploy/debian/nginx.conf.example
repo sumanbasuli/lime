@@ -1,4 +1,5 @@
 # Nginx reverse proxy example for a Debian systemd deployment.
+# Use nginx 1.30.6+ or a maintained vendor build with equivalent security backports.
 #
 # Replace lime.example.com with your host and run certbot/caddy/your TLS
 # manager of choice after validating the proxy.
@@ -7,12 +8,21 @@ server {
     listen 80;
     server_name lime.example.com;
 
+    # This example serves one hostname. Replace it in server_name and both checks.
+    # Keep both checks in the HTTPS server that proxies LIME after enabling TLS.
+    if ($http_host !~* "^lime\\.example\\.com(:[0-9]+)?$") {
+        return 444;
+    }
+    if ($host !~* "^lime\\.example\\.com$") {
+        return 444;
+    }
+
     client_max_body_size 25m;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;

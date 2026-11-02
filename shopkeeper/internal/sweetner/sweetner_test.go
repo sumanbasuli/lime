@@ -1,10 +1,94 @@
 package sweetner
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/juicer"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 )
+
+type testIssueStore struct {
+	issueErr           error
+	occurrenceErr      error
+	issuesCreated      int
+	occurrencesCreated int
+}
+
+func (s *testIssueStore) GetScanIssueMap(context.Context, string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (s *testIssueStore) GetInheritedFalsePositiveStates(context.Context, string, []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
+func (s *testIssueStore) CreateURLAudits(context.Context, []models.URLAudit) error {
+	return nil
+}
+
+func (s *testIssueStore) CreateURLAuditOccurrences(context.Context, []models.URLAuditOccurrence) error {
+	return nil
+}
+
+func (s *testIssueStore) CreateIssue(_ context.Context, _, violationType, _, _ string, _ *string, _ bool) (*models.Issue, error) {
+	s.issuesCreated++
+	if s.issueErr != nil {
+		return nil, s.issueErr
+	}
+	return &models.Issue{ID: violationType}, nil
+}
+
+func (s *testIssueStore) CreateIssueOccurrence(context.Context, string, string, *string, *string, *string, *string) error {
+	s.occurrencesCreated++
+	return s.occurrenceErr
+}
+
+func TestProcessFailsWhenIssueEvidenceCannotBeSaved(t *testing.T) {
+	failure := errors.New("database write failed")
+	tests := []struct {
+		name                string
+		violation           juicer.Violation
+		issueErr            error
+		occurrenceErr       error
+		wantIssueCalls      int
+		wantOccurrenceCalls int
+	}{
+		{"issue insert", juicer.Violation{ID: "rule-1", Nodes: []juicer.Node{{HTML: "<button>Go</button>"}}}, failure, nil, 1, 0},
+		{"node occurrence insert", juicer.Violation{ID: "rule-1", Nodes: []juicer.Node{{HTML: "<button>Go</button>"}}}, nil, failure, 1, 1},
+		{"fallback occurrence insert", juicer.Violation{ID: "rule-1"}, nil, failure, 1, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &testIssueStore{issueErr: tc.issueErr, occurrenceErr: tc.occurrenceErr}
+			err := processWithStore(context.Background(), store, "scan-1", []juicer.RawResult{{URLID: "url-1", Violations: []juicer.Violation{tc.violation}}})
+			if !errors.Is(err, failure) {
+				t.Fatalf("expected persistence failure, got %v", err)
+			}
+			if store.issuesCreated != tc.wantIssueCalls || store.occurrencesCreated != tc.wantOccurrenceCalls {
+				t.Fatalf("issue/occurrence calls = %d/%d, want %d/%d", store.issuesCreated, store.occurrencesCreated, tc.wantIssueCalls, tc.wantOccurrenceCalls)
+			}
+		})
+	}
+}
+
+func TestProcessStillSavesAllIssueEvidenceOnSuccess(t *testing.T) {
+	store := &testIssueStore{}
+	err := processWithStore(context.Background(), store, "scan-1", []juicer.RawResult{{
+		URLID: "url-1",
+		Violations: []juicer.Violation{
+			{ID: "rule-1", Nodes: []juicer.Node{{HTML: "<button>A</button>"}, {HTML: "<button>B</button>"}}},
+			{ID: "rule-2"},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.issuesCreated != 2 || store.occurrencesCreated != 3 {
+		t.Fatalf("issue/occurrence calls = %d/%d, want 2/3", store.issuesCreated, store.occurrencesCreated)
+	}
+}
 
 func TestBuildURLAuditsCapturesAllAuditOutcomeBuckets(t *testing.T) {
 	audits := buildURLAudits(juicer.RawResult{

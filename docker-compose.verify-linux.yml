@@ -1,0 +1,7 @@
+# The verification fixture runs on the Linux host while Shopkeeper runs in a
+# container. Docker Engine needs an explicit host-gateway alias; Docker Desktop
+# supplies host.docker.internal itself and does not use this override.
+services:
+  shopkeeper:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

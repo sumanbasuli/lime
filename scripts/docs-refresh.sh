@@ -32,6 +32,11 @@ validate_port() {
 for required_command in curl node npm docker; do
   require_command "${required_command}"
 done
+source "${ROOT_DIR}/scripts/docs-db-credential.sh"
+if [ "${LIME_DOCS_KEEP_STACK:-false}" = "true" ] && [ -z "${LIME_DOCS_DB_PASSWORD:-}" ]; then
+  echo "Set LIME_DOCS_DB_PASSWORD when keeping the docs stack so you can access its database later." >&2
+  exit 1
+fi
 validate_port "${API_PORT}" "LIME_DOCS_API_PORT"
 validate_port "${UI_PORT}" "LIME_DOCS_UI_PORT"
 if [ "${API_PORT}" = "${UI_PORT}" ]; then
@@ -288,21 +293,23 @@ scan_has_completed_page() {
 }
 
 echo "Preparing docs-site dependencies..."
-npm --prefix "${ROOT_DIR}/docs-site" ci
+lime_docs_without_password npm --prefix "${ROOT_DIR}/docs-site" ci
 
 echo "Linting docs-site before starting the isolated scan stack..."
-npm --prefix "${ROOT_DIR}/docs-site" run lint
+lime_docs_without_password npm --prefix "${ROOT_DIR}/docs-site" run lint
 
 echo "Checking Playwright Chromium..."
-if node -e "const { chromium } = require(process.argv[1]); const fs = require('fs'); process.exit(fs.existsSync(chromium.executablePath()) ? 0 : 1);" "${ROOT_DIR}/docs-site/node_modules/playwright" >/dev/null 2>&1; then
+if lime_docs_without_password node -e "const { chromium } = require(process.argv[1]); const fs = require('fs'); process.exit(fs.existsSync(chromium.executablePath()) ? 0 : 1);" "${ROOT_DIR}/docs-site/node_modules/playwright" >/dev/null 2>&1; then
   echo "Playwright Chromium is already installed."
 elif [ "${LIME_DOCS_INSTALL_PLAYWRIGHT:-false}" = "true" ]; then
-  npm --prefix "${ROOT_DIR}/docs-site" exec playwright install chromium
+  lime_docs_without_password npm --prefix "${ROOT_DIR}/docs-site" exec playwright install chromium
 else
   echo "Playwright Chromium is missing. Run with LIME_DOCS_INSTALL_PLAYWRIGHT=true if this machine needs a browser install." >&2
   exit 1
 fi
 
+# Keep a generated test credential out of dependency installation hooks.
+lime_docs_db_credential
 echo "Resetting isolated ${COMPOSE_PROJECT} docs stack..."
 compose down -v --remove-orphans
 STACK_STARTED=true
@@ -368,7 +375,7 @@ wait_for_link_check "${LINK_CHECK_ID}"
 
 mkdir -p "${SCREENSHOT_DIR}"
 echo "Capturing docs screenshots from ${UI_BASE} for scan ${CAPTURE_SCAN_ID} (${CAPTURE_SCAN_LABEL})..."
-npm --prefix "${ROOT_DIR}/docs-site" run docs:screenshots -- \
+lime_docs_without_password npm --prefix "${ROOT_DIR}/docs-site" run docs:screenshots -- \
   --base-url "${UI_BASE}" \
   --scan-id "${CAPTURE_SCAN_ID}" \
   --partial-scan-id "${PARTIAL_SCAN_ID}" \
@@ -376,6 +383,6 @@ npm --prefix "${ROOT_DIR}/docs-site" run docs:screenshots -- \
   --output "${SCREENSHOT_DIR}"
 
 echo "Building static docs site..."
-npm --prefix "${ROOT_DIR}/docs-site" run build
+lime_docs_without_password npm --prefix "${ROOT_DIR}/docs-site" run build
 
 echo "Docs refreshed. Static output: ${ROOT_DIR}/docs-site/out"

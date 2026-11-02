@@ -1,6 +1,6 @@
 # Expects the docker build context at the repository root so the
 # shared ./data catalog can be baked into the image alongside ./lime.
-FROM node:23-alpine AS base
+FROM node:24.22.1-alpine AS base
 ARG LIME_VERSION=""
 ARG LIME_COMMIT=""
 
@@ -42,7 +42,7 @@ RUN adduser --system --uid 1001 nextjs
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-# Baked data catalog so the image works without bind mounts (Fly, standalone VPS).
+# Baked data catalog so the image works without bind mounts.
 # Local Docker and release bundles still override via /shared-data mount.
 COPY --chown=nextjs:nodejs data/ ./data/
 USER nextjs

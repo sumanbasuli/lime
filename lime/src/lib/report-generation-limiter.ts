@@ -33,11 +33,7 @@ class ReportGenerationLimiter {
     }
   }
 
-  async run<T>(
-    limit: number,
-    task: () => Promise<T>,
-    signal?: AbortSignal
-  ): Promise<T> {
+  private enter(limit: number, signal?: AbortSignal): Promise<void> | undefined {
     if (signal?.aborted) {
       throw new DOMException("PDF report request was cancelled", "AbortError");
     }
@@ -50,7 +46,7 @@ class ReportGenerationLimiter {
         throw new ReportGenerationQueueFullError();
       }
 
-      await new Promise<void>((resolve, reject) => {
+      return new Promise<void>((resolve, reject) => {
         const waiter: WaitingRequest = {
           resolve,
           reject,
@@ -73,18 +69,52 @@ class ReportGenerationLimiter {
           waiter.onAbort();
         }
       });
-    } else {
-      this.active += 1;
+    }
+    this.active += 1;
+  }
+
+  private release() {
+    this.active -= 1;
+    this.drain();
+  }
+
+  async acquire(limit: number, signal?: AbortSignal): Promise<() => void> {
+    const waiting = this.enter(limit, signal);
+    if (waiting) {
+      await waiting;
     }
 
+    let released = false;
+    const release = () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      this.release();
+    };
+    if (signal?.aborted) {
+      release();
+      throw new DOMException("PDF report request was cancelled", "AbortError");
+    }
+    return release;
+  }
+
+  async run<T>(
+    limit: number,
+    task: () => Promise<T>,
+    signal?: AbortSignal
+  ): Promise<T> {
+    const waiting = this.enter(limit, signal);
+    if (waiting) {
+      await waiting;
+    }
     try {
       if (signal?.aborted) {
         throw new DOMException("PDF report request was cancelled", "AbortError");
       }
       return await task();
     } finally {
-      this.active -= 1;
-      this.drain();
+      this.release();
     }
   }
 }

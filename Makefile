@@ -3,7 +3,13 @@ include .env
 export
 endif
 
-VERSION := $(shell cat VERSION)
+ifeq ($(origin VERSION),command line)
+# Freeze the raw command-line value before Make can expand embedded functions.
+override VERSION := $(value VERSION)
+else
+override VERSION := $(shell cat VERSION)
+endif
+export VERSION
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DIST_DIR := dist
 BACKUP_DIR := $(DIST_DIR)/backups
@@ -23,10 +29,16 @@ SHOPKEEPER_IMAGE ?= lime-shopkeeper
 LIME_API_PORT ?= 8080
 LIME_UI_PORT ?= 3000
 LIME_DOCS_PORT ?= 3001
-LIME_IMAGE_TAG ?= v$(VERSION)
+ifeq ($(origin LIME_IMAGE_TAG),undefined)
+LIME_IMAGE_TAG := v$(VERSION)
+else
+override LIME_IMAGE_TAG := $(value LIME_IMAGE_TAG)
+endif
+export LIME_IMAGE_TAG
 DOCKER_BUILD_FLAGS ?= --pull
 DOCKER_BUILD_CONTEXT ?= .
 DOCKER_COMPOSE ?= $(shell if docker compose version >/dev/null 2>&1; then printf 'docker compose'; elif command -v docker-compose >/dev/null 2>&1; then printf 'docker-compose'; else printf 'docker compose'; fi)
+export DOCKER_COMPOSE
 # The installer records this exact Compose file list in .env. Keep its
 # localhost-only port override last when switching that checkout to hot reload.
 DEV_COMPOSE_FILES := -f docker-compose.yml -f docker-compose.dev.yml
@@ -37,7 +49,7 @@ SHOPKEEPER_LDFLAGS := -s -w \
   -X github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo.Version=$(VERSION) \
   -X github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo.Commit=$(GIT_COMMIT)
 
-.PHONY: start-db start-shopkeeper start-ui start-dev start-all stop-all \
+.PHONY: init-env validate-release-version start-db start-shopkeeper start-ui start-dev start-all stop-all \
        logs-db logs-shopkeeper logs-ui \
        dev-ui dev-shopkeeper \
        migrate-all \
@@ -64,6 +76,9 @@ require-linux:
 	fi
 
 # ---- Docker commands ----
+
+init-env:
+	@bash ./scripts/init-env.sh
 
 start-db:
 	$(DOCKER_COMPOSE) up -d db
@@ -124,16 +139,25 @@ dev-shopkeeper:
 
 # ---- Production build ----
 
+validate-release-version:
+	@bash ./scripts/validate-release-version.sh --file VERSION
+	@bash ./scripts/validate-release-version.sh "$$VERSION"
+	@if [ -L dist ]; then \
+		echo "Build output dist must be a real directory, not a symlink." >&2; \
+		exit 1; \
+	fi
+
 build: build-shopkeeper build-ui build-release-bundle
 	@echo "Production artifacts ready in $(DIST_DIR)/"
 
-build-shopkeeper:
+build-shopkeeper: validate-release-version
 	rm -rf $(DIST_DIR)/shopkeeper
 	mkdir -p $(DIST_DIR)/shopkeeper
 	cd shopkeeper && GOCACHE=$$PWD/.cache/go-build go build -ldflags "$(SHOPKEEPER_LDFLAGS)" -o ../$(DIST_DIR)/shopkeeper/shopkeeper ./cmd/shopkeeper
 	cp -R shopkeeper/migrations $(DIST_DIR)/shopkeeper/migrations
 
-build-ui:
+build-ui: validate-release-version
+	cd lime && npm ci
 	rm -rf $(DIST_DIR)/ui
 	cd lime && npm run build
 	mkdir -p $(DIST_DIR)/ui
@@ -142,36 +166,32 @@ build-ui:
 	cp -R lime/.next/static $(DIST_DIR)/ui/.next/static
 	cp -R lime/public $(DIST_DIR)/ui/public
 
-build-release-bundle:
-	./scripts/build-release-bundle.sh $(VERSION)
+build-release-bundle: validate-release-version
+	./scripts/build-release-bundle.sh "$$VERSION"
 
 build-docker: build-docker-shopkeeper build-docker-ui
 	@echo "Production images built:"
-	@echo "  $(SHOPKEEPER_IMAGE):$(LIME_IMAGE_TAG)"
-	@echo "  $(UI_IMAGE):$(LIME_IMAGE_TAG)"
+	@echo "  $(SHOPKEEPER_IMAGE):$$LIME_IMAGE_TAG"
+	@echo "  $(UI_IMAGE):$$LIME_IMAGE_TAG"
 
-build-docker-shopkeeper:
+build-docker-shopkeeper: validate-release-version
 	docker build $(DOCKER_BUILD_FLAGS) \
 		--build-arg LIME_VERSION=$(VERSION) \
 		--build-arg LIME_COMMIT=$(GIT_COMMIT) \
-		--tag $(SHOPKEEPER_IMAGE):$(LIME_IMAGE_TAG) \
+		--tag "$(SHOPKEEPER_IMAGE):$$LIME_IMAGE_TAG" \
 		--file "$(DOCKER_BUILD_CONTEXT)/shopkeeper/Dockerfile" \
 		"$(DOCKER_BUILD_CONTEXT)"
 
-build-docker-ui:
+build-docker-ui: validate-release-version
 	docker build $(DOCKER_BUILD_FLAGS) \
 		--build-arg LIME_VERSION=$(VERSION) \
 		--build-arg LIME_COMMIT=$(GIT_COMMIT) \
-		--tag $(UI_IMAGE):$(LIME_IMAGE_TAG) \
+		--tag "$(UI_IMAGE):$$LIME_IMAGE_TAG" \
 		--file "$(DOCKER_BUILD_CONTEXT)/lime/Dockerfile" \
 		"$(DOCKER_BUILD_CONTEXT)"
 
-publish-release-images:
-	LIME_IMAGE_REGISTRY="$(LIME_IMAGE_REGISTRY)" \
-	LIME_SHA_TAG="$(LIME_SHA_TAG)" \
-	PUBLISH_LATEST="$(PUBLISH_LATEST)" \
-	PUSH_IMAGES="$(PUSH_IMAGES)" \
-	./scripts/publish-release-images.sh $(LIME_IMAGE_TAG)
+publish-release-images: validate-release-version
+	./scripts/publish-release-images.sh "v$$(cat VERSION)"
 
 # ---- Docs site ----
 
@@ -224,26 +244,42 @@ backup-db:
 		echo "Backup written to $$backup_file" \
 	'
 
-# `make update TAG=v0.2.0` — rolling update for a local dev Docker stack.
-# Rebuilds images from source and recreates services one at a time.
+# `make update TAG=v0.2.0` — maintenance update for a source Docker stack.
+# Build the images selected by Compose, then stop the old app before migrating.
 update:
 	@if [ -z "$(TAG)" ]; then echo "usage: make update TAG=<version>" >&2; exit 1; fi
 	@echo "==> Backing up bundled database"
 	@$(MAKE) backup-db
-	@echo "==> Checking out $(TAG) and rebuilding"
+	@echo "==> Checking out $(TAG)"
 	git fetch --tags --prune
 	git checkout $(TAG)
-	@echo "==> Rebuilding images"
-	$(MAKE) build-docker
+	@echo "==> Rebuilding Compose-selected images"
+	$(DOCKER_COMPOSE) build --pull --build-arg LIME_VERSION="$$(cat VERSION)" --build-arg LIME_COMMIT="$$(git rev-parse --short HEAD)" shopkeeper ui
+	@echo "==> Stopping old UI and Shopkeeper for migration"
+	$(DOCKER_COMPOSE) stop ui shopkeeper
+	@echo "==> Verifying browser sandbox and catalogs before migration"
+	$(DOCKER_COMPOSE) run --rm --no-deps shopkeeper ./shopkeeper --verify-startup
 	@echo "==> Applying migrations"
 	$(DOCKER_COMPOSE) run --rm --no-deps shopkeeper ./shopkeeper --migrate
-	@echo "==> Rolling Shopkeeper"
-	$(DOCKER_COMPOSE) up -d --no-deps shopkeeper
-	@echo "==> Rolling UI"
-	$(DOCKER_COMPOSE) up -d --no-deps ui
+	@echo "==> Starting Shopkeeper"
+	$(DOCKER_COMPOSE) up -d --no-deps --force-recreate shopkeeper
+	@echo "==> Waiting for Shopkeeper health"
+	@attempt=1; while [ "$$attempt" -le 30 ]; do \
+		if $(DOCKER_COMPOSE) exec -T shopkeeper setpriv --reuid=10001 --regid=10001 --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs -- wget --timeout=2 --tries=1 -qO- http://127.0.0.1:8080/api/health >/dev/null 2>&1; then break; fi; \
+		sleep 2; attempt=$$((attempt + 1)); \
+	done; \
+	if [ "$$attempt" -gt 30 ]; then echo "Shopkeeper did not become healthy; UI remains stopped" >&2; exit 1; fi
+	@echo "==> Starting UI"
+	$(DOCKER_COMPOSE) up -d --no-deps --force-recreate ui
+	@echo "==> Waiting for UI response"
+	@attempt=1; while [ "$$attempt" -le 30 ]; do \
+		if $(DOCKER_COMPOSE) exec -T ui node -e 'fetch("http://127.0.0.1:3000/", { signal: AbortSignal.timeout(2000) }).then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))' >/dev/null 2>&1; then break; fi; \
+		sleep 2; attempt=$$((attempt + 1)); \
+	done; \
+	if [ "$$attempt" -gt 30 ]; then echo "UI did not respond successfully; inspect its logs" >&2; exit 1; fi
 	@echo "Update to $(TAG) complete."
 
-# `make update-release TAG=v0.2.0` — rolling update for a release-bundle
+# `make update-release TAG=v0.2.0` — maintenance update for a release-bundle
 # deployment that pulls the published GHCR images.
 update-release:
 	@if [ -z "$(TAG)" ]; then echo "usage: make update-release TAG=<version>" >&2; exit 1; fi

@@ -28,14 +28,16 @@ Install the existing docs-site verification dependencies first. The explicit pro
 ```bash
 npm --prefix agent test
 npm --prefix docs-site ci
+export LIME_DOCS_DB_PASSWORD="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')"
 LIME_DOCS_DB_PORT=16432 LIME_DOCS_API_PORT=19080 LIME_DOCS_UI_PORT=14000 \
   docker compose -p lime-verification -f docker-compose.docs.yml up -d --build --wait
 npm --prefix agent run verify:openclaw -- --model openai/gpt-5.6-sol
 LIME_DOCS_DB_PORT=16432 LIME_DOCS_API_PORT=19080 LIME_DOCS_UI_PORT=14000 \
   docker compose -p lime-verification -f docker-compose.docs.yml down --volumes
+unset LIME_DOCS_DB_PASSWORD
 ```
 
-The last command removes **only disposable test containers and volumes**. Run it even if the verifier fails, after ensuring no agent turn remains active. The verifier checks the disposable database identity before key/settings changes, uses temporary OpenClaw configuration/state/workspace, and does not deliver messages. Provider/model access is required and may consume account usage; login/catalog success alone cannot satisfy the runtime gate.
+The last Compose command removes **only disposable test containers and volumes**. Run it even if the verifier fails, after ensuring no agent turn remains active. The database password is unique to this test stack; a retained volume still requires the password used when it was created. The verifier checks the disposable database identity before key/settings changes, uses temporary OpenClaw configuration/state/workspace, and does not deliver messages. Provider/model access is required and may consume account usage; login/catalog success alone cannot satisfy the runtime gate.
 
 ## Acceptance and evidence
 

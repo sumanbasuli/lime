@@ -128,6 +128,7 @@ export function IssueReportDownloadButton({
   const [downloadingFormat, setDownloadingFormat] =
     useState<ReportDownloadKey | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pdfTooLarge, setPdfTooLarge] = useState(false);
   const isDownloading = downloadingFormat !== null;
   const isDownloadingCsv =
     downloadingFormat === "csv-small" || downloadingFormat === "csv-full";
@@ -151,6 +152,7 @@ export function IssueReportDownloadButton({
 
     setDownloadingFormat(format);
     setError(null);
+    setPdfTooLarge(false);
 
     try {
       const response = await fetch(
@@ -162,6 +164,9 @@ export function IssueReportDownloadButton({
       );
 
       if (!response.ok) {
+        if (format === "pdf" && response.status === 413) {
+          setPdfTooLarge(true);
+        }
         throw new Error(await getErrorMessage(response));
       }
 
@@ -255,7 +260,14 @@ export function IssueReportDownloadButton({
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        {error ? <p role="alert" className="mt-1 text-right text-xs text-destructive">{error}</p> : null}
+        {error ? (
+          <div role="alert" className="mt-1 text-right text-xs text-destructive">
+            <p>{error}</p>
+            {pdfTooLarge && reportDownloads["csv-full"] ? (
+              <Button type="button" variant="link" size="xs" onClick={() => void handleDownload("csv-full")}>Download Full CSV</Button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -356,7 +368,12 @@ export function IssueReportDownloadButton({
       </div>
       <div className="mt-1 min-h-4">
         {error ? (
-          <p className="text-xs text-destructive">{error}</p>
+          <div role="alert" className="text-xs text-destructive">
+            <p>{error}</p>
+            {pdfTooLarge && reportDownloads["csv-full"] ? (
+              <Button type="button" variant="link" size="xs" onClick={() => void handleDownload("csv-full")}>Download Full CSV</Button>
+            ) : null}
+          </div>
         ) : isDownloading ? (
           <p className="text-xs text-muted-foreground">
             Preparing the report. Large scans can take a few seconds.

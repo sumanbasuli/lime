@@ -5,10 +5,17 @@ section matching `VERSION` to populate GitHub Release notes.
 
 ## [Unreleased]
 
+- Require Chromium's sandbox for scans and PDF reports. Docker deployments now include a scoped seccomp policy, a non-root backend, and guarded preparation of legacy screenshot ownership. Existing installs need the complete updated Compose bundle and a one-time stopped-backend upgrade; image-only updates fail startup when sandbox support is missing.
+
+- Stored new Link Checker source occurrences as ordered rows, so a destination repeated across many pages no longer causes a growing JSONB rewrite on every progress save. Existing checks, source order, duplicates, paging, MCP reads, and CSV exports are preserved. Migration `000019` requires all old backends to be stopped before the new backend starts.
+- Bounded HTML/PDF report preparation before loading large saved evidence into the dashboard. Oversized PDFs now return a clear size error with a same-scope Full CSV path instead of a partial report; the download UI offers Full CSV when enabled. Full CSV export remains complete for its saved-data scope.
+- Long sitemap scans now save each finished page and yield to older queued scans between timed page batches. Restart recovery preserves completed findings, clears unfinished evidence, and prevents orphan screenshots from being served or reused on retry.
+- Kept the small focused-image preview available under the new screenshot access guard by requiring a saved full-size image from a completed page; unfinished preview files are now removed before retries.
+
 ## [2.0.0] - 2026-10-05
 
 - Expanded MCP to 29 tools: 17 read/evidence tools plus opt-in operational scan/link-check lifecycle, false-positive triage, deletion, and reporting/performance settings. Added canonical report/screenshot content, live permission checks, strict confirmations/argument validation, and durable job request IDs without changing existing backend lifecycle rules. Existing keys remain read-only after migration; key and permission administration stay dashboard-only.
-- Added a homepage-only one-command Mac/Linux installer with prerequisite checks, fresh-install safeguards, private local service bindings, readiness checks, and a side-effect-free `--help`/`-h` option; clarified that Fly.io/systemd deployments are separate workflows.
+- Added a homepage-only one-command Mac/Linux installer with prerequisite checks, fresh-install safeguards, private local service bindings, readiness checks, and a side-effect-free `--help`/`-h` option; documented native systemd setup separately.
 - Added selectable Codex, Claude Code, and OpenCode MCP setup examples in dashboard settings.
 - Refreshed the API reference with formatted request examples, copy controls, response contracts, and expandable usage notes; redesigned the roadmap to distinguish current accessibility and connected workflows, validation, and future ideas.
 - Audited marketing and rendered guide copy for current feature availability, MCP client choices, audit/report limits, and version differences; fixed broken source-reference links and keyboard access to expanded marketing screenshots, and added repeatable content/browser checks.
@@ -80,7 +87,7 @@ Hello OSS.
 - Added large-report improvements including paginated issue details, bounded PDF occurrences, small/full CSV modes, and compact LLM text exports.
 - Added same-scan retry support for failed pages in completed partial scans.
 - Added report settings for PDF, CSV, and LLM availability plus operator-controlled report limits and performance knobs.
-- Added Docker and Fly.io release readiness with GHCR image publishing, changelog-driven release notes, and release bundle generation.
+- Added Docker release readiness with GHCR image publishing, changelog-driven release notes, and release bundle generation.
 - Added public OSS readiness docs including contribution, security, roadmap, deployment, architecture, and support guidance.
 - Added strict host verification in the scan profiling flow to keep scans on the entered host after redirect checks.
 
@@ -90,5 +97,5 @@ Hello OSS.
 - Added the NextJS scan dashboard with scan progress, issue details, false-positive triage, CSV export, and PDF reports.
 - Added same-scan retry support for failed pages in partial scans.
 - Added large-report loading improvements for issue pages and report generation.
-- Added production deployment support for Docker release bundles and Fly.io.
+- Added production deployment support for Docker release bundles and Debian systemd.
 - Added automated GHCR image publishing and GitHub Release bundle generation from `CHANGELOG.md`.

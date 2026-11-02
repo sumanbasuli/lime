@@ -6,9 +6,12 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/chromedp/cdproto/cdp"
 	cdppage "github.com/chromedp/cdproto/page"
 )
 
@@ -25,6 +28,9 @@ func TestLighthouseAxeRunConfigMatchesExpectedShape(t *testing.T) {
 
 	if !config.ElementRef {
 		t.Fatal("expected Lighthouse-aligned run to enable elementRef")
+	}
+	if config.Iframes {
+		t.Fatal("isolated axe runs must not trust page-owned frame messages")
 	}
 	if config.RunOnly.Type != "tag" {
 		t.Fatalf("expected runOnly type tag, got %q", config.RunOnly.Type)
@@ -44,6 +50,105 @@ func TestLighthouseAxeRunConfigMatchesExpectedShape(t *testing.T) {
 	assertRuleEnabledState(t, config, "target-size", true)
 	assertRuleEnabledState(t, config, "nested-interactive", false)
 	assertRuleEnabledState(t, config, "scrollable-region-focusable", false)
+}
+
+func TestBrowserBudgetFailureDiscardsEvidenceAndDistinguishesPayload(t *testing.T) {
+	page := PageInput{URLID: "page-1", URL: "https://example.test/"}
+	for _, tc := range []struct {
+		name            string
+		payloadExceeded bool
+		canceled        bool
+		wantError       string
+	}{
+		{"connection", false, false, "browser connection budget exceeded"},
+		{"payload", true, false, "browser network transfer limit exceeded"},
+		{"canceled", true, true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := browserBudgetFailure(page, tc.payloadExceeded, tc.canceled)
+			if result.URLID != page.URLID || result.URL != page.URL || result.Canceled != tc.canceled || !strings.Contains(result.Error, tc.wantError) {
+				t.Fatalf("budget failure result = %+v", result)
+			}
+			if result.Version != "" || result.ScreenshotPath != "" || len(result.Violations) != 0 || len(result.Incomplete) != 0 || len(result.Passes) != 0 || len(result.NotApplicable) != 0 {
+				t.Fatalf("budget failure retained page evidence: %+v", result)
+			}
+		})
+	}
+}
+
+func TestSamePageAuthority(t *testing.T) {
+	tests := []struct {
+		name      string
+		submitted string
+		final     string
+		want      bool
+	}{
+		{"same host and path change", "http://example.test/start", "http://example.test/final", true},
+		{"standard HTTP to HTTPS", "http://Example.test:80/start", "https://example.test:443/final", true},
+		{"uppercase scheme", "HTTP://Example.test:80/start", "https://example.test:443/final", true},
+		{"zero-padded default ports", "http://example.test:00080/start", "https://example.test:00443/final", true},
+		{"Unicode hostname", "http://bücher.example/start", "https://xn--bcher-kva.example/final", true},
+		{"IPv4 mapped IPv6", "http://[::ffff:127.0.0.1]/start", "http://127.0.0.1/final", true},
+		{"same nondefault port", "http://example.test:8080/start", "https://example.test:8080/final", true},
+		{"different public host", "https://example.test/start", "https://other.test/final", false},
+		{"different nondefault port", "http://example.test:8080/start", "http://example.test:8081/final", false},
+		{"non-HTTP destination", "https://example.test/start", "data:text/html,other", false},
+		{"host-prefix trick", "https://example.test/start", "https://example.test.attacker.test/final", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := samePageAuthority(tt.submitted, tt.final); got != tt.want {
+				t.Fatalf("samePageAuthority(%q, %q) = %t, want %t", tt.submitted, tt.final, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPageNavigationGuardRemembersOffHostThenBack(t *testing.T) {
+	guard := &pageNavigationGuard{submitted: "http://example.test/start"}
+	navigate := func(final string, parent cdp.FrameID) {
+		guard.observe(&cdppage.EventFrameNavigated{Frame: &cdp.Frame{URL: final, ParentID: parent}})
+	}
+	navigate("about:blank", "")
+	if guard.escaped.Load() {
+		t.Fatal("initial blank tab was treated as a redirect")
+	}
+	navigate("http://other.test/frame", "child")
+	if guard.escaped.Load() {
+		t.Fatal("off-host child frame changed top-level scope")
+	}
+	navigate("http://example.test/start", "")
+	navigate("https://example.test/final", "")
+	if guard.escaped.Load() {
+		t.Fatal("same-host redirect changed top-level scope")
+	}
+	navigate("https://other.test/away", "")
+	navigate("http://example.test/back", "")
+	if !guard.escaped.Load() {
+		t.Fatal("returning to the submitted host cleared the earlier scope escape")
+	}
+}
+
+func TestPublishPageScreenshotsKeepsFilesPrivateUntilCommit(t *testing.T) {
+	scanDir := t.TempDir()
+	staging, err := os.MkdirTemp(scanDir, ".pending-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged := filepath.Join(staging, "page.png")
+	if err := os.WriteFile(staged, []byte("fixture PNG"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(scanDir, "page.png")); !os.IsNotExist(err) {
+		t.Fatalf("staged screenshot was exposed before verification: %v", err)
+	}
+	if _, err := publishPageScreenshots(staging, scanDir, map[string]int64{"page.png": int64(len("fixture PNG"))}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(scanDir, "page.png"))
+	if err != nil || string(data) != "fixture PNG" {
+		t.Fatalf("verified screenshot was not published: %q, err=%v", data, err)
+	}
 }
 
 func TestLighthouseAxeRunScriptSerializesFailureSummaryAndRelatedNodes(t *testing.T) {

@@ -56,7 +56,7 @@ const features = [
   {
     icon: "dns",
     title: "Run LIME your way",
-    copy: "Run LIME locally with Docker or host it on your own server. Follow the setup guide for Docker, Debian, or Fly.io.",
+    copy: "Run LIME locally with Docker or host it on your own server. Follow the setup guide for Docker or Debian.",
     href: "/get-started/",
     linkLabel: "Choose your setup",
   },

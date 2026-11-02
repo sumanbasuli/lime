@@ -37,7 +37,6 @@ const operatorItems = [
   { title: "Setup", href: "/docs/reference/setup", description: "Install and run LIME." },
   { title: "Docker Deploy", href: "/docs/reference/deployment/docker", description: "Pinned images, release bundles, and persistence." },
   { title: "Debian Deploy", href: "/docs/reference/deployment/debian", description: "Native systemd install for Debian-family Linux." },
-  { title: "Fly.io Deploy", href: "/docs/reference/deployment/fly", description: "Separate UI and backend apps with persistent storage." },
   { title: "Backup And Restore", href: "/docs/reference/deployment/backup-restore", description: "Protect PostgreSQL data and screenshot evidence." },
   { title: "Updates", href: "/docs/reference/deployment/updates", description: "Upgrade steps, rollback limits, and update notices." },
   { title: "Operational Troubleshooting", href: "/docs/reference/deployment/troubleshooting", description: "Diagnose service, scan, screenshot, and report problems." },

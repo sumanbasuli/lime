@@ -54,7 +54,7 @@ func (s *Server) listLinkChecks(ctx context.Context, args map[string]any) (any, 
 	if err != nil {
 		return nil, err
 	}
-	return linkPage("checks", checks, total, limit, offset), nil
+	return linkPage("checks", models.PublicLinkChecks(checks), total, limit, offset), nil
 }
 
 func (s *Server) requireLinkCheck(ctx context.Context, id string) (*models.LinkCheck, error) {
@@ -78,7 +78,8 @@ func (s *Server) getLinkCheck(ctx context.Context, args map[string]any) (any, er
 		return nil, err
 	}
 	dashboard, csv := linkCheckPaths(check.ID)
-	return map[string]any{"check": check, "dashboard_path": dashboard, "csv_path": csv, "paths_relative_to": "dashboard_origin"}, nil
+	publicCheck := models.PublicLinkCheck(*check)
+	return map[string]any{"check": &publicCheck, "dashboard_path": dashboard, "csv_path": csv, "paths_relative_to": "dashboard_origin"}, nil
 }
 
 func (s *Server) getLinkCheckStats(ctx context.Context) (any, error) {
@@ -93,7 +94,7 @@ func (s *Server) getLinkCheckStats(ctx context.Context) (any, error) {
 }
 
 func (s *Server) getScanLinkCheck(ctx context.Context, args map[string]any) (any, error) {
-	scan, err := s.repo.GetScan(ctx, stringArg(args, "scan_id"))
+	scan, err := s.repo.GetMCPScanReference(ctx, stringArg(args, "scan_id"))
 	if err != nil {
 		return nil, err
 	}
@@ -107,6 +108,8 @@ func (s *Server) getScanLinkCheck(ctx context.Context, args map[string]any) (any
 	result := map[string]any{"scan_id": scan.ID, "include_link_check": scan.IncludeLinkCheck, "check": check,
 		"dashboard_path": nil, "csv_path": nil, "paths_relative_to": "dashboard_origin"}
 	if check != nil {
+		publicCheck := models.PublicLinkCheck(*check)
+		result["check"] = &publicCheck
 		result["dashboard_path"], result["csv_path"] = linkCheckPaths(check.ID)
 	}
 	return result, nil
@@ -123,7 +126,7 @@ func (s *Server) listLinkCheckResults(ctx context.Context, args map[string]any) 
 	if err != nil {
 		return nil, err
 	}
-	return linkPage("results", results, total, limit, offset), nil
+	return linkPage("results", models.PublicLinkResults(results), total, limit, offset), nil
 }
 
 func (s *Server) listLinkCheckSources(ctx context.Context, args map[string]any) (any, error) {
@@ -140,5 +143,5 @@ func (s *Server) listLinkCheckSources(ctx context.Context, args map[string]any) 
 	if !found {
 		return nil, errLinkResultNotFound
 	}
-	return linkPage("sources", sources, total, limit, offset), nil
+	return linkPage("sources", models.PublicLinkSources(sources), total, limit, offset), nil
 }

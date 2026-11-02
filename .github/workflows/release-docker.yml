@@ -30,7 +30,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
+          bash ./scripts/validate-release-version.sh --file VERSION
+          FILE_VERSION="$(cat VERSION)"
+          bash ./scripts/validate-release-version.sh "${FILE_VERSION}"
           OWNER_LC="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
 
           echo "LIME_VERSION=${FILE_VERSION}" >> "${GITHUB_ENV}"
@@ -46,7 +48,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 23
+          node-version: "24.22.1"
           cache: npm
           cache-dependency-path: lime/package-lock.json
 
@@ -55,6 +57,13 @@ jobs:
 
       - name: Validate changelog entry
         run: ./scripts/extract-release-notes.sh "${LIME_VERSION}" >/dev/null
+
+      - name: Verify Host and backend resource boundaries
+        run: |
+          (cd shopkeeper && go test ./internal/router -count=1)
+          npm --prefix lime run test:allowed-hosts
+          npm --prefix lime run test:html-report-admission
+          node scripts/verify-backend-memory.mjs
 
       - name: Build release artifacts
         run: make build

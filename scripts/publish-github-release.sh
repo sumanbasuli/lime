@@ -14,7 +14,9 @@ cd "${ROOT_DIR}"
 TAG_INPUT="$1"
 VERSION="${TAG_INPUT#v}"
 RELEASE_TAG="v${VERSION}"
-FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
+bash "${ROOT_DIR}/scripts/validate-release-version.sh" --file VERSION
+FILE_VERSION="$(cat VERSION)"
+bash "${ROOT_DIR}/scripts/validate-release-version.sh" "${FILE_VERSION}"
 EXPECTED_TAG="v${FILE_VERSION}"
 NOTES_PATH="${RELEASE_NOTES_PATH:-${ROOT_DIR}/dist/release-notes.md}"
 BUNDLE_PATH="${RELEASE_BUNDLE_PATH:-${ROOT_DIR}/dist/lime-${RELEASE_TAG}-release.tar.gz}"
@@ -24,13 +26,47 @@ if [[ "${RELEASE_TAG}" != "${EXPECTED_TAG}" ]]; then
   exit 1
 fi
 
-if [[ ! -f "${BUNDLE_PATH}" ]]; then
-  echo "Release bundle not found: ${BUNDLE_PATH}" >&2
+if [[ -L "${ROOT_DIR}/dist" ]]; then
+  echo "Release output dist must be a real directory, not a symlink." >&2
   exit 1
 fi
 
-mkdir -p "$(dirname "${NOTES_PATH}")"
-./scripts/extract-release-notes.sh "${VERSION}" > "${NOTES_PATH}"
+if [[ ! -f "${BUNDLE_PATH}" || -L "${BUNDLE_PATH}" ]]; then
+  echo "Release bundle must be an ordinary file: ${BUNDLE_PATH}" >&2
+  exit 1
+fi
+
+NOTES_DIR="$(dirname "${NOTES_PATH}")"
+mkdir -p "${NOTES_DIR}"
+if [[ -L "${NOTES_DIR}" || -L "${NOTES_PATH}" || -d "${NOTES_PATH}" ]]; then
+  echo "Release notes output must use a real directory and ordinary file: ${NOTES_PATH}" >&2
+  exit 1
+fi
+NOTES_LINKS=0
+if [[ -f "${NOTES_PATH}" ]]; then
+  if [[ "$(uname -s)" == Darwin ]]; then
+    NOTES_LINKS="$(stat -f '%l' "${NOTES_PATH}")"
+    NOTES_MODE="$(stat -f '%Lp' "${NOTES_PATH}")"
+  else
+    NOTES_LINKS="$(stat -c '%h' "${NOTES_PATH}")"
+    NOTES_MODE="$(stat -c '%a' "${NOTES_PATH}")"
+  fi
+fi
+if [[ "${NOTES_LINKS}" == 1 ]]; then
+  # Keep an ordinary existing notes file's owner, group, and ACLs.
+  ./scripts/extract-release-notes.sh "${VERSION}" > "${NOTES_PATH}"
+else
+  TEMP_NOTES="$(mktemp "${NOTES_DIR}/.lime-release-notes.XXXXXXXX")"
+  trap 'rm -f -- "${TEMP_NOTES}"' EXIT
+  ./scripts/extract-release-notes.sh "${VERSION}" > "${TEMP_NOTES}"
+  if [[ "${NOTES_LINKS}" == 0 ]]; then
+    chmod =rw "${TEMP_NOTES}"
+  else
+    chmod "${NOTES_MODE}" "${TEMP_NOTES}"
+  fi
+  mv -f -- "${TEMP_NOTES}" "${NOTES_PATH}"
+  trap - EXIT
+fi
 
 HEAD_SHA="$(git rev-parse HEAD)"
 

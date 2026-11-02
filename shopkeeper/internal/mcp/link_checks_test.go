@@ -49,6 +49,45 @@ func linkPayload(t *testing.T, result map[string]any) map[string]any {
 	return structured
 }
 
+func TestLinkMCPResponsesHideQueriesButKeepSavedURLs(t *testing.T) {
+	const raw = "https://example.test/path?token=QUERY_TOKEN_CANARY"
+	final := "https://other.test/final?token=QUERY_TOKEN_CANARY"
+	errText := "GET " + raw + ": timeout"
+	repo := newStubRepository()
+	repo.scan.ID = testScanID
+	repo.check.URL = raw
+	repo.check.Error = &errText
+	repo.checks = []models.LinkCheck{*repo.check}
+	repo.companion = repo.check
+	repo.results = []models.LinkResult{{ID: testResultID, TargetURL: raw, FinalURL: &final, Error: &errText,
+		Sources: []models.LinkSource{{PageURL: raw}}}}
+	repo.sources = []models.LinkSource{{PageURL: raw}}
+	repo.linkTotal = 1
+	for _, tc := range []struct{ name, args string }{
+		{"list_link_checks", `{}`},
+		{"get_link_check", `{"check_id":"` + testCheckID + `"}`},
+		{"get_scan_link_check", `{"scan_id":"` + testScanID + `"}`},
+		{"list_link_check_results", `{"check_id":"` + testCheckID + `"}`},
+		{"list_link_check_sources", `{"check_id":"` + testCheckID + `","result_id":"` + testResultID + `"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := callLinkTool(t, repo, tc.name, tc.args)
+			payload := linkPayload(t, result)
+			encoded, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), "QUERY_TOKEN_CANARY") || !strings.Contains(string(encoded), "https://example.test/path") {
+				t.Fatalf("unsafe MCP link output: %s", encoded)
+			}
+		})
+	}
+	if repo.check.URL != raw || repo.checks[0].URL != raw || repo.results[0].TargetURL != raw ||
+		*repo.results[0].FinalURL != final || repo.results[0].Sources[0].PageURL != raw || repo.sources[0].PageURL != raw {
+		t.Fatal("MCP read mutated saved link URLs")
+	}
+}
+
 func TestLinkToolsKeepReadOnlyClosedWorldAnnotations(t *testing.T) {
 	expected := []string{"list_scans", "get_scan", "list_scan_issues", "get_issue_detail", "get_report_metadata", "get_settings",
 		"list_link_checks", "get_link_check", "get_link_check_stats", "get_scan_link_check", "list_link_check_results", "list_link_check_sources"}

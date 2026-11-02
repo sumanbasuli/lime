@@ -12,8 +12,10 @@ const exec = promisify(execFile);
 
 // execFile opens a non-TTY stdin pipe. Codex appends piped stdin even when a
 // positional prompt is supplied, so leave no open pipe waiting indefinitely.
-export function runInstalledCli(command, args, options) {
-  const pending = exec(command, args, options);
+export function runInstalledCli(command, args, options = {}) {
+  const environment = { ...(options.env ?? process.env) };
+  delete environment.LIME_DOCS_DB_PASSWORD;
+  const pending = exec(command, args, { ...options, env: environment });
   pending.child?.stdin?.end();
   return pending;
 }

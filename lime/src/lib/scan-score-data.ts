@@ -1,8 +1,9 @@
-import { and, count, eq, inArray } from "drizzle-orm";
+import { and, count, eq, getTableColumns, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { issues, scanScoreSummaryCache, scans, urlAudits, urls } from "@/db/schema";
 import { getAxeRuleCatalog } from "@/lib/act-rules";
 import { getPerformanceSettings } from "@/lib/report-settings";
+import { readReportQuery, type ReportReadContext } from "@/lib/mcp-report-read";
 import {
   buildScanAuditReportFromPageCounts,
   type ScanAuditReport,
@@ -63,7 +64,8 @@ function isMissingAuditStorageError(error: unknown): boolean {
 }
 
 export async function getScanAuditReports(
-  scansToLoad: ScanLike[]
+  scansToLoad: ScanLike[],
+  context?: ReportReadContext
 ): Promise<Record<string, ScanAuditReport>> {
   if (scansToLoad.length === 0) {
     return {};
@@ -71,15 +73,15 @@ export async function getScanAuditReports(
 
   const scanIds = scansToLoad.map((scan) => scan.id);
   const [falsePositiveRows, axeRuleCatalog, urlCoverageRows] = await Promise.all([
-    db
-      .select({
+    readReportQuery((context?.db ?? db)
+      .selectDistinct({
         scanId: issues.scanId,
         ruleId: issues.violationType,
       })
       .from(issues)
-      .where(and(inArray(issues.scanId, scanIds), eq(issues.isFalsePositive, true))),
+      .where(and(inArray(issues.scanId, scanIds), eq(issues.isFalsePositive, true))), context, 2),
     getAxeRuleCatalog(),
-    db
+    readReportQuery((context?.db ?? db)
       .select({
         scanId: urls.scanId,
         status: urls.status,
@@ -87,7 +89,7 @@ export async function getScanAuditReports(
       })
       .from(urls)
       .where(inArray(urls.scanId, scanIds))
-      .groupBy(urls.scanId, urls.status),
+      .groupBy(urls.scanId, urls.status), context, 3),
   ]);
 
   let auditRows: Array<{
@@ -98,7 +100,7 @@ export async function getScanAuditReports(
   }> = [];
 
   try {
-    auditRows = await db
+    auditRows = await readReportQuery((context?.db ?? db)
       .select({
         scanId: urls.scanId,
         ruleId: urlAudits.ruleId,
@@ -108,9 +110,10 @@ export async function getScanAuditReports(
       .from(urlAudits)
       .innerJoin(urls, eq(urls.id, urlAudits.urlId))
       .where(and(inArray(urls.scanId, scanIds), eq(urls.status, "completed")))
-      .groupBy(urls.scanId, urlAudits.ruleId, urlAudits.outcome);
+      .groupBy(urls.scanId, urlAudits.ruleId, urlAudits.outcome), context, 4);
   } catch (error) {
-    if (!isMissingAuditStorageError(error)) {
+    // A failed MCP statement aborts its snapshot; it is not empty audit data.
+    if (context || !isMissingAuditStorageError(error)) {
       throw error;
     }
   }
@@ -182,7 +185,8 @@ export async function getScanAuditReports(
     });
   }
 
-  await refreshScoreSummaryCaches(scansToLoad, reports);
+  // Reports stay read-only; score calls can stage a bounded cache refresh.
+  if (!context || context.stageScoreCache) await refreshScoreSummaryCaches(scansToLoad, reports, context);
 
   return reports;
 }
@@ -222,15 +226,18 @@ function isFreshSummaryCache(
   );
 }
 
-async function loadScanCacheStates(scanIds: string[]): Promise<ScanCacheState[]> {
-  const rows = await db
+async function loadScanCacheStates(
+  scanIds: string[],
+  context?: ReportReadContext
+): Promise<ScanCacheState[]> {
+  const rows = await readReportQuery((context?.db ?? db)
     .select({
       id: scans.id,
       status: scans.status,
       updatedAt: scans.updatedAt,
     })
     .from(scans)
-    .where(inArray(scans.id, scanIds));
+    .where(inArray(scans.id, scanIds)), context, 3);
 
   return rows.map((row) => ({
     id: row.id,
@@ -240,7 +247,8 @@ async function loadScanCacheStates(scanIds: string[]): Promise<ScanCacheState[]>
 }
 
 async function resolveScanCacheStates(
-  scansToLoad: ScanLike[]
+  scansToLoad: ScanLike[],
+  context?: ReportReadContext
 ): Promise<ScanCacheState[]> {
   const statesById = new Map<string, ScanCacheState>();
   const missingIds: string[] = [];
@@ -258,7 +266,7 @@ async function resolveScanCacheStates(
   }
 
   if (missingIds.length > 0) {
-    const loadedStates = await loadScanCacheStates(missingIds);
+    const loadedStates = await loadScanCacheStates(missingIds, context);
     for (const state of loadedStates) {
       statesById.set(state.id, state);
     }
@@ -271,11 +279,12 @@ async function resolveScanCacheStates(
 
 async function upsertScoreSummaryCache(
   scan: ScanCacheState,
-  summary: ScanScoreSummary
+  summary: ScanScoreSummary,
+  context?: ReportReadContext
 ) {
   const now = new Date();
 
-  await db
+  const query = (context?.db ?? db)
     .insert(scanScoreSummaryCache)
     .values({
       scanId: scan.id,
@@ -325,24 +334,28 @@ async function upsertScoreSummaryCache(
         updatedAt: now,
       },
     });
+  if (context?.stageScoreCache) context.stageScoreCache(query);
+  else await query;
 }
 
 async function refreshScoreSummaryCaches(
   scansToLoad: ScanLike[],
-  reports: Record<string, ScanAuditReport>
+  reports: Record<string, ScanAuditReport>,
+  context?: ReportReadContext
 ) {
-  const scanStates = await resolveScanCacheStates(scansToLoad);
+  const scanStates = await resolveScanCacheStates(scansToLoad, context);
   if (scanStates.length === 0) {
     return;
   }
 
   const scanIds = scanStates.map((scan) => scan.id);
   const [performanceSettings, cachedRows] = await Promise.all([
-    getPerformanceSettings(),
-    db
+    getPerformanceSettings(context),
+    readReportQuery((context?.db ?? db)
       .select()
       .from(scanScoreSummaryCache)
-      .where(inArray(scanScoreSummaryCache.scanId, scanIds)),
+      .where(inArray(scanScoreSummaryCache.scanId, scanIds)), context,
+      Object.keys(getTableColumns(scanScoreSummaryCache)).length),
   ]);
   const cachedRowsByScan = new Map(cachedRows.map((row) => [row.scanId, row]));
 
@@ -365,13 +378,14 @@ async function refreshScoreSummaryCaches(
         return;
       }
 
-      await upsertScoreSummaryCache(scan, summary);
+      await upsertScoreSummaryCache(scan, summary, context);
     })
   );
 }
 
 export async function getScanScoreSummaries(
-  scansToLoad: ScanLike[]
+  scansToLoad: ScanLike[],
+  context?: ReportReadContext
 ): Promise<Record<string, ScanScoreSummary>> {
   if (scansToLoad.length === 0) {
     return {};
@@ -379,12 +393,15 @@ export async function getScanScoreSummaries(
 
   const scanIds = scansToLoad.map((scan) => scan.id);
   const [scanStates, performanceSettings, cachedRows] = await Promise.all([
-    loadScanCacheStates(scanIds),
-    getPerformanceSettings(),
-    db
+    loadScanCacheStates(scanIds, context),
+    getPerformanceSettings(context),
+    readReportQuery((context?.db ?? db)
       .select()
       .from(scanScoreSummaryCache)
       .where(inArray(scanScoreSummaryCache.scanId, scanIds)),
+      context,
+      Object.keys(getTableColumns(scanScoreSummaryCache)).length
+    ),
   ]);
 
   const scanStateById = new Map(scanStates.map((scan) => [scan.id, scan]));
@@ -410,7 +427,7 @@ export async function getScanScoreSummaries(
   }
 
   if (missingScans.length > 0) {
-    const reports = await getScanAuditReports(missingScans);
+    const reports = await getScanAuditReports(missingScans, context);
     for (const scan of missingScans) {
       const summary = reports[scan.id]?.summary;
       if (summary) {
@@ -426,7 +443,7 @@ export async function getScanScoreSummaries(
         continue;
       }
 
-      const reports = await getScanAuditReports([scanState]);
+      const reports = await getScanAuditReports([scanState], context);
       summaries[scan.id] = reports[scan.id].summary;
     }
   }

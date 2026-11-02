@@ -7,10 +7,15 @@ export LIME_DOCS_API_PORT="${LIME_VERIFY_API_PORT:-19080}"
 export LIME_DOCS_UI_PORT="${LIME_VERIFY_UI_PORT:-14000}"
 export LIME_VERIFY_FIXTURE_PORT="${LIME_VERIFY_FIXTURE_PORT:-19090}"
 STACK_STARTED=false
+COMPOSE_FILES=(-f "${ROOT_DIR}/docker-compose.docs.yml")
+if [[ "$(uname -s)" == Linux ]]; then
+  COMPOSE_FILES+=(-f "${ROOT_DIR}/docker-compose.verify-linux.yml")
+fi
 
 for command_name in docker node npm curl; do
   command -v "${command_name}" >/dev/null || { echo "${command_name} is required." >&2; exit 1; }
 done
+source "${ROOT_DIR}/scripts/docs-db-credential.sh"
 for port in "${LIME_DOCS_DB_PORT}" "${LIME_DOCS_API_PORT}" "${LIME_DOCS_UI_PORT}" "${LIME_VERIFY_FIXTURE_PORT}"; do
   if ! [[ "${port}" =~ ^[0-9]+$ ]] || [ "${port}" -lt 1 ] || [ "${port}" -gt 65535 ]; then
     echo "Verification ports must be integers between 1 and 65535." >&2
@@ -18,8 +23,10 @@ for port in "${LIME_DOCS_DB_PORT}" "${LIME_DOCS_API_PORT}" "${LIME_DOCS_UI_PORT}
   fi
 done
 
+lime_verify_project_unoccupied
+
 compose() {
-  docker compose -p lime-verification -f "${ROOT_DIR}/docker-compose.docs.yml" "$@"
+  docker compose -p lime-verification "${COMPOSE_FILES[@]}" "$@"
 }
 
 cleanup() {
@@ -41,12 +48,14 @@ trap 'exit 143' TERM
 if [ ! -d "${ROOT_DIR}/docs-site/node_modules/playwright" ] ||
    [ ! -d "${ROOT_DIR}/docs-site/node_modules/@modelcontextprotocol/sdk" ] ||
    [ ! -d "${ROOT_DIR}/docs-site/node_modules/@modelcontextprotocol/client" ]; then
-  npm --prefix "${ROOT_DIR}/docs-site" ci
+  lime_docs_without_password npm --prefix "${ROOT_DIR}/docs-site" ci
 fi
-if ! (cd "${ROOT_DIR}/docs-site" && node --input-type=module -e 'import { chromium } from "playwright"; import { existsSync } from "node:fs"; if (!existsSync(chromium.executablePath())) process.exit(1);'); then
-  (cd "${ROOT_DIR}/docs-site" && npx playwright install chromium)
+if ! (cd "${ROOT_DIR}/docs-site" && lime_docs_without_password node --input-type=module -e 'import { chromium } from "playwright"; import { existsSync } from "node:fs"; if (!existsSync(chromium.executablePath())) process.exit(1);'); then
+  (cd "${ROOT_DIR}/docs-site" && lime_docs_without_password npx playwright install chromium)
 fi
 
+# Keep a generated test credential out of dependency installation hooks.
+lime_docs_db_credential
 echo "Starting isolated production verification stack (lime-verification)..."
 STACK_STARTED=true
 compose up -d --build --wait --wait-timeout 180

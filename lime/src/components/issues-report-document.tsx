@@ -1350,9 +1350,9 @@ function AffectedPagesSection({
         occurrences for this issue were found on each page.
       </p>
       <div className="affected-pages-list">
-        {affectedPages.map((affectedPage) => (
+        {affectedPages.map((affectedPage, index) => (
           <div
-            key={affectedPage.pageUrl}
+            key={`${affectedPage.pageUrl}-${index}`}
             className="affected-page-row"
           >
             <a href={affectedPage.pageUrl} className="affected-page-link">

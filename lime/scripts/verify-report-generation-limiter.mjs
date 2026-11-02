@@ -239,7 +239,13 @@ test("non-finite concurrency limits fall back to one active job", async () => {
   assert.deepEqual(started, ["first", "second", "third"]);
 });
 
-async function loadRoute(limiter, fetchMock) {
+async function loadRoute(
+  limiter,
+  fetchMock,
+  shopkeeperUrl = "http://shopkeeper:8080",
+  signalAPI = AbortSignal,
+  timerAPI = { setTimeout, clearTimeout }
+) {
   return loadSource("../src/app/api/scans/[id]/issues/report.pdf/route.ts", {
     "@/lib/report-settings": {
       getSystemSettings: async () => ({
@@ -250,10 +256,15 @@ async function loadRoute(limiter, fetchMock) {
     "@/lib/performance-logging": { measureServerAction: (_name, action) => action() },
     "@/lib/report-generation-limiter": limiter,
   }, {
-    process: { env: { SHOPKEEPER_URL: "http://shopkeeper:8080" } },
+    process: { env: { SHOPKEEPER_URL: shopkeeperUrl } },
     Response,
     Headers,
+    AbortController,
+    AbortSignal: signalAPI,
+    setTimeout: timerAPI.setTimeout,
+    clearTimeout: timerAPI.clearTimeout,
     URL,
+    ReadableStream,
     fetch: fetchMock,
   });
 }
@@ -268,7 +279,7 @@ test("PDF route returns retryable 503 for queue overflow without contacting back
   const route = await loadRoute({
     ...limiter,
     reportGenerationLimiter: {
-      run: async () => {
+      acquire: async () => {
         throw new limiter.ReportGenerationQueueFullError();
       },
     },
@@ -312,9 +323,9 @@ test("ordinary PDF proxy response and unrelated upstream errors retain their beh
   const route = await loadRoute({
     ...limiter,
     reportGenerationLimiter: {
-      run: async (_limit, task, signal) => {
+      acquire: async (_limit, signal) => {
         passedSignal = signal;
-        return task();
+        return () => {};
       },
     },
   }, async (url) => {
@@ -331,10 +342,305 @@ test("ordinary PDF proxy response and unrelated upstream errors retain their beh
 
   const failedRoute = await loadRoute({
     ...limiter,
-    reportGenerationLimiter: { run: async (_limit, task) => task() },
+    reportGenerationLimiter: { acquire: async () => () => {} },
   }, async () => {
     throw new Error("upstream offline");
-  });
+  }, "http://service-user:service-password@shopkeeper:8080");
   const failedResponse = await failedRoute.GET(routeRequest(), { params: Promise.resolve({ id: "scan" }) });
   assert.equal(failedResponse.status, 502);
+  const failedBody = await failedResponse.json();
+  assert.match(failedBody.error, /unavailable/i);
+  assert.ok(!JSON.stringify(failedBody).includes("service-password"));
+});
+
+test("a slow PDF send retains its permit until the response reaches EOF", async () => {
+  const limiter = await loadLimiter();
+  const finishUpstream = deferred();
+  const encoder = new TextEncoder();
+  let fetchCount = 0;
+  const route = await loadRoute(limiter, async () => {
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode("%PDF-first"));
+          void finishUpstream.promise.then(() => controller.close());
+        },
+      });
+      return new Response(body, { headers: { "Content-Type": "application/pdf" } });
+    }
+    return new Response("%PDF-second", { headers: { "Content-Type": "application/pdf" } });
+  });
+
+  const first = await route.GET(routeRequest(), { params: Promise.resolve({ id: "first" }) });
+  const secondPending = route.GET(routeRequest(), { params: Promise.resolve({ id: "second" }) });
+  finishUpstream.resolve();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fetchCount, 1, "the next render must wait even after upstream finishes");
+  assert.equal(await first.text(), "%PDF-first");
+  const second = await secondPending;
+  assert.equal(await second.text(), "%PDF-second");
+  assert.equal(fetchCount, 2);
+});
+
+test("a stalled upstream PDF response times out and frees its permit", async () => {
+  const limiter = await loadLimiter();
+  const deadlines = [];
+  const timerAPI = {
+    setTimeout(callback, milliseconds) {
+      assert.equal(milliseconds, 10 * 60 * 1000);
+      const timer = { callback, cleared: false };
+      deadlines.push(timer);
+      return timer;
+    },
+    clearTimeout(timer) { timer.cleared = true; },
+  };
+  let fetchCount = 0;
+  let upstreamAborted = false;
+  const route = await loadRoute(limiter, async (_url, { signal }) => {
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => {
+          upstreamAborted = true;
+          reject(signal.reason);
+        }, { once: true });
+      });
+    }
+    return new Response("%PDF-after-header-timeout", {
+      headers: { "Content-Type": "application/pdf" },
+    });
+  }, "http://shopkeeper:8080", AbortSignal, timerAPI);
+
+  const stalled = route.GET(routeRequest(), { params: Promise.resolve({ id: "stalled" }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  const nextPending = route.GET(routeRequest(), { params: Promise.resolve({ id: "next" }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fetchCount, 1);
+  assert.equal(deadlines.length, 1);
+
+  deadlines[0].callback();
+  const failed = await stalled;
+  assert.equal(failed.status, 502);
+  assert.equal(upstreamAborted, true);
+  assert.equal(deadlines[0].cleared, true);
+  const next = await nextPending;
+  assert.equal(await next.text(), "%PDF-after-header-timeout");
+  assert.equal(fetchCount, 2);
+});
+
+test("header timeout is cleared before a healthy PDF transfer", async () => {
+  const limiter = await loadLimiter();
+  const deadlines = [];
+  const timerAPI = {
+    setTimeout(callback, milliseconds) {
+      assert.equal(milliseconds, 10 * 60 * 1000);
+      const timer = { callback, cleared: false };
+      deadlines.push(timer);
+      return timer;
+    },
+    clearTimeout(timer) { timer.cleared = true; },
+  };
+  const finishUpstream = deferred();
+  let fetchSignal;
+  const route = await loadRoute(limiter, async (_url, { signal }) => {
+    fetchSignal = signal;
+    return new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("%PDF-healthy"));
+        void finishUpstream.promise.then(() => controller.close());
+      },
+    }), { headers: { "Content-Type": "application/pdf" } });
+  }, "http://shopkeeper:8080", AbortSignal, timerAPI);
+
+  const response = await route.GET(routeRequest(), { params: Promise.resolve({ id: "healthy" }) });
+  assert.equal(deadlines.length, 1);
+  assert.equal(deadlines[0].cleared, true);
+  if (!deadlines[0].cleared) deadlines[0].callback();
+  assert.equal(fetchSignal.aborted, false);
+  finishUpstream.resolve();
+  assert.equal(await response.text(), "%PDF-healthy");
+});
+
+test("a stalled PDF transfer times out and frees its permit", async () => {
+  const limiter = await loadLimiter();
+  const deadlines = [];
+  const signalAPI = {
+    any: (signals) => AbortSignal.any(signals),
+    timeout: (milliseconds) => {
+      assert.equal(milliseconds, 10 * 60 * 1000);
+      const controller = new AbortController();
+      deadlines.push(controller);
+      return controller.signal;
+    },
+  };
+  let fetchCount = 0;
+  let upstreamCancelled = false;
+  const route = await loadRoute(limiter, async () => {
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      return new Response(new ReadableStream({
+        cancel() {
+          upstreamCancelled = true;
+        },
+      }), { headers: { "Content-Type": "application/pdf" } });
+    }
+    return new Response("%PDF-after-timeout", { headers: { "Content-Type": "application/pdf" } });
+  }, "http://shopkeeper:8080", signalAPI);
+
+  const stalled = await route.GET(routeRequest(), { params: Promise.resolve({ id: "stalled" }) });
+  const nextPending = route.GET(routeRequest(), { params: Promise.resolve({ id: "next" }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fetchCount, 1);
+  assert.equal(deadlines.length, 1);
+
+  deadlines[0].abort(new DOMException("PDF transfer timed out", "TimeoutError"));
+  await assert.rejects(stalled.arrayBuffer(), { name: "AbortError" });
+  assert.equal(upstreamCancelled, true);
+  const next = await nextPending;
+  assert.equal(await next.text(), "%PDF-after-timeout");
+  assert.equal(fetchCount, 2);
+});
+
+test("cancelling a PDF send releases its permit and cancels the upstream body", async () => {
+  const limiter = await loadLimiter();
+  let fetchCount = 0;
+  let upstreamCancelled = false;
+  const route = await loadRoute(limiter, async () => {
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      return new Response(new ReadableStream({
+        cancel() {
+          upstreamCancelled = true;
+        },
+      }), { headers: { "Content-Type": "application/pdf" } });
+    }
+    return new Response("%PDF-after-cancel");
+  });
+
+  const first = await route.GET(routeRequest(), { params: Promise.resolve({ id: "first" }) });
+  const secondPending = route.GET(routeRequest(), { params: Promise.resolve({ id: "second" }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fetchCount, 1);
+  await first.body.cancel();
+  assert.equal(upstreamCancelled, true);
+  const second = await secondPending;
+  assert.equal(await second.text(), "%PDF-after-cancel");
+});
+
+test("aborting a PDF request during send releases its permit", async () => {
+  const limiter = await loadLimiter();
+  const controller = new AbortController();
+  let fetchCount = 0;
+  let upstreamCancelled = false;
+  const route = await loadRoute(limiter, async () => {
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      return new Response(new ReadableStream({
+        cancel() {
+          upstreamCancelled = true;
+        },
+      }), { headers: { "Content-Type": "application/pdf" } });
+    }
+    return new Response("%PDF-after-abort");
+  });
+
+  const first = await route.GET(routeRequest(controller.signal), {
+    params: Promise.resolve({ id: "first" }),
+  });
+  const secondPending = route.GET(routeRequest(), { params: Promise.resolve({ id: "second" }) });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fetchCount, 1);
+  controller.abort();
+  await assert.rejects(first.text(), { name: "AbortError" });
+  assert.equal(upstreamCancelled, true);
+  const second = await secondPending;
+  assert.equal(await second.text(), "%PDF-after-abort");
+});
+
+test("a PDF over the streaming size cap fails and frees the next permit", async () => {
+  const limiter = await loadLimiter();
+  const chunk = new Uint8Array(1024 * 1024);
+  let chunks = 0;
+  let fetchCount = 0;
+  const route = await loadRoute(limiter, async () => {
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      return new Response(new ReadableStream({
+        pull(controller) {
+          if (chunks < 65) {
+            chunks += 1;
+            controller.enqueue(chunk);
+          } else {
+            controller.close();
+          }
+        },
+      }), { headers: { "Content-Type": "application/pdf" } });
+    }
+    return new Response("%PDF-after-limit");
+  });
+
+  const first = await route.GET(routeRequest(), { params: Promise.resolve({ id: "first" }) });
+  const secondPending = route.GET(routeRequest(), { params: Promise.resolve({ id: "second" }) });
+  const reader = first.body.getReader();
+  for (let index = 0; index < 64; index += 1) {
+    const value = await reader.read();
+    assert.equal(value.done, false);
+    assert.equal(value.value.byteLength, chunk.byteLength);
+  }
+  await assert.rejects(reader.read(), /response size limit/);
+  const second = await secondPending;
+  assert.equal(await second.text(), "%PDF-after-limit");
+});
+
+test("an oversized Content-Length is rejected before streaming", async () => {
+  const limiter = await loadLimiter();
+  let cancelled = false;
+  const route = await loadRoute(limiter, async () => new Response(new ReadableStream({
+    cancel() {
+      cancelled = true;
+    },
+  }), {
+    headers: {
+      "Content-Type": "application/pdf",
+      "Content-Length": String(64 * 1024 * 1024 + 1),
+    },
+  }));
+
+  const response = await route.GET(routeRequest(), { params: Promise.resolve({ id: "scan" }) });
+  assert.equal(response.status, 502);
+  assert.match((await response.json()).error, /response size limit/);
+  assert.equal(cancelled, true);
+});
+
+test("an upstream fetch error releases the PDF permit for the next request", async () => {
+  const limiter = await loadLimiter();
+  let fetchCount = 0;
+  const route = await loadRoute(limiter, async () => {
+    fetchCount += 1;
+    if (fetchCount === 1) {
+      throw new Error("backend unavailable");
+    }
+    return new Response("%PDF-recovered", { headers: { "Content-Type": "application/pdf" } });
+  });
+
+  const failed = await route.GET(routeRequest(), { params: Promise.resolve({ id: "first" }) });
+  assert.equal(failed.status, 502);
+  const recovered = await route.GET(routeRequest(), { params: Promise.resolve({ id: "second" }) });
+  assert.equal(recovered.status, 200);
+  assert.equal(await recovered.text(), "%PDF-recovered");
+  assert.equal(fetchCount, 2);
+});
+
+test("an ordinary backend error response keeps its status, headers, and body", async () => {
+  const limiter = await loadLimiter();
+  const route = await loadRoute(limiter, async () => new Response("missing report", {
+    status: 404,
+    headers: { "Content-Type": "text/plain", "X-Report-Test": "kept" },
+  }));
+
+  const response = await route.GET(routeRequest(), { params: Promise.resolve({ id: "missing" }) });
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get("X-Report-Test"), "kept");
+  assert.equal(await response.text(), "missing report");
 });

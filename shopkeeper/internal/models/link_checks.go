@@ -18,6 +18,7 @@ type LinkCheck struct {
 	Error        *string     `json:"error"`
 	Summary      LinkSummary `json:"summary"`
 	SeedURLs     []string    `json:"-"`
+	RootPublic   bool        `json:"-"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 	CompletedAt  *time.Time  `json:"completed_at"`

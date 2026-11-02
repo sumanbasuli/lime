@@ -5,15 +5,32 @@ services:
     environment:
       ACT_RULES_PATH: /shared-data/act-rules.json
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      REPORT_BASE_URL: ${REPORT_BASE_URL:-http://ui:3000}
+      LIME_ALLOWED_HOSTS: ${LIME_ALLOWED_HOSTS:-ui,shopkeeper}
       SHOPKEEPER_PORT: 8080
     ports:
       - "${LIME_API_PORT:-8080}:8080"
     shm_size: "2gb"
+    mem_limit: ${LIME_SHOPKEEPER_MEMORY_LIMIT:-2g}
+    memswap_limit: ${LIME_SHOPKEEPER_MEMORY_LIMIT:-2g}
+    # Only the bounded initializer has these capabilities. It drops every
+    # capability, changes to UID/GID 10001, then execs the requested command.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+      - SETPCAP
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./deploy/docker/chromium-seccomp.json
     volumes:
       - ./data:/shared-data:ro
       - screenshots:/app/screenshots
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      test: ["CMD", "setpriv", "--reuid=10001", "--regid=10001", "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "--", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -31,6 +48,7 @@ services:
       AXE_GUIDANCE_PATH: /shared-data/axe-guidance.json
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
       SHOPKEEPER_URL: ${SHOPKEEPER_URL:?set SHOPKEEPER_URL}
+      LIME_ALLOWED_HOSTS: ${LIME_ALLOWED_HOSTS:-ui,shopkeeper}
       LIME_UPDATE_CHECK: ${LIME_UPDATE_CHECK:-true}
       LIME_GITHUB_REPO: ${LIME_GITHUB_REPO:-sumanbasuli/lime}
     ports:

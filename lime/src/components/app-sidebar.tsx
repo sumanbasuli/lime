@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { version as appVersion } from "../../package.json"
 
 import { NavMain } from "@/components/nav-main"
 import { NavSecondary } from "@/components/nav-secondary"
@@ -82,11 +83,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       <SidebarFooter className="border-t border-black/8 px-3 py-3">
         <div className="flex items-center gap-2.5 overflow-hidden rounded-xl px-0.5 group-data-[collapsible=icon]:justify-center">
           <div className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-black text-[12px] font-bold text-[#FFED00]">
-            SB
+            LM
           </div>
           <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-            <p className="truncate text-[13px] font-semibold">Suman Basuli</p>
-            <p className="truncate text-[11.5px] text-black/45">Self-hosted · v1.0.5</p>
+            <p className="truncate text-[13px] font-semibold">LIME workspace</p>
+            <p className="truncate text-[11.5px] text-black/45">Self-hosted · v{appVersion}</p>
           </div>
         </div>
       </SidebarFooter>

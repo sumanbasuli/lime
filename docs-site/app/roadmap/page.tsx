@@ -50,7 +50,7 @@ const stages = [
       {
         icon: "dns",
         title: "Host it yourself",
-        copy: "Run LIME with Docker or follow the Debian and Fly.io guides. Keep your scans, database, and screenshots on infrastructure you control.",
+        copy: "Run LIME with Docker or follow the Debian guide. Keep your scans, database, and screenshots on infrastructure you control.",
       },
     ],
     href: "/docs/user/first-scan/",
@@ -119,7 +119,7 @@ const stages = [
       {
         icon: "cloud_upload",
         title: "More hosting checks",
-        copy: "Expand testing of published Docker images and Fly.io deployments so the guides cover more real installation scenarios.",
+        copy: "Expand testing of published Docker images and native Debian deployments so the guides cover more real installation scenarios.",
       },
       {
         icon: "speed",

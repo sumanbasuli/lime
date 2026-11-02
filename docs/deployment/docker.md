@@ -23,11 +23,17 @@ That keeps the Docker images generic. They do not need a build-time public API U
 
 Use one Shopkeeper per database. Its active jobs, pause cancellation, and restart recovery are process-local; another backend can reset a job still running elsewhere. The screenshot volume is part of the durable application state and must be backed up with PostgreSQL.
 
-The source stack publishes PostgreSQL on port 5432, Shopkeeper on 8080, and the UI on 3000. The release stack also publishes the backend and UI. Remove or restrict unnecessary port mappings, and put the UI behind a reverse proxy with TLS and access control. The dashboard and ordinary API routes have no built-in login; the MCP key protects only MCP.
+The source stack binds PostgreSQL to `127.0.0.1:5432` by default while publishing Shopkeeper on 8080 and the UI on 3000. The release stack also publishes the backend and UI on host interfaces by default; these binds remain unchanged for existing remote deployments. The docs-demo database binds to localhost. The dashboard and ordinary API routes have no built-in login, and the MCP key protects only MCP. Before allowing remote access, restrict the published UI and API ports with a firewall or authenticated reverse proxy, serve the UI over TLS, and remove or restrict the direct Shopkeeper mapping if it is not needed. If remote PostgreSQL access is necessary, set `LIME_DB_BIND_HOST` explicitly, keep the unique password created for new installs, and allow only trusted client addresses. An older stack using the former default password needs a deliberate database-role rotation, not just an `.env` edit.
+
+Link CSV downloads may use up to 512 MiB of temporary storage inside the Shopkeeper container while the export is prepared and delivered. Keep its temporary directory on suitable disk-backed storage rather than a small tmpfs; a full or failing temporary volume returns an export error before the CSV response starts. Only one such export runs per Shopkeeper process at a time.
+
+Scans make network requests from Shopkeeper. Limit who can submit private targets, and use network rules to keep Shopkeeper away from sensitive management and metadata services. When a private target uses the standard HTTP or HTTPS port, its page can also request the same host on the other standard port, even if that port belongs to a separate service.
 
 Browser write requests to the ordinary API must come from the dashboard's origin. The existing trusted `http://localhost:<port>` development exception for direct Shopkeeper calls remains, as do non-browser clients without an `Origin` header; other cross-origin browser writes are rejected. A public reverse proxy must preserve the browser's `Origin` and `Host` headers and set `X-Forwarded-Proto` to the public request scheme, as in the [Debian nginx example](../../deploy/debian/nginx.conf.example), so same-origin dashboard writes are recognized. This browser protection does not replace the access control above.
 
-Replace development credentials for nonlocal use, protect `.env`, and ensure both services reach the same PostgreSQL database. A production database URL's TLS requirements depend on its provider; the local `sslmode=disable` example is not a recommendation for a remote database.
+Both services also reject an unrecognized HTTP `Host` with status 421. `LIME_ALLOWED_HOSTS` is a comma-separated list of exact DNS names, without schemes, paths, or wildcards; a port may be present but does not restrict matching to that port. Names are matched case-insensitively. `localhost` and literal IPv4/IPv6 addresses are accepted implicitly, even when omitted from the list. An invalid list fails closed for both services, including their health checks. Source, release, and docs-demo Compose pass `LIME_ALLOWED_HOSTS` to **both** services and default it to `ui,shopkeeper` for internal requests. Before serving `lime.example.com`, set `LIME_ALLOWED_HOSTS=ui,shopkeeper,lime.example.com` in the deployment `.env`, then recreate both services. Include any distinct public API DNS name if clients reach Shopkeeper directly. The reverse proxy must preserve the original `Host` on both hops. Keep the ingress hostname check, firewall/authentication, and direct Shopkeeper network boundary: this application list does not authenticate callers, and the implicit IP allowance means it does not restrict direct IP access.
+
+Protect `.env`, use unique credentials for nonlocal deployments, and ensure both services reach the same PostgreSQL database. A production database URL's TLS requirements depend on its provider; the local `sslmode=disable` example is not a recommendation for a remote database.
 
 ## Local Docker Stack
 
@@ -44,7 +50,9 @@ make start-all
 make stop-all
 ```
 
-For a new checkout, copy `.env.example` to `.env` first. `make start-all` builds the services, starts the database, and Shopkeeper applies migrations on startup. `make start-dev` instead applies the UI hot-reload override. The individual `start-db`, `start-shopkeeper`, `start-ui`, and `migrate-all` targets are available when working on one service.
+For a new checkout, start Docker, then run `make init-env` before starting LIME. It checks for an existing LIME container and Compose `pgdata` volumes, creates a private `.env` with a unique password only for a fresh stack, and refuses to overwrite an existing `.env`. If the host has another project's unrelated `pgdata` volume, first confirm which project and volume your checkout will use; then set `LIME_INIT_ENV_ALLOW_OTHER_PGDATA=true` for this one initialization. It never ignores a volume named for this checkout's `COMPOSE_PROJECT_NAME` (or directory-derived default). Initialization accepts the ordinary `docker compose` or `docker-compose` command only: put any `-p`/`--project-name` selection in `COMPOSE_PROJECT_NAME` and use the same Docker context for initialization and startup. Keep the new `.env` with the database volume across updates: changing the Compose password does not change an already-initialized PostgreSQL role. Source Compose now refuses a missing or blank password. If you have an older volume but no `.env`, restore its existing credential in a private `.env` instead of running the initializer; do not remove the volume or generate a new password for it. `make start-all` builds the services, starts the database, and Shopkeeper applies migrations on startup. `make start-dev` instead applies the UI hot-reload override. The individual `start-db`, `start-shopkeeper`, `start-ui`, and `migrate-all` targets are available when working on one service.
+
+For a legacy no-`.env` stack, first confirm the original Compose project and `pgdata` volume; preserve the original `-p`/`COMPOSE_PROJECT_NAME` on every subsequent command. Create a new mode-`0600` `.env` from `.env.example` only if the file is absent, and set `POSTGRES_PASSWORD` to the password already in that database (the old source fallback was `lime_dev_password` unless you overrode it). Set native `DATABASE_URL` to the same credential if you run Shopkeeper outside Compose. Then check Compose configuration and restart with the same project and volume. A changed `POSTGRES_PASSWORD` environment value does not rotate PostgreSQL's stored role password; perform a deliberate database credential rotation separately after you have a verified backup.
 
 The root `.env` controls:
 - published UI and API host ports
@@ -82,6 +90,7 @@ These builds are generic. Runtime deployments must supply:
 ## GitHub Release Publishing
 
 Pushing a `VERSION` change to `main`, or manually dispatching it, triggers [release-docker.yml](../../.github/workflows/release-docker.yml). A code-only push does not publish images automatically.
+The `VERSION` file and any direct bundle version must use `major.minor.patch`, optionally followed by a prerelease suffix such as `-rc.1`. Keep `VERSION` on one line. Release builds reject other forms before replacing bundle output or claiming a tag. Native builds, bundle generation, and GitHub publishing reject a symlinked `dist`; bundle generation also rejects a symlinked `dist/release` or output archive, and the publisher rejects symlinked bundle and release-notes files. Use real build-output directories.
 
 The workflow:
 - reads `VERSION` and uses `v<VERSION>` as the release tag
@@ -111,15 +120,9 @@ The release bundle contains:
 - `README.md`
 - `data/*.json`
 
-After extracting the bundle, copy `.env.example` to `.env`, set the external `DATABASE_URL`, and review the selected image tag. Do not overwrite an existing operator `.env` during an update. The release stack includes no PostgreSQL server.
+After extracting the bundle, run `umask 077; cp .env.example .env; chmod 600 .env` for a new install, set the external `DATABASE_URL`, and review the selected image tag. Do not overwrite an existing operator `.env` during an update. The release stack includes no PostgreSQL server.
 
-The current release Compose template omits `REPORT_BASE_URL`. Before enabling PDF use, add this under the existing `shopkeeper.environment` block in your deployment's Compose file:
-
-```yaml
-REPORT_BASE_URL: http://ui:3000
-```
-
-This is the backend-to-UI direction; `SHOPKEEPER_URL=http://shopkeeper:8080` in `.env` configures the opposite direction. Setting `REPORT_BASE_URL` only in `.env` is insufficient because the current template does not forward that variable. Alternatively use a Compose override, but consistently include it for startup, diagnostics, migration, update, and recovery; `scripts/docker-update.sh` accepts one `COMPOSE_FILE` and does not combine an additional override automatically.
+The release Compose template sets Shopkeeper's `REPORT_BASE_URL` to `http://ui:3000`, so PDF rendering can reach the dashboard inside the Compose network. Set `REPORT_BASE_URL` in `.env` only if your internal UI address differs. `SHOPKEEPER_URL=http://shopkeeper:8080` configures the opposite, UI-to-backend direction. If you use a Compose override for either address, include it consistently for startup, diagnostics, migration, update, and recovery; `scripts/docker-update.sh` accepts one `COMPOSE_FILE` and does not combine an additional override automatically.
 
 From the extracted deployment directory:
 
@@ -182,6 +185,18 @@ This keeps build contexts small and excludes local files from release images.
 ## Shopkeeper Container Note
 
 Shopkeeper runs Chromium inside Docker. The Compose configuration sets `shm_size: 2gb` for browser shared memory.
+
+All three Compose stacks also set Shopkeeper `mem_limit` and `memswap_limit` to `2g` by default. The equal values allow no additional swap beyond the memory limit. Set `LIME_SHOPKEEPER_MEMORY_LIMIT` in `.env` to change both together after sizing the host and testing representative scans and exports; a larger limit increases the possible impact of a heavy page, while a smaller one can terminate Shopkeeper or Chromium during normal work. The 2 GB shared-memory allocation is separate from these limits. Keep the selected value and current Compose files when updating, and inspect `docker compose config` before recreating the service.
+
+Shopkeeper and Chromium run as UID/GID `10001`, with no process capabilities and no-new-privileges. Chromium's sandbox is required. The current Compose files load `deploy/docker/chromium-seccomp.json` from your checkout or release bundle; keep that file with the Compose deployment. The policy is for Docker Engine on Linux amd64/arm64, including Docker Desktop's Linux VM. Other runtimes need their own validation; do not use an unconfined profile or add `SYS_ADMIN` to bypass a startup failure.
+
+Existing installations need the [one-time sandbox upgrade](updates.md#one-time-chromium-sandbox-upgrade). Changing only an image tag in an old Compose file is insufficient. Shopkeeper checks that a sandboxed browser can start before applying migrations or opening its HTTP port, and exits with a diagnostic if it cannot.
+
+The container entrypoint briefly starts as root to prepare the fixed `/app/screenshots` volume, then drops privileges before running Shopkeeper or a command such as `./shopkeeper --migrate`. On the first start, it transfers supported root-owned legacy captures to UID/GID `10001`, preserving their paths, bytes, and permission bits. It rejects symlinks, hard-linked files, nested mounts, special files, and unexpected owners instead of following or broadly changing them. Keep the image's default entrypoint and user; a custom read-only screenshot mount or user override cannot perform this upgrade.
+
+Shared catalog mounts must be readable by both Shopkeeper (`10001`) and the UI (`1001`), with traversal access on the mounted directories. The release bundle provides readable copies of its public catalogs; the fresh one-line installer prepares its cloned public catalogs too. For a manual checkout or custom catalog, grant those users the narrow read/traverse access it needs; do not make `.env` files or screenshots public. An unreadable or malformed ACT catalog stops Shopkeeper startup.
+
+Continue to restrict scan submission to trusted users, isolate the backend from sensitive internal services, and keep host Docker sockets and unrelated secrets out of the container.
 
 The embedded axe library and image-baked catalogs work without outbound rule downloads; scan targets and the default-enabled GitHub release check still need their own network access. A scan target on `localhost` refers to the backend container itself, not the host/browser. Use a hostname reachable from that container for local fixtures.
 

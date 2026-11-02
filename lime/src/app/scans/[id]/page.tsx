@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
-import { scans, issues, issueOccurrences } from "@/db/schema";
+import { scans, issues } from "@/db/schema";
 import { eq, count } from "drizzle-orm";
 import { AccessibilityScoreGauge } from "@/components/accessibility-score-gauge";
 import { AuditResultsDataTable } from "@/components/audit-results-data-table";
@@ -25,6 +25,7 @@ import {
   getAccessibilityScoreBand,
   type ScanScoreSummary,
 } from "@/lib/scan-scoring";
+import { redactUrlUserinfo } from "@/lib/url-presentation";
 
 export const dynamic = "force-dynamic";
 
@@ -43,9 +44,10 @@ function formatTimestamp(value: string | Date | null | undefined): string {
 function formatTarget(value: string): { domain: string; url: string } {
   try {
     const parsed = new URL(value);
-    return { domain: parsed.hostname.replace(/^www\./, ""), url: value };
+    return { domain: parsed.hostname.replace(/^www\./, ""), url: redactUrlUserinfo(value) };
   } catch {
-    return { domain: value, url: value };
+    const redacted = redactUrlUserinfo(value);
+    return { domain: redacted, url: redacted };
   }
 }
 
@@ -183,24 +185,19 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
     notFound();
   }
 
-  const [scanIssues, auditReports, reportSettings] = await measureServerAction(
+  const [issueCounts, auditReports, reportSettings] = await measureServerAction(
     `scan detail issue and audit summaries ${id}`,
     () =>
       Promise.all([
         db
           .select({
-            id: issues.id,
-            violationType: issues.violationType,
-            description: issues.description,
             severity: issues.severity,
             isFalsePositive: issues.isFalsePositive,
-            createdAt: issues.createdAt,
-            occurrenceCount: count(issueOccurrences.id),
+            issueCount: count(),
           })
           .from(issues)
-          .leftJoin(issueOccurrences, eq(issueOccurrences.issueId, issues.id))
           .where(eq(issues.scanId, id))
-          .groupBy(issues.id),
+          .groupBy(issues.severity, issues.isFalsePositive),
         getScanAuditReports([
           {
             id: scan.id,
@@ -226,25 +223,23 @@ export default async function ScanDetailPage({ params }: ScanDetailPageProps) {
     scan.status === "completed" &&
     scoreSummary.isPartialScan &&
     scoreSummary.failedUrlCount > 0;
-  const excludedIssueCount = scanIssues.filter(
-    (issue) => issue.isFalsePositive
-  ).length;
-  const activeIssueCount = scanIssues.length - excludedIssueCount;
-  const activeIssues = scanIssues.filter((issue) => !issue.isFalsePositive);
+  let excludedIssueCount = 0;
+  let activeIssueCount = 0;
+  const severityCounts: Record<string, number> = {};
+  for (const row of issueCounts) {
+    if (row.isFalsePositive) {
+      excludedIssueCount += row.issueCount;
+    } else {
+      activeIssueCount += row.issueCount;
+      const severity = row.severity ?? "moderate";
+      severityCounts[severity] = (severityCounts[severity] ?? 0) + row.issueCount;
+    }
+  }
   const hasIssueDetails =
     activeIssueCount > 0 ||
     excludedIssueCount > 0 ||
     scoreSummary.needsReviewCount > 0;
   const target = formatTarget(scan.sitemapUrl);
-
-  const severityCounts = activeIssues.reduce(
-    (acc, issue) => {
-      const severity = issue.severity ?? "moderate";
-      acc[severity] = (acc[severity] || 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>
-  );
 
   return (
     <div className="mx-auto w-full max-w-[1180px] space-y-5">

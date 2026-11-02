@@ -1,13 +1,13 @@
 services:
   db:
-    image: postgres:17-alpine
+    image: postgres:17.11-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: lime
-      POSTGRES_PASSWORD: lime_docs_password
+      POSTGRES_PASSWORD: ${LIME_DOCS_DB_PASSWORD:?Set a unique URL-safe LIME_DOCS_DB_PASSWORD for the isolated docs database}
       POSTGRES_DB: lime_docs_db
     ports:
-      - "${LIME_DOCS_DB_PORT:-15432}:5432"
+      - "${LIME_DOCS_DB_BIND_HOST:-127.0.0.1}:${LIME_DOCS_DB_PORT:-15432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -26,17 +26,33 @@ services:
         condition: service_healthy
     environment:
       ACT_RULES_PATH: /shared-data/act-rules.json
-      DATABASE_URL: postgresql://lime:lime_docs_password@db:5432/lime_docs_db?sslmode=disable
+      DATABASE_URL: postgresql://lime:${LIME_DOCS_DB_PASSWORD:?Set a unique URL-safe LIME_DOCS_DB_PASSWORD for the isolated docs database}@db:5432/lime_docs_db?sslmode=disable
       REPORT_BASE_URL: http://ui:3000
+      LIME_ALLOWED_HOSTS: ${LIME_ALLOWED_HOSTS:-ui,shopkeeper}
       SHOPKEEPER_PORT: 8080
     ports:
-      - "${LIME_DOCS_API_PORT:-18080}:8080"
+      - "${LIME_DOCS_API_BIND_HOST:-127.0.0.1}:${LIME_DOCS_API_PORT:-18080}:8080"
     shm_size: "2gb"
+    mem_limit: ${LIME_SHOPKEEPER_MEMORY_LIMIT:-2g}
+    memswap_limit: ${LIME_SHOPKEEPER_MEMORY_LIMIT:-2g}
+    # Only the bounded initializer has these capabilities. It drops every
+    # capability, changes to UID/GID 10001, then execs the requested command.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETUID
+      - SETGID
+      - SETPCAP
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./deploy/docker/chromium-seccomp.json
     volumes:
       - ./data:/shared-data:ro
       - screenshots:/app/screenshots
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
+      test: ["CMD", "setpriv", "--reuid=10001", "--regid=10001", "--clear-groups", "--bounding-set=-all", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "--", "wget", "-qO-", "http://127.0.0.1:8080/api/health"]
       interval: 10s
       timeout: 5s
       retries: 18
@@ -52,13 +68,14 @@ services:
         condition: service_healthy
     environment:
       ACT_RULES_PATH: /shared-data/act-rules.json
-      DATABASE_URL: postgresql://lime:lime_docs_password@db:5432/lime_docs_db?sslmode=disable
+      DATABASE_URL: postgresql://lime:${LIME_DOCS_DB_PASSWORD:?Set a unique URL-safe LIME_DOCS_DB_PASSWORD for the isolated docs database}@db:5432/lime_docs_db?sslmode=disable
       SHOPKEEPER_URL: http://shopkeeper:8080
+      LIME_ALLOWED_HOSTS: ${LIME_ALLOWED_HOSTS:-ui,shopkeeper}
       LIME_UPDATE_CHECK: "false"
       LIME_GITHUB_REPO: sumanbasuli/lime
       LIME_VERSION: docs-demo
     ports:
-      - "${LIME_DOCS_UI_PORT:-13000}:3000"
+      - "${LIME_DOCS_UI_BIND_HOST:-127.0.0.1}:${LIME_DOCS_UI_PORT:-13000}:3000"
     volumes:
       - ./data:/shared-data:ro
 

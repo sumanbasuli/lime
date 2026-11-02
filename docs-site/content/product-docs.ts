@@ -87,6 +87,8 @@ Start with a **Single page** scan to learn the workflow or check one changed pag
 
 Use a complete HTTP or HTTPS URL, such as \`https://example.com/about\` or \`https://example.com/sitemap.xml\`. The target must be reachable from the LIME server, not just from your own browser. The form does not accept login credentials or your browser's signed-in session.
 
+Avoid putting access tokens or passwords in a URL. LIME hides credentials, queries, and fragments when it shows a saved URL in the dashboard, API, MCP, or reports. It still keeps the exact address privately so scans and retries work; protect database backups and remember that page content or screenshots may reveal sensitive data. A displayed link without its query may not reopen a token-protected page.
+
 Have an optional **Tag** ready if you want to distinguish a project, environment, or release, for example \`staging-release-12\`.
 
 ## Create the scan
@@ -100,17 +102,27 @@ Have an optional **Tag** ready if you want to distinguish a project, environment
 
 Each scan has its own ID and saved results. Its chosen screen size is reused for every page, same-scan retries, and rescans. Use Mobile to audit the site's narrow layout; resizing the dashboard does not change how the site was audited. Start a separate scan to compare another screen size.
 
+If LIME says the queue is full, it has not created the scan. Wait for active work to finish, then select **Start scan** again. The same limit applies to **Resume**, **Retry failed pages**, and **Rescan**; a rejected action leaves the saved scan unchanged.
+
 ## What LIME does next
 
-For a sitemap, LIME first discovers and checks eligible URLs. It then visits pages in Chromium, runs automated checks, and saves findings and screenshot evidence. Status moves through profiling, scanning, and processing before the run settles.
+For a sitemap, LIME first discovers and checks eligible URLs. It then visits pages in Chromium, runs automated checks, and saves each finished page's findings and screenshot evidence. The scan shows **Profiling** during discovery and **Scanning** while pages are audited; it settles as completed or failed when the work is done.
+
+On a large sitemap, LIME lets other waiting scans use a worker slot about every ten minutes during discovery and page auditing. The scan may briefly show **Pending** while it waits for its next turn. Completed sitemap work, page checks, and audited pages are saved, and it continues automatically. An in-flight network request or saved checkpoint can make one turn last a little longer.
+
+Sitemap discovery is bounded to 20,000 HTTP requests, 128 MiB of sitemap XML in total, 50 MiB per sitemap, 10,000 distinct page candidates, and ten nested-sitemap levels. LIME fails discovery if a limit is exceeded; it does not present the pages found so far as a complete scan. These limits mean sitemap mode cannot promise every URL in a larger sitemap. There is no overall 30-minute discovery cutoff after the checkpointed discovery upgrade.
 
 When it settles, check coverage first and then open **View issue details**. If some pages failed to audit, follow [Scan Detail and Partial Retry](/docs/user/scan-detail/) before treating the report as complete.
+
+LIME checks embedded frames as part of the page audit. A frame that changes while checks are running can cause that page to fail so its saved results do not leave out the new content. Review important embedded content yourself as well; automated checks do not cover every accessibility barrier.
 
 If you selected **Include link check**, the scan detail page also shows a **Link check** card. The companion check has its own progress and result status; use **View link results** to inspect destinations and source references. Accessibility can finish before link checking does. Link results do not change the accessibility score, issue groups, screenshot evidence, or existing accessibility exports. See [Link Checker](/docs/user/link-checker/) for limits and CSV export.
 
 ## If the target redirects
 
-For sitemap scans, LIME checks pages on the entered sitemap's host and follows redirects only while they stay on that host. Custom ports must also match; switching between HTTP and HTTPS on their usual ports is allowed. LIME skips off-host page URLs and redirects without requesting their destinations. For example, a sitemap on \`example.com\` whose pages redirect to \`www.example.com\` can produce less coverage than you expect. An off-host nested sitemap stops profiling so the scan does not silently use an incomplete page list. Submit the sitemap for the intended final host and compare the discovered count with your expected pages.
+During sitemap discovery and profiling, LIME checks pages on the entered sitemap's host and follows redirects only while they stay on that host. Custom ports must also match; switching between HTTP and HTTPS on their usual ports is allowed. At this stage, LIME skips off-host page URLs and redirects without requesting their destinations. For example, a sitemap on \`example.com\` whose pages redirect to \`www.example.com\` can produce less coverage than you expect. An off-host nested sitemap stops profiling so the scan does not silently use an incomplete page list. Submit the sitemap for the intended final host and compare the discovered count with your expected pages.
+
+During the browser audit, LIME blocks redirects and page resources that lead to private or localhost addresses outside the entered site. Public assets from other sites can still load. If the page itself lands on a different host or an unsupported port, LIME marks it as failed rather than saving another site's results. For a private site entered on the usual HTTP or HTTPS port, LIME allows that same host on both usual ports. This lets the site switch between HTTP and HTTPS, but it also lets the page request the other port, even if a separate service is listening there. Only scan private sites you trust; operators should keep the LIME server away from sensitive internal services. If the site's layout depends on another private host, the saved screenshot may differ from what you see in your browser. If a hostname has already resolved to a public address during a scan, a later private address is blocked. After upgrading, start a fresh scan from **New scan** if an older saved hostname scan needs to reach an intentionally private site; **Rescan** keeps the older scan's network policy.
 `,
   },
   {
@@ -122,7 +134,7 @@ For sitemap scans, LIME checks pages on the entered sitemap's host and follows r
     sourceFiles: ["lime/src/app/page.tsx", "lime/src/app/scans/page.tsx", "lime/src/lib/scan-scoring.ts"],
     markdown: `# Dashboard and Scan List
 
-**Overview** shows recent scans and workspace totals. **Scans** shows the full saved list. Open a target from either view to see its coverage, checks, findings, and available actions.
+**Overview** shows recent scans and workspace totals. **Scans** lets you browse the full saved history, 50 scans at a time. Use **Previous** and **Next** to move between pages. Open a target from either view to see its coverage, checks, findings, and available actions.
 
 ![Dashboard scan list](/product-screenshots/dashboard.png "Overview shows recent targets, tags, status, score, and coverage.")
 
@@ -138,12 +150,14 @@ For sitemap scans, LIME checks pages on the entered sitemap's host and follows r
 
 Use **Search scans** in the header and submit the search to match a target URL, tag, stored status, or scan type. Command-K or Control-K focuses the input. On the results page, select a tag chip to narrow that search; **All** removes the tag filter. Starting another header search resets the tag filter.
 
+Search matches the target as shown in the list; credentials embedded in a saved URL are not displayed or searchable. Search terms and exact tag filters can be up to 256 characters long. Results remain paged, including when you search or select a tag.
+
 No results? Clear the search and tag filter before assuming a scan is missing. On mobile, use the menu button to open the sidebar; wide tables can be scrolled horizontally. Active progress and Overview's **Pages scanned** count represent processed page attempts, which can include failures; use completed coverage on a settled scan to identify successful audits.
 
 ## Statuses
 
-- **Pending** means the scan has been created or reopened and is waiting for work.
-- **Profiling** means LIME is discovering eligible URLs from the sitemap.
+- **Pending** means the scan is waiting for work. A large scan can return to pending between discovery or page batches without losing committed work; it continues automatically.
+- **Profiling** means LIME is discovering eligible URLs from the sitemap. The audited-page count stays at zero until the complete eligible list is ready.
 - **Scanning** means LIME is visiting pages and running accessibility checks.
 - **Processing** means completed browser results are being grouped and stored.
 - **Paused** means the scan has stopped and can be resumed.
@@ -185,6 +199,8 @@ Link checking is available in LIME 2.0. If your dashboard is missing these contr
 1. Open **Link checker** in the sidebar.
 2. Under **Check a site**, choose **Single page** to extract links from one page, or **Full crawl** to follow eligible same-origin pages.
 3. Enter a complete HTTP or HTTPS **Page URL** or **Website URL**. Submit a webpage, not a sitemap XML file. The server must be able to reach it; your browser's login session is not supplied.
+
+Avoid URLs with access tokens or passwords after \`?\`. LIME hides queries in displayed link addresses, CSV, and MCP results, but retains full targets privately for checking and rechecking. Captured page text and database backups may still contain secrets; use a secret-free test URL when possible.
 4. For **Full crawl**, choose **Maximum pages**. The default is 100 and the maximum is 500. A limit is a ceiling, not a promise that this many pages exist or will succeed.
 5. Select **Start link check** and review the detail page. Leaving the dashboard does not stop the backend job.
 
@@ -193,6 +209,8 @@ Link checking is available in LIME 2.0. If your dashboard is missing these contr
 Use the site's final canonical URL, including the correct HTTPS scheme and \`www\` hostname if applicable. A root that redirects to another origin can be checked for reachability, but LIME will not extract that other origin's links; the run shows a warning when this limits its coverage.
 
 **All checks** is saved history, including companions. The **All saved checks** totals add counts across those jobs, not distinct destinations across time. Checking the same site twice contributes two sets of results. Use a run's detail page for its own coverage and counts.
+
+If the queue is full, no link check is created. Wait for active checks to finish, then try again. A rejected **Recheck** leaves the original result intact.
 
 ## Include a link check with an accessibility scan
 
@@ -231,7 +249,7 @@ One destination is grouped into one target row even when many pages reference it
 
 The outcome tiles show healthy, redirected, broken, error, blocked and unchecked totals for this saved run. Select a tile or use **Status** to filter targets. **Run details** shows scope, start/finish timestamps and elapsed time, including any time spent queued. Familiar brand icons help you recognize destinations; check the result status to see whether each link works.
 
-Expand **Show sources** to see the complete destination URL and numbered **Referenced from** cards. Each occurrence includes **Found on**, its HTML **Element** and **Attribute**, and **Captured text**. Long URLs remain available without stretching the collapsed card. **No text captured** describes the saved extraction only; it is not a missing-accessible-name finding. A source-page inventory entry is explicitly distinguished from an extracted HTML link. Repeated occurrences are retained, not deduplicated away.
+Expand **Show sources** to see the destination's origin and path and numbered **Referenced from** cards. LIME hides the URL's query and fragment here, although it keeps the full address privately for checks and rechecks. Each occurrence includes **Found on**, its HTML **Element** and **Attribute**, and **Captured text**. Long paths remain available without stretching the collapsed card. **No text captured** describes the saved extraction only; it is not a missing-accessible-name finding. A source-page inventory entry is explicitly distinguished from an extracted HTML link. Repeated occurrences are retained, not deduplicated away.
 
 Source references load in batches. Use the pagination controls to see all the places a link appears. Use the source address and context to locate the original markup rather than changing only the final destination. If a page of sources cannot load, select **Retry sources**; outdated rows are hidden until the requested page loads successfully.
 
@@ -240,17 +258,18 @@ A non-standard HTTP response such as **999** keeps its saved result category and
 ## Limits and interpretation
 
 - A run is bounded by source-page, target, reference, request, redirect, body, and time budgets. Current ceilings are 500 source pages, 2,000 unique targets, 10,000 retained references, 5,000 HTTP requests, five redirect hops, 2 MiB of HTML per source page, ten seconds per request, and ten minutes per job. Companions use the 500-source-page ceiling. **Truncated** means the saved result does not cover the entire discovered scope.
-- Extraction reads returned HTML; it does not run Chromium, execute JavaScript, authenticate, or wait for client-side links. Links created only by JavaScript can be absent. The accessibility scanner's screenshot and rendering behavior is unchanged.
+- Extraction reads returned HTML; it does not run Chromium, execute JavaScript, authenticate, or wait for client-side links. Links created only by JavaScript can be absent. Running a link check does not change the accessibility findings or saved screenshots.
 - Fragment-only references such as \`#section\` are skipped. Fragment identifiers on other destinations are removed before checking: a healthy \`/guide#missing-section\` result does not prove that the section exists. Query strings remain significant, so \`?page=1\` and \`?page=2\` can be separate targets.
 - Non-HTTP(S) schemes such as \`mailto:\`, \`tel:\`, and \`javascript:\` are not tested as HTTP destinations.
-- The entered root origin is trusted and may be private for local/staging use. Discovered external origins and redirects outside that root are restricted to globally routable addresses. A **Blocked** result is a policy outcome, not a site-quality verdict. Only submit origins you are authorized to access.
+- Connection hints such as \`preconnect\` and \`dns-prefetch\` are skipped. They prepare a server connection or DNS lookup; they do not point to a file that must return a successful HTTP response. Stylesheets, preloads, and other resource links are still checked.
+- The entered root origin may be private for local/staging use. Once its hostname resolves publicly, the same check and any recheck will block a later private address. Older saved hostname checks may need a fresh check to reach an intentionally private site after an upgrade. Discovered external origins and redirects outside the root remain restricted to globally routable addresses. A **Blocked** result is a policy outcome, not a site-quality verdict. Only submit origins you are authorized to access.
 - Status codes are point-in-time evidence. Rate limits, bot protection, temporary failures, login requirements, or changes after the run can affect results. A healthy response does not verify fragment anchors, content correctness, accessibility, malware safety, or security conformance.
 
 ## Export and repeat a check
 
 Select **Export CSV** for saved link targets and their source references. This is a separate link-check export, not the accessibility report CSV. It includes the available saved scope; it does not fill gaps from a truncated, failed, or cancelled run.
 
-CSV has a row per retained source reference with repeated destination details. Prefer a settled run before sharing final evidence; results can change while a job is active.
+CSV has a row per retained source reference with repeated destination details. Prefer a settled run before sharing final evidence; results can change while a job is active. If another export is running, try again shortly. An exceptionally large export over 512 MiB returns an error rather than a partial file.
 
 Use **Cancel check** to stop a queued or running link job without cancelling the parent accessibility scan. **Recheck** is available after the run settles; it creates a new detached run and preserves the old run for comparison. Rechecking a companion reuses its saved page inventory, not a newly expanded sitemap. If it never started and no inventory was saved, start a new accessibility scan with link checking selected instead.
 
@@ -294,6 +313,8 @@ If **Include link check** was selected when the scan was created, a separate **L
 
 A **failed URL** means the page audit did not complete. A **failed check** means an audited page produced an accessibility finding. These require different follow-up: restore page coverage for the first, investigate the site's markup or behavior for the second.
 
+On a large sitemap, the status can move from **Profiling** or **Scanning** back to **Pending** while other queued scans take a turn. You do not need to select **Resume**: LIME keeps committed discovery work or completed pages and picks up the remaining work automatically. A manual **Pause** is different and stays paused until you resume it.
+
 This page does not currently list individual failed URL addresses. If you need to diagnose exactly which page audits failed, ask the operator to inspect the saved URL statuses or scanner logs using the scan ID. **View issue details** lists affected URLs for saved findings, not every failed page attempt. It appears when failed, marked, or needs-review groups are available.
 
 ## Same-scan failed-page retry
@@ -316,9 +337,9 @@ If a page fails again, address its reachability or audit error before retrying r
 ## Pause and resume
 
 1. Select **Pause** on an active scan.
-2. Wait for **Pausing...** to settle to **Paused**. A pause is cooperative: pages already in flight may finish before it is saved.
+2. Wait for **Pausing...** to settle to **Paused**. A pause is cooperative: an in-flight discovery request, XML checkpoint, or page audit may settle before it is saved.
 3. Select **Resume** when you want to continue pending pages.
-4. LIME keeps the same scan ID, screen size, completed pages, and saved findings. A paused scan stays paused if the backend restarts.
+4. LIME keeps the same scan ID, screen size, completed discovery work, completed pages, and saved findings. A paused scan stays paused if the backend restarts.
 
 Closing the browser or changing pages does not pause a scan.
 
@@ -370,6 +391,10 @@ The small image is a focused preview of the affected element. Select it to open 
 
 If the focused image is unavailable but a page screenshot was saved, **Open page capture** opens that saved fallback. It does not capture the current page again. Some occurrences have no screenshot: use their URL, selector, and HTML evidence instead. A screenshot shows the page at audit time, not a live view of the site.
 
+For an issue inside an embedded frame, LIME shows the finding and its selector but omits the focused element image. The page capture remains available when saved. This avoids highlighting the whole frame as though it were the affected element; open the page and inspect that selector inside the frame.
+
+On unusually large or changing pages, LIME may omit a screenshot to keep capture resources bounded. Check the saved HTML for an evidence warning when available, then review the affected page and selector manually; a missing image does not mean the issue passed.
+
 ## Needs-review checks
 
 **Needs review** means the automated check could not determine the result. Inspect the page and use the guidance to decide what needs fixing. It is not a confirmed failure and is not counted as an automatic pass or failure in the score.
@@ -402,7 +427,7 @@ Use a scan-wide report for an audit handoff or a card's download menu to share o
 
 | Format | Best for | What is limited |
 | --- | --- | --- |
-| **PDF** | A readable audit or issue handoff with summaries, guidance, and saved screenshots where available. | Occurrence detail is capped per issue. |
+| **PDF** | A readable audit or issue handoff with summaries, guidance, and saved screenshots where available. | Occurrence detail is capped per issue; reports too large to prepare safely are rejected, not shortened. |
 | **Small CSV** | A spreadsheet-friendly sample across reportable issue groups. | Occurrences are sampled per issue. |
 | **Full CSV** | All stored occurrences for the report's issue scope, with URLs, selectors, and HTML. | Not capped by the small-CSV sample setting; large files may exceed your spreadsheet tool's limits. |
 | **LLM text** | A compact text summary for AI-assisted review. | Occurrences are sampled, text is shortened, and screenshots are omitted. |
@@ -430,6 +455,8 @@ An issue PDF shows **Generating issue PDF report** while it is prepared. A large
 The defaults are 30 occurrences per issue in a scan PDF, 2,000 in an issue PDF, 5 per issue in small CSV, and 3 per issue in LLM text. These are occurrence limits, not page-count limits, and an operator can change them in [Settings](/docs/user/settings/).
 
 Use full CSV when you need unsampled stored occurrences. It still cannot recreate missing page audits, absent screenshots, or details that were not saved. Older needs-review data may contain only page-level information.
+
+If a PDF is too large to prepare safely, LIME stops and shows an error instead of downloading a shortened report. If CSV exports are enabled, choose **Full CSV** for the same scan or issue card to get its complete saved occurrence data. This does not add pages that were never audited or evidence that was never saved.
 
 Disabled formats are unavailable in the UI and rejected by the export endpoint. If every format is disabled, the controls say **Report exports are disabled in dashboard settings**. Ask the instance operator before changing shared settings.
 
@@ -459,11 +486,13 @@ Most **Settings** affect everyone using this LIME instance. Change shared limits
 
 Occurrence limits accept whole numbers from 1 to 20,000. They do not cap full CSV exports. See [Export Reports](/docs/user/reports/) before increasing a limit on a large scan.
 
+Increasing a PDF occurrence limit can make a large report too big to render. If that happens, use **Full CSV** for the complete saved data in the selected scope, if CSV exports are enabled.
+
 ## Performance settings
 
 - **Summary cache TTL** controls how long saved summaries can be reused; default 60 seconds.
 - **Report data cache TTL** is a reserved setting. Its value is saved, but reports do not currently use it; changing it does not make repeated exports faster.
-- **Report concurrency** limits simultaneous PDF renders in the backend and PDF requests sent by each dashboard process; default 1. Extra dashboard requests enter a bounded queue, while a busy backend asks direct callers to retry. CSV and LLM exports use separate paths. Increasing the limit can increase server load.
+- **Report concurrency** limits in-flight PDF requests through download completion in the backend and each dashboard process; default 1. Extra dashboard requests enter a bounded queue, while a busy backend asks direct callers to retry. CSV and LLM exports use separate paths. Increasing the limit can increase server load.
 
 Leave these at their defaults unless you are investigating a measured performance problem. The [Performance reference](/docs/reference/performance/) explains the current implementation and limits.
 
@@ -506,13 +535,15 @@ Open **Scans**, clear the header search, and select **All** to remove the tag fi
 
 A URL that opens on your laptop may be unreachable from LIME's server. Check the submitted URL and mode, then ask the operator about network access or the scan error. The scan form does not supply your browser's login session.
 
-Sitemap mode audits eligible sitemap entries; it is not a whole-site link crawl. Duplicate destinations, unresolved URLs, and pages redirecting to a different host or port can be filtered during discovery. If the discovered count is unexpectedly small, compare the sitemap's host with the final host of its page URLs.
+If a page opens unusually many browser connections or transfers an exceptionally large amount of data, LIME marks that page as failed instead of presenting an incomplete audit as a success. Check large media and background requests, then use **Retry failed pages** once the cause is addressed.
+
+Sitemap mode audits eligible sitemap entries within its discovery caps; it is not a whole-site link crawl. Duplicate destinations, unresolved URLs, and pages redirecting to a different host or port can be filtered during discovery. A request, XML, candidate, per-document, or depth limit fails discovery instead of publishing partial results. If the discovered count is unexpectedly small, compare the sitemap's host with the final host of its page URLs.
 
 If the run completed with some failed pages, use **Retry failed pages** after addressing the cause. If the whole scan failed, use **Rescan** after investigating. See [Scan Detail and Partial Retry](/docs/user/scan-detail/) for the differences.
 
 ## The run looks stuck or Pause is taking time
 
-Profiling and processing are real work, even when the completed-page count is not moving. A pause waits for in-flight work to settle. Closing the dashboard does not pause anything.
+Profiling and processing are real work, even when the completed-page count is not moving. Long discovery can return to **Pending** about every ten minutes and resume automatically from saved progress. A pause waits for in-flight work to settle. Closing the dashboard does not pause anything.
 
 Reopen the detail page and check its status and update time. If it still appears stalled, send the operator the scan ID, target, status, time, and any displayed error. Service logs and restart/recovery behavior are covered in [Operational Troubleshooting](/docs/reference/deployment/troubleshooting/); do not assume that restarting an active backend is the same as Pause.
 
@@ -545,6 +576,8 @@ If the page changed after the scan, use its saved URL/selector/HTML for historic
 PDF, small CSV, and LLM text have per-issue limits. Full CSV includes all stored occurrences for the selected report scope, but does not recover missing audits. LLM text omits screenshots and shortens text. Check [Export Reports](/docs/user/reports/) before comparing formats.
 
 A disabled format cannot be downloaded. Ask the operator to check reporting settings. Large PDFs may queue or take time to generate; keep the page open and read any error before retrying. Include the scan ID, format, and error when reporting a download problem.
+
+If the error says the PDF is too large, download **Full CSV** for the same scan or issue if CSV exports are enabled. Retrying an unchanged report will not make it fit.
 
 ## Settings changed, but nothing happened
 
@@ -604,6 +637,8 @@ http://localhost:3000/mcp
 \`\`\`
 
 Use your LIME dashboard's address followed by \`/mcp\`. If the AI client runs on another machine, it needs a reachable HTTPS address; your computer's localhost address will not work remotely.
+
+Before exposing LIME remotely, protect the dashboard and ordinary API with external authentication or a restricted network. The MCP key protects \`/mcp\` only; it does not secure the dashboard, API, or download links.
 
 ## Generate a key
 
@@ -821,6 +856,8 @@ For a ready-made workspace and skills, follow [LIME agent and OpenClaw](/docs/us
 | \`list_link_check_results\` | Paginated unique destinations, optionally filtered by the six saved outcome categories. |
 | \`list_link_check_sources\` | Paginated retained source references, including repeated occurrences and captured context. |
 
+If selected saved data is too large, LIME returns an error without partial results. Ask for fewer results per page or open the dashboard.
+
 ## Capabilities, reports, and screenshots
 
 These tools check access and retrieve reports and images:
@@ -833,7 +870,11 @@ These tools check access and retrieve reports and images:
 | \`get_screenshot\` | A saved evidence image using its scan ID and filename, not an arbitrary URL/path. |
 | \`get_link_check_export\` | Saved-link CSV, separate from accessibility report toggles. |
 
-Use the dashboard's \`/mcp\` endpoint to retrieve reports, screenshots, and link CSV files. Files can be up to 4 MiB; download larger reports from the dashboard. How images and PDFs appear depends on your AI client.
+Use the dashboard's \`/mcp\` endpoint to retrieve reports, screenshots, and link CSV files. Files can be up to 4 MiB. Very large reports may also be too large to prepare through MCP; download the complete file from the dashboard instead. LIME won't present a shortened report as complete. How images and PDFs appear depends on your AI client.
+
+If LIME is busy calculating scores, preparing reports, or sending files, wait a moment and ask again. You can also retry a file if its transfer is interrupted. A failed score read does not mean the scan scored zero; LIME returns an error rather than an incomplete score.
+
+If a response from an older backend is too large, ask for fewer results at a time or open the dashboard. After any failed action response, check whether the change was saved before trying again. For actions that use a request ID, keep the original ID so you don't accidentally create a second job.
 
 You can request a whole-scan report or a report for one issue. Small CSV and text reports include samples; full CSV includes all saved occurrences for the selected report. See [Export Reports](/docs/user/reports/) for format details.
 
@@ -852,6 +893,14 @@ Enable **Allow MCP write actions** in Settings and save. This gives all clients 
 | \`update_settings\` | Change selected reporting/performance values with \`confirm: true\`; no integration permissions or keys. |
 
 New scans, standalone link checks, rescans, and rechecks use a UUID \`request_id\` to identify the request. If the connection drops, your client should reuse that ID with the same arguments and check the saved job before trying again. A new ID can create a duplicate. If LIME reports that the outcome is uncertain, inspect scan or link-check history before starting another job.
+
+The instance accepts at most 1,000 new MCP action request IDs per UTC day. If it returns a rate denial (\`http_status: 429\`, \`retry_with_same_request_id: true\`), no request was reserved and no job started. Wait until \`retry_after_utc\`, then retry the same UUID and arguments. Saved results and unfinished requests still replay or report their prior state during the limit.
+
+If an action returns **capacity busy**, no action was started. Wait briefly and retry with the same request ID and arguments. This is different from a confirmed queue-full result below.
+
+An unusually large saved action result may return **result too large**. Your request record stays saved, and LIME will not run the action again to recreate the response. Open the scan or link check in the dashboard to inspect its current state; do not switch to a new request ID just to retrieve a result.
+
+If LIME confirms the queue is full while creating a scan, rescan, standalone link check, or recheck, no job was created. Wait, then use a new request ID. Reusing the old ID repeats the queue-full response. For **Resume scan** or **Retry failed pages**, wait, check the scan's current status, then retry the same scan ID if it is still eligible.
 
 Deleting results or changing shared settings requires your approval and \`confirm: true\`. Keep your client's approval prompts enabled. Pausing or cancelling may take a moment while work already in progress finishes.
 
@@ -875,8 +924,12 @@ Use HTTPS for remote access and keep your key private. Keys stay valid until rot
 
 - **Action unavailable:** check **Allow MCP write actions** in Settings, then reconnect the client.
 - **Action failed:** read the error and check the scan or link check's current status before retrying.
+- **Queue full:** when creating a new job, wait for capacity and try again with a new request ID. For resume or failed-page retry, check the scan's status and retry its scan ID if still eligible. Keep the original request ID when a new-job outcome is uncertain.
 - **Request timed out:** check saved history for the job and keep its original request ID.
 - **Report too large:** download it from the dashboard. MCP transfers files up to 4 MiB.
+- **Connection or read busy:** wait briefly and retry. Capacity may remain busy briefly after a canceled database request.
+- **Response too large:** ask for fewer results per page, or open the dashboard. LIME returns an error instead of partial saved results.
+- **Response delivery unavailable:** restart the dashboard. If this followed an action, check its saved state before trying again and keep the original request ID.
 
 ## Example AI prompts
 
@@ -1092,7 +1145,7 @@ Use Docker for a stable scan runtime, or native development when you need to deb
 \`\`\`bash
 git clone https://github.com/sumanbasuli/lime.git
 cd lime
-cp .env.example .env  # new checkout only; do not overwrite an existing .env
+make init-env  # new checkout and database only; refuses an existing .env
 make start-all
 \`\`\`
 
@@ -1100,7 +1153,7 @@ The dashboard defaults to \`http://localhost:3000\`; the backend defaults to \`h
 
 ## Choose checks by changed area
 
-Native checks need Go 1.25.1+ for Shopkeeper and a supported Node release satisfying the dashboard's Node 23+ requirement. Install locked frontend dependencies with \`npm --prefix lime ci\` or \`npm --prefix docs-site ci\` for the app you are checking. Docker-only startup supplies the application runtimes.
+Native checks need Go 1.27.3+ for Shopkeeper and Node 24.22.1+ on the 24.x LTS line, or a newer maintained release with current security patches, for the dashboard. Install locked frontend dependencies with \`npm --prefix lime ci\` or \`npm --prefix docs-site ci\` for the app you are checking. Docker-only startup supplies the application runtimes.
 
 | Change | Checks from the repository root |
 | --- | --- |
@@ -1144,11 +1197,11 @@ Shopkeeper also owns the separate link-check job runner, HTTP extraction/validat
 
 ## Profiler
 
-Profiler expands sitemap and sitemap-index inputs, resolves and validates eligible URLs, and deduplicates final destinations. The scanner persists the resulting URL rows. Single-page scans skip sitemap discovery.
+Profiler expands sitemap and sitemap-index inputs, resolves and validates eligible URLs, and deduplicates final destinations. Migration \`000020\` saves the sitemap frontier, candidate probe outcomes, and cumulative discovery budgets across ten-minute admissions, pause, and restart. The scanner publishes the complete eligible URL list atomically; no partial list becomes available to Juicer or a companion link check. Historical scans with saved URLs but no discovery row continue normally. Single-page scans skip sitemap discovery.
 
 ## Juicer
 
-Juicer visits pages in Chromium, runs axe-core, and captures page/focused/preview screenshots. It returns raw page results to the scanner. Interrupted work is distinguished from genuine page failures so pause/resume can continue pending URLs.
+Juicer visits pages in Chromium, runs axe-core, and captures page/focused/preview screenshots. Each finished page is handed to the scanner for a saved checkpoint before its URL is marked complete. Its page-local network proxy limits simultaneous and total browser connections, plus relayed data (256 MiB per page and 1 GiB across active page proxies). A page that exceeds a limit fails without publishing partial audit evidence. Interrupted work is distinguished from genuine page failures so pause/resume can continue pending URLs.
 
 ## Sweetner
 
@@ -1162,7 +1215,7 @@ The dashboard's \`/mcp\` endpoint checks authentication with Shopkeeper, calcula
 
 ## Lifecycle and persistence boundaries
 
-Pause/resume and failed-page retry keep a scan ID; rescan creates another ID. Cooperative pauses preserve completed work, whereas startup recovery of an interrupted active scan resets its partial results before rerunning under the same ID. Persisted paused scans remain paused. Do not use backend restarts as a substitute for Pause.
+Pause/resume and failed-page retry keep a scan ID; rescan creates another ID. Large scans yield to other queued scans between discovery or page batches without discarding committed work. Startup recovery keeps saved discovery checkpoints, completed pages, and their evidence, clears only unfinished-page artifacts, and continues under the same ID. Discovery has no cumulative 30-minute stop after migration \`000020\`, though its request, XML, candidate, depth, and per-document caps remain. Persisted paused scans remain paused. Do not use backend restarts as a substitute for Pause.
 
 Scan progress callbacks are serialized to preserve monotonic counters. Concurrent issue-summary cache replacement locks the parent scan row and checks its source timestamp before replacing rows; obsolete or deleted snapshots do not persist cache rows. Keep these guards when changing the paths.
 
@@ -1248,8 +1301,9 @@ LIME uses PostgreSQL-backed score and issue summaries to reduce repeated aggrega
 - Issue cards load progressively (default 12 groups); occurrences are queried live in pages (default 25).
 - Group summary loading still assembles or reads the scan's summary list before slicing it. Its cost therefore grows with the number of issue groups.
 - Full CSV streams keyset-paged batches of 5,000 stored occurrences. It avoids one giant occurrence array but still does work proportional to the full export.
+- PDF report data is measured before it is loaded into the dashboard. An oversized report stops with a clear error; Full CSV remains available for the same saved-data scope when CSV exports are enabled. This is a data-read limit, not a guarantee about Chromium's memory use.
 - \`scan_report_data_cache\` is schema-only reserved infrastructure. \`reportDataCacheTtlSeconds\` persists a value, but no report loader consumes that cache today.
-- \`reportGenerationConcurrency\` bounds Chromium PDF renders per backend process and requests admitted by each UI process. The dashboard queue is bounded and removes cancelled requests. Direct backend PDF requests obey the saved enablement and concurrency settings too; a busy renderer returns HTTP 503 with \`Retry-After\`. CSV/LLM exports do not use this limit. It is not a database-wide semaphore.
+- \`reportGenerationConcurrency\` bounds in-flight PDF requests through response completion per backend process and requests admitted by each UI process. The dashboard queue is bounded and removes cancelled requests. Direct backend PDF requests obey the saved enablement and concurrency settings too; when PDF capacity is busy, they return HTTP 503 with \`Retry-After\`. CSV/LLM exports do not use this limit. It is not a database-wide semaphore.
 
 ## Invalidation
 
@@ -1302,9 +1356,17 @@ Run \`npm --prefix lime run test:mcp-transport\` and \`npm --prefix lime run tes
 
 ## Errors and retries
 
-Inspect both HTTP errors and the MCP tool's \`isError\` field. A successful HTTP response can still contain a tool error. Keep the original request ID when recovering a create, rescan, or recheck request, and read saved state before retrying an uncertain action.
+Inspect both HTTP errors and the MCP tool's \`isError\` field. A successful HTTP response can still contain a tool error. Keep the original request ID when recovering a create, rescan, or recheck request, and read saved state before retrying an uncertain action. A new-ID rate denial includes \`http_status: 429\`, \`retry_with_same_request_id: true\`, and \`retry_after_utc\`; no reservation or job exists, so retry the same ID and arguments after the UTC day resets. A confirmed queue-full response for a new-job action includes \`retry_with_new_request_id: true\` and \`retry_after_seconds: 30\`; no job started, so wait and use a new ID. Resume and failed-page retry use the existing scan ID instead.
 
-Read operations use deadlines for score queries and artifact retrieval. Settings writes use PostgreSQL lock and statement timeouts and wait for commit or rollback. If a settings response is lost, reread the settings before retrying. See the [MCP Protocol Reference](/docs/reference/mcp/) for timeout behavior and response fields.
+Native saved-data reads share two Shopkeeper slots per process through database reads, encoding, and HTTP delivery. They preflight selected stored TEXT/JSONB under one read-only repeatable-read snapshot, using a conservative weighted 32 MiB budget across a call rather than an exact wire-size cap. Oversized selections return HTTP 200 with \`isError: true\` and \`structuredContent.http_status: 413\`, without partial results; request fewer results or use the dashboard. Busy native reads return plain JSON HTTP 503 with \`Retry-After: 1\` and no JSON-RPC ID.
+
+Every MCP authentication settings read uses a separate process-wide two-slot gate and a fresh read-only READ COMMITTED transaction, never the saved-data snapshot, preserving live key revocation and permission checks after timeout setup. Busy or unavailable authentication before dispatch returns plain JSON HTTP 503 with \`Retry-After: 1\` and no JSON-RPC ID; no action has been dispatched. These checks run separately from action execution and permanent replay.
+
+Native scan, link-check, and issue-triage actions, including replay, use a separate two-slot process gate. Busy admission returns plain JSON HTTP 503 with \`Retry-After: 1\` and no RPC ID before any reservation or action; retry with the same ID and arguments. Action database reads share a conservative 32 MiB selected-data estimate and use READ COMMITTED transactions. Saved replay responses above 2 MiB are not fetched into the application. Action tool results above 4 MiB, including text and structured content but excluding the separately bounded RPC ID, return a tool error with \`http_status: 413\`. The permanent request record stays unchanged and the action is not rerun. Inspect saved state in the dashboard. Malformed historical responses also fail without rerunning the action. Dashboard-owned settings changes have their own limits.
+
+Saved-data, authentication, and native action database phases use 30-second contexts and shrinking SQL timeouts. Interrupted queries or uncertain cleanup retain the respective slot for the last configured SQL interval, at most another 30 seconds after cleanup. Actions keep a detached five-second attempt to save an observed result after disconnection. Native saved-data and action delivery then have a separate 30-second HTTP write deadline. These phases are not a total request limit. An interrupted action may already have completed; inspect its saved state and keep the original request ID. Ordinary API reads and worker execution are unchanged by these MCP limits.
+
+Dashboard score queries and artifact reads have separate deadlines and capacity. Score calculations and CSV/text report preparation share a two-request database limit; a busy tool returns a one-second retry hint. Successful score calculations keep the saved cache up to date. Settings writes use PostgreSQL lock and statement timeouts and wait for commit or rollback. If a settings response is lost, reread the settings before retrying. See the [MCP Protocol Reference](/docs/reference/mcp/) for timeout behavior and response fields.
 
 Update the API manifest, protocol reference, user guide, and relevant tests when changing an endpoint.
 `,

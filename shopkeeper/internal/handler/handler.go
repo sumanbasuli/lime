@@ -7,29 +7,34 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/actrules"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/linkchecker"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/reporter"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
+	log "github.com/sumanbasuli/lime/shopkeeper/internal/safelog"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/screenshots"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
 
 type ScanRepository interface {
 	CreateScan(ctx context.Context, sitemapURL, scanType string, tag *string, scanViewport viewport.Settings) (*models.Scan, error)
-	ListScans(ctx context.Context) ([]models.Scan, error)
-	ListScansByTag(ctx context.Context, tag string) ([]models.Scan, error)
+	CreateRescanFrom(ctx context.Context, sourceScanID string) (*models.Scan, error)
+	ListScansPage(ctx context.Context, tag string, limit, offset int) ([]models.Scan, error)
 	GetScan(ctx context.Context, id string) (*models.Scan, error)
+	ScreenshotVisible(ctx context.Context, scanID, filename string) (bool, error)
 	GetScanIssues(ctx context.Context, scanID string) ([]models.IssueWithOccurrences, error)
 	RetryFailedURLs(ctx context.Context, id string) (*models.Scan, int, error)
 	DeleteScan(ctx context.Context, id string) (bool, error)
@@ -55,9 +60,26 @@ type pdfPolicyRepository interface {
 	GetPDFReportPolicy(ctx context.Context) (*models.PDFReportPolicy, error)
 }
 
+// pdfRenderLimiter also retains the slot during response delivery, when the
+// generated PDF byte slice is still held in memory.
 type pdfRenderLimiter struct {
 	mu     sync.Mutex
 	active int
+}
+
+const maxPDFResponseBytes = 64 << 20
+const maxPDFPreflightRequests = 10
+
+func writeAdmissionBusy(w http.ResponseWriter, err error) bool {
+	var capacity *repository.AdmissionCapacityError
+	if !errors.As(err, &capacity) {
+		return false
+	}
+	w.Header().Set("Retry-After", "30")
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+		"error": "The scan or link check queue is full; retry later",
+	})
+	return true
 }
 
 func (l *pdfRenderLimiter) tryAcquire(limit int) (func(), bool) {
@@ -80,19 +102,43 @@ func (l *pdfRenderLimiter) tryAcquire(limit int) (func(), bool) {
 	}, true
 }
 
+func writePDFReportSizeError(w http.ResponseWriter, scanID, kind, key, message string) {
+	// CSV is served by the dashboard, not by direct Shopkeeper HTTP routes.
+	// Keep this path dashboard-relative for both proxied and direct PDF callers.
+	query := url.Values{"mode": {"full"}}
+	if kind != "" && key != "" {
+		query.Set("kind", kind)
+		query.Set("key", key)
+	}
+	csvURL := fmt.Sprintf("/api/scans/%s/issues/report.csv?%s", url.PathEscape(scanID), query.Encode())
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+		"error":   message,
+		"csv_url": csvURL,
+	})
+}
+
 // Handler holds dependencies for HTTP handlers.
 type Handler struct {
-	repo       ScanRepository
-	scanner    ScanRunner
-	reporter   IssueReportGenerator
-	pdfLimiter pdfRenderLimiter
-	links      LinkRepository
-	linkRunner LinkRunner
+	repo           ScanRepository
+	scanner        ScanRunner
+	reporter       IssueReportGenerator
+	pdfLimiter     pdfRenderLimiter
+	pdfPreflight   chan struct{}
+	issueReadSlots chan struct{}
+	links          LinkRepository
+	linkRunner     LinkRunner
 }
 
 // New creates a new Handler with the given repository, scanner, and reporter.
 func New(repo ScanRepository, scanner ScanRunner, reporter IssueReportGenerator) *Handler {
-	return &Handler{repo: repo, scanner: scanner, reporter: reporter}
+	return &Handler{
+		repo:           repo,
+		scanner:        scanner,
+		reporter:       reporter,
+		pdfPreflight:   make(chan struct{}, maxPDFPreflightRequests),
+		issueReadSlots: make(chan struct{}, 2),
+	}
 }
 
 // HealthCheck returns a simple health status.
@@ -181,12 +227,15 @@ func (h *Handler) CreateScan(w http.ResponseWriter, r *http.Request) {
 	// Create scan record
 	if req.IncludeLinkCheck {
 		if _, err := linkchecker.Normalize(req.SitemapURL); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": log.Text(err.Error())})
 			return
 		}
 	}
 	scan, err := h.createScan(r.Context(), req.SitemapURL, req.ScanType, req.Tag, scanViewport, req.IncludeLinkCheck)
 	if err != nil {
+		if writeAdmissionBusy(w, err) {
+			return
+		}
 		log.Printf("Failed to create scan: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "Failed to create scan",
@@ -199,23 +248,50 @@ func (h *Handler) CreateScan(w http.ResponseWriter, r *http.Request) {
 		go h.scanner.RunScan(*scan)
 	}
 
-	writeJSON(w, http.StatusCreated, scan)
+	writeJSON(w, http.StatusCreated, models.PublicScan(*scan))
 }
 
-// ListScans handles GET /api/scans.
-// Supports optional ?tag= query parameter for filtering.
+const (
+	legacyScanListMax = 1000
+	scanListPageMax   = 200
+	scanListMaxOffset = 1_000_000
+)
+
+// ListScans handles GET /api/scans. The legacy array shape is unchanged for
+// small histories. Larger histories require explicit, bounded pagination.
 func (h *Handler) ListScans(w http.ResponseWriter, r *http.Request) {
-	tag := r.URL.Query().Get("tag")
-
-	var scans []models.Scan
-	var err error
-
-	if tag != "" {
-		scans, err = h.repo.ListScansByTag(r.Context(), tag)
-	} else {
-		scans, err = h.repo.ListScans(r.Context())
+	query := r.URL.Query()
+	tag := query.Get("tag")
+	paged := query.Has("limit") || query.Has("offset")
+	limit, offset := legacyScanListMax+1, 0
+	if paged {
+		limit = 100
+		if values, ok := query["limit"]; ok {
+			if len(values) != 1 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be a single integer from 1 to 200"})
+				return
+			}
+			parsed, err := strconv.Atoi(values[0])
+			if err != nil || parsed < 1 || parsed > scanListPageMax {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be an integer from 1 to 200"})
+				return
+			}
+			limit = parsed
+		}
+		if values, ok := query["offset"]; ok {
+			if len(values) != 1 {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "offset must be a single non-negative integer"})
+				return
+			}
+			parsed, err := strconv.Atoi(values[0])
+			if err != nil || parsed < 0 || parsed > scanListMaxOffset {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "offset must be an integer from 0 to 1000000"})
+				return
+			}
+			offset = parsed
+		}
 	}
-
+	scans, err := h.repo.ListScansPage(r.Context(), tag, limit, offset)
 	if err != nil {
 		log.Printf("Failed to list scans: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -223,7 +299,13 @@ func (h *Handler) ListScans(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	writeJSON(w, http.StatusOK, scans)
+	if !paged && len(scans) > legacyScanListMax {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+			"error": "Scan history is too large for one response; use limit (1-200) and offset to page through scans",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, models.PublicScans(scans))
 }
 
 // GetScan handles GET /api/scans/{id}.
@@ -251,7 +333,7 @@ func (h *Handler) GetScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, scan)
+	writeJSON(w, http.StatusOK, models.PublicScan(*scan))
 }
 
 // GetScanIssues handles GET /api/scans/{id}/issues.
@@ -280,8 +362,18 @@ func (h *Handler) GetScanIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	release, ok := h.acquireIssueRead()
+	if !ok {
+		writeIssueReadBusy(w)
+		return
+	}
+	defer release()
 	issues, err := h.repo.GetScanIssues(r.Context(), id)
 	if err != nil {
+		if errors.Is(err, repository.ErrScanIssuesTooLarge) {
+			writeIssueResponseTooLarge(w)
+			return
+		}
 		log.Printf("Failed to get scan issues: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "Failed to get scan issues",
@@ -296,7 +388,22 @@ func (h *Handler) GetScanIssues(w http.ResponseWriter, r *http.Request) {
 	if resolver != nil {
 		issues = resolver.EnrichIssues(issues)
 	}
+	for _, item := range issues {
+		if !issueACTFits(item.Issue) {
+			writeIssueResponseTooLarge(w)
+			return
+		}
+	}
 
+	// GetScanIssues owns these result slices for this request. Redact before
+	// encoding instead of duplicating a potentially large result set.
+	for i := range issues {
+		issues[i].Issue = models.PublicIssue(issues[i].Issue)
+		for j := range issues[i].Occurrences {
+			occurrence := &issues[i].Occurrences[j]
+			occurrence.PageURL = log.PublicURLText(occurrence.PageURL)
+		}
+	}
 	writeJSON(w, http.StatusOK, issues)
 }
 
@@ -311,7 +418,7 @@ func (h *Handler) UnmarkIssueFalsePositive(w http.ResponseWriter, r *http.Reques
 }
 
 // RescanScan handles POST /api/scans/{id}/rescan.
-// It creates a fresh scan using the same target URL, scan type, tag, and viewport.
+// It creates a fresh scan using the same target settings and root DNS history.
 func (h *Handler) RescanScan(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -342,15 +449,19 @@ func (h *Handler) RescanScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newScan, err := h.createScan(
-		r.Context(),
-		scan.SitemapURL,
-		scan.ScanType,
-		scan.Tag,
-		viewport.SettingsFromStored(scan.ViewportPreset, scan.ViewportWidth, scan.ViewportHeight),
-		scan.IncludeLinkCheck,
-	)
+	newScan, err := h.repo.CreateRescanFrom(r.Context(), scan.ID)
 	if err != nil {
+		if writeAdmissionBusy(w, err) {
+			return
+		}
+		if errors.Is(err, repository.ErrRescanNotReady) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "Only completed, paused, or failed scans can be rescanned"})
+			return
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Scan not found"})
+			return
+		}
 		log.Printf("Failed to create rescan: %v", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "Failed to create rescan",
@@ -362,7 +473,7 @@ func (h *Handler) RescanScan(w http.ResponseWriter, r *http.Request) {
 		go h.scanner.RunScan(*newScan)
 	}
 
-	writeJSON(w, http.StatusCreated, newScan)
+	writeJSON(w, http.StatusCreated, models.PublicScan(*newScan))
 }
 
 // RetryFailedPages handles POST /api/scans/{id}/retry-failed.
@@ -378,6 +489,9 @@ func (h *Handler) RetryFailedPages(w http.ResponseWriter, r *http.Request) {
 
 	updatedScan, retriedURLCount, err := h.repo.RetryFailedURLs(r.Context(), id)
 	if err != nil {
+		if writeAdmissionBusy(w, err) {
+			return
+		}
 		log.Printf("Failed to retry failed pages for scan %s: %v", id, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "Failed to retry failed pages",
@@ -402,7 +516,7 @@ func (h *Handler) RetryFailedPages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, models.RetryFailedPagesResponse{
-		Scan:            *updatedScan,
+		Scan:            models.PublicScan(*updatedScan),
 		RetriedURLCount: retriedURLCount,
 	})
 }
@@ -417,6 +531,10 @@ func (h *Handler) DeleteScan(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if !validScanID(id) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Scan not found"})
+		return
+	}
 
 	scan, err := h.repo.GetScan(r.Context(), id)
 	if err != nil {
@@ -427,9 +545,7 @@ func (h *Handler) DeleteScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scan == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{
-			"error": "Scan not found",
-		})
+		finishMissingScanDeletion(w, id)
 		return
 	}
 	if !isTerminalScanStatus(scan.Status) {
@@ -456,19 +572,54 @@ func (h *Handler) DeleteScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !deleted {
-		writeJSON(w, http.StatusNotFound, map[string]string{
-			"error": "Scan not found",
-		})
+		current, err := h.repo.GetScan(r.Context(), id)
+		if err != nil {
+			log.Printf("Failed to recheck scan after delete conflict: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to get scan"})
+			return
+		}
+		if current != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "Only completed, paused, or failed scans can be deleted",
+			})
+		} else {
+			finishMissingScanDeletion(w, id)
+		}
 		return
 	}
 	if companion != nil && h.linkRunner != nil {
 		h.linkRunner.Cancel(companion.ID)
 	}
 
-	if err := os.RemoveAll(screenshotDir(id)); err != nil {
+	if err := os.RemoveAll(screenshotDir(strings.ToLower(scan.ID))); err != nil {
 		log.Printf("Failed to remove screenshots for scan %s: %v", id, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": "Scan deleted, but screenshot cleanup failed",
+		})
+		return
 	}
 
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// A prior deletion can commit but fail to remove evidence from a read-only or
+// otherwise broken screenshot volume. Allow an exact-ID retry to finish that
+// cleanup without requiring a database row that was already removed.
+func finishMissingScanDeletion(w http.ResponseWriter, id string) {
+	dir := screenshotDir(strings.ToLower(id))
+	if _, err := os.Lstat(dir); os.IsNotExist(err) {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "Scan not found"})
+		return
+	} else if err != nil {
+		log.Printf("Failed to inspect orphaned screenshots for scan %s: %v", id, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to inspect screenshot cleanup"})
+		return
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		log.Printf("Failed to remove orphaned screenshots for scan %s: %v", id, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Screenshot cleanup failed; retry deletion"})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -506,7 +657,7 @@ func (h *Handler) PauseScan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if scan.PauseRequested {
-		writeJSON(w, http.StatusOK, scan)
+		writeJSON(w, http.StatusOK, models.PublicScan(*scan))
 		return
 	}
 
@@ -539,7 +690,7 @@ func (h *Handler) PauseScan(w http.ResponseWriter, r *http.Request) {
 		h.scanner.RequestPause(id)
 	}
 
-	writeJSON(w, http.StatusOK, updatedScan)
+	writeJSON(w, http.StatusOK, models.PublicScan(*updatedScan))
 }
 
 // ResumeScan handles POST /api/scans/{id}/resume.
@@ -576,6 +727,9 @@ func (h *Handler) ResumeScan(w http.ResponseWriter, r *http.Request) {
 
 	updatedScan, err := h.repo.ResumeScan(r.Context(), id)
 	if err != nil {
+		if writeAdmissionBusy(w, err) {
+			return
+		}
 		log.Printf("Failed to resume scan %s: %v", id, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "Failed to resume scan",
@@ -583,9 +737,17 @@ func (h *Handler) ResumeScan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if updatedScan == nil {
-		writeJSON(w, http.StatusConflict, map[string]string{
-			"error": "Scan is no longer paused",
-		})
+		current, err := h.repo.GetScan(r.Context(), id)
+		if err != nil {
+			log.Printf("Failed to recheck scan after resume conflict: %v", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to get scan"})
+			return
+		}
+		if current == nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "Scan not found"})
+		} else {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "Scan is no longer paused"})
+		}
 		return
 	}
 
@@ -593,7 +755,7 @@ func (h *Handler) ResumeScan(w http.ResponseWriter, r *http.Request) {
 		go h.scanner.RunScan(*updatedScan)
 	}
 
-	writeJSON(w, http.StatusOK, updatedScan)
+	writeJSON(w, http.StatusOK, models.PublicScan(*updatedScan))
 }
 
 // DownloadIssueReport handles GET /api/scans/{id}/issues/report.pdf.
@@ -624,6 +786,22 @@ func (h *Handler) DownloadIssueReport(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 			"error": "PDF report policy is unavailable",
+		})
+		return
+	}
+	if r.Context().Err() != nil {
+		return
+	}
+	// The persisted policy and scan lookup are database work too. Admit that
+	// preflight before either read, independently of the configured PDF render
+	// limit, whose maximum is ten.
+	select {
+	case h.pdfPreflight <- struct{}{}:
+		defer func() { <-h.pdfPreflight }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "PDF generation is busy; retry shortly",
 		})
 		return
 	}
@@ -670,12 +848,30 @@ func (h *Handler) DownloadIssueReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pdf, err := h.reporter.GenerateIssueReportPDF(r.Context(), id, kind, key)
-	release() // The render slot is no longer needed while a client receives the PDF.
 	if err != nil {
+		if errors.Is(err, reporter.ErrReportBusy) {
+			w.Header().Set("Retry-After", "1")
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error": "HTML report generation is busy; retry shortly",
+			})
+			return
+		}
+		if errors.Is(err, reporter.ErrReportTooLarge) {
+			writePDFReportSizeError(w, id, kind, key, "Report too large to render safely; use the complete CSV export if enabled")
+			return
+		}
+		if errors.Is(err, reporter.ErrPDFTooLarge) {
+			writePDFReportSizeError(w, id, kind, key, "Generated PDF exceeds the 64 MiB download limit; use the complete CSV export if enabled")
+			return
+		}
 		log.Printf("Failed to generate issue report PDF for scan %s: %v", id, err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
 			"error": "Failed to generate issue report",
 		})
+		return
+	}
+	if len(pdf) > maxPDFResponseBytes {
+		writePDFReportSizeError(w, id, kind, key, "Generated PDF exceeds the 64 MiB download limit; use the complete CSV export if enabled")
 		return
 	}
 
@@ -686,6 +882,7 @@ func (h *Handler) DownloadIssueReport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/pdf")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Length", strconv.Itoa(len(pdf)))
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write(pdf); err != nil {
 		log.Printf("Failed to stream issue report PDF for scan %s: %v", id, err)
@@ -738,7 +935,7 @@ func (h *Handler) updateIssueFalsePositive(w http.ResponseWriter, r *http.Reques
 		issue.SuggestedFixes = []string{}
 	}
 
-	writeJSON(w, http.StatusOK, issue)
+	writeJSON(w, http.StatusOK, models.PublicIssue(*issue))
 }
 
 // GetStats handles GET /api/stats.
@@ -765,8 +962,32 @@ func (h *Handler) ServeScreenshot(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid path", http.StatusBadRequest)
 		return
 	}
+	if !validScanID(scanID) {
+		http.Error(w, "Screenshot not found", http.StatusNotFound)
+		return
+	}
+	scan, err := h.repo.GetScan(r.Context(), scanID)
+	if err != nil {
+		log.Printf("Failed to load scan for screenshot: %v", err)
+		http.Error(w, "Failed to load screenshot", http.StatusInternalServerError)
+		return
+	}
+	if scan == nil {
+		http.Error(w, "Screenshot not found", http.StatusNotFound)
+		return
+	}
+	visible, err := h.repo.ScreenshotVisible(r.Context(), scan.ID, filename)
+	if err != nil {
+		log.Printf("Failed to check screenshot visibility: %v", err)
+		http.Error(w, "Failed to load screenshot", http.StatusInternalServerError)
+		return
+	}
+	if !visible {
+		http.Error(w, "Screenshot not found", http.StatusNotFound)
+		return
+	}
 
-	filePath := filepath.Join(screenshotDir(scanID), filename)
+	filePath := filepath.Join(screenshotDir(strings.ToLower(scan.ID)), filename)
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
 		http.Error(w, "Screenshot not found", http.StatusNotFound)
 		return
@@ -775,12 +996,31 @@ func (h *Handler) ServeScreenshot(w http.ResponseWriter, r *http.Request) {
 	if contentType, err := detectFileContentType(filePath); err == nil && contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeFile(w, r, filePath)
 }
 
 func isTerminalScanStatus(status string) bool {
 	return status == "completed" || status == "paused" || status == "failed"
+}
+
+func validScanID(id string) bool {
+	if len(id) != 36 {
+		return false
+	}
+	for index := 0; index < len(id); index++ {
+		character := id[index]
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			if character != '-' {
+				return false
+			}
+			continue
+		}
+		if !((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f') || (character >= 'A' && character <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func isPausableScanStatus(status string) bool {
@@ -808,7 +1048,7 @@ func detectFileContentType(path string) (string, error) {
 }
 
 func buildIssueReportFilename(rawURL string, createdAt time.Time) string {
-	host := sanitizeFilenameToken(rawURL)
+	host := reportHostFilenameToken(rawURL)
 
 	return fmt.Sprintf(
 		"lime-issue-report-%s-%s.pdf",
@@ -818,7 +1058,7 @@ func buildIssueReportFilename(rawURL string, createdAt time.Time) string {
 }
 
 func buildScopedIssueReportFilename(rawURL string, createdAt time.Time, kind, key string) string {
-	host := sanitizeFilenameToken(rawURL)
+	host := reportHostFilenameToken(rawURL)
 	scope := sanitizeFilenameToken(fmt.Sprintf("%s-%s", kind, key))
 
 	return fmt.Sprintf(
@@ -827,6 +1067,14 @@ func buildScopedIssueReportFilename(rawURL string, createdAt time.Time, kind, ke
 		createdAt.UTC().Format("2006-01-02"),
 		scope,
 	)
+}
+
+func reportHostFilenameToken(rawURL string) string {
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil || parsedURL.Host == "" {
+		return "scan"
+	}
+	return sanitizeFilenameToken(parsedURL.Host)
 }
 
 func sanitizeFilenameToken(rawValue string) string {

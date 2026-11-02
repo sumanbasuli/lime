@@ -4,6 +4,7 @@
 package linkchecker
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -21,24 +22,33 @@ import (
 	"time"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/rootdns"
 	"golang.org/x/net/html"
 )
 
 const (
-	DefaultMaxPages = 100
-	MaxPages        = 500
-	MaxLinks        = 2000
-	MaxSources      = 10000
-	MaxRequests     = 5000
-	MaxRedirects    = 5
-	MaxHTMLBytes    = 2 << 20
-	RequestTimeout  = 10 * time.Second
-	JobTimeout      = 10 * time.Minute
+	DefaultMaxPages      = 100
+	MaxPages             = 500
+	MaxLinks             = 2000
+	MaxSources           = 10000
+	MaxRequests          = 5000
+	MaxRedirects         = 5
+	MaxHTMLBytes         = 2 << 20
+	RequestTimeout       = 10 * time.Second
+	JobTimeout           = 10 * time.Minute
+	maxURLBytes          = 8192
+	maxBaseNodes         = MaxHTMLBytes + 16
+	maxExtractNodes      = MaxSources * 10
+	maxTextNodes         = MaxSources * 8
+	maxExtractCandidates = MaxSources * 2
+	maxExtractURLBytes   = 32 << 20
+	maxSourceTextBytes   = 513
 )
 
 var errBlocked = errors.New("target resolves to a network address blocked by link-check policy")
 var errBudget = errors.New("HTTP request limit reached")
 var errRedirect = errors.New("redirect limit or loop reached")
+var errInvalidRedirectURL = errors.New("invalid redirect URL")
 
 type Resolver interface {
 	LookupIPAddr(context.Context, string) ([]net.IPAddr, error)
@@ -51,18 +61,25 @@ type Checker struct {
 	DialContext func(context.Context, string, string) (net.Conn, error)
 }
 
+// RootDNSObserver records one complete trusted-root DNS answer before any
+// address from that answer can be dialed.
+type RootDNSObserver = rootdns.Observer
+
 func New() *Checker {
 	d := &net.Dialer{Timeout: RequestTimeout}
 	return &Checker{Resolver: net.DefaultResolver, DialContext: d.DialContext}
 }
 
 func Normalize(raw string) (string, error) {
+	if len(raw) > maxURLBytes {
+		return "", errors.New("URL must be an absolute HTTP/HTTPS URL without credentials")
+	}
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return "", err
 	}
 	u.Scheme = strings.ToLower(u.Scheme)
-	if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || len(raw) > 8192 {
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil {
 		return "", errors.New("URL must be an absolute HTTP/HTTPS URL without credentials")
 	}
 	u.Scheme = strings.ToLower(u.Scheme)
@@ -98,44 +115,38 @@ func publicIP(ip net.IP) bool {
 	if !ok {
 		return false
 	}
-	a = a.Unmap()
-	if !a.IsGlobalUnicast() || a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() {
-		return false
-	}
-	// Exclude translation/tunnelling ranges that can encode a private IPv4
-	// destination; only native global IPv6 is considered an external target.
-	if a.Is6() && !netip.MustParsePrefix("2000::/3").Contains(a) {
-		return false
-	}
-	for _, cidr := range []string{"0.0.0.0/8", "100.64.0.0/10", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "240.0.0.0/4", "2001:db8::/32", "2001::/23", "2002::/16", "3fff::/20"} {
-		if netip.MustParsePrefix(cidr).Contains(a) {
-			return false
-		}
-	}
-	return true
+	return rootdns.PublicIP(a)
 }
 
 type run struct {
-	checker        *Checker
-	job            models.LinkCheck
-	root           *url.URL
-	rootDialMu     sync.Mutex
-	rootSeenPublic bool
-	client         *http.Client
-	requests       int
-	results        map[string]*models.LinkResult
-	order          []string
-	sourceCount    int
-	sink           func(models.LinkCheck, []models.LinkResult) error
+	checker          *Checker
+	job              models.LinkCheck
+	root             *url.URL
+	rootDialMu       sync.Mutex
+	rootSeenPublic   bool
+	observeRootDNS   RootDNSObserver
+	privateDialGuard rootdns.PrivateDialGuard
+	client           *http.Client
+	requests         int
+	results          map[string]*models.LinkResult
+	order            []string
+	dirty            map[string]bool
+	sourceCount      int
+	sink             func(models.LinkCheck, []models.LinkResult) error
+	deltaSink        func(models.LinkCheck, []models.LinkResult) error
 }
 
-func (c *Checker) newRun(job models.LinkCheck, sink func(models.LinkCheck, []models.LinkResult) error) (*run, error) {
+func (c *Checker) newRun(job models.LinkCheck, sink func(models.LinkCheck, []models.LinkResult) error, observer ...RootDNSObserver) (*run, error) {
 	normalized, err := Normalize(job.URL)
 	if err != nil {
 		return nil, err
 	}
 	root, _ := url.Parse(normalized)
-	r := &run{checker: c, job: job, root: root, results: map[string]*models.LinkResult{}, sink: sink}
+	var observeRootDNS RootDNSObserver
+	if len(observer) > 0 {
+		observeRootDNS = observer[0]
+	}
+	r := &run{checker: c, job: job, root: root, rootSeenPublic: job.RootPublic, observeRootDNS: observeRootDNS, results: map[string]*models.LinkResult{}, dirty: map[string]bool{}, sink: sink}
 	t := &http.Transport{Proxy: nil, MaxIdleConns: 8, MaxIdleConnsPerHost: 2, IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: RequestTimeout, ResponseHeaderTimeout: RequestTimeout}
 	t.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		// A transport can start dials asynchronously. Serialize trusted-root dials
@@ -156,6 +167,7 @@ func (c *Checker) newRun(job models.LinkCheck, sink func(models.LinkCheck, []mod
 		if len(ips) == 0 {
 			return nil, errors.New("hostname has no addresses")
 		}
+		privateRootDial := false
 		if trusted {
 			public, nonPublic := false, false
 			for _, ip := range ips {
@@ -165,20 +177,51 @@ func (c *Checker) newRun(job models.LinkCheck, sink func(models.LinkCheck, []mod
 					nonPublic = true
 				}
 			}
+			blocked := (public && nonPublic) || (r.rootSeenPublic && nonPublic)
+			// Record every answer, including blocked answers, before dialing. A
+			// persistence failure is also a dial failure: unrecorded trust must
+			// never be used to reach a root address.
+			if r.observeRootDNS != nil {
+				if err := r.observeRootDNS(ctx, public, nonPublic); err != nil {
+					if blocked || errors.Is(err, rootdns.ErrBlocked) {
+						return nil, errBlocked
+					}
+					return nil, fmt.Errorf("record root DNS observation: %w", err)
+				}
+			}
 			// A mixed answer cannot acquire private-root trust. Once any public
 			// answer is observed, a later non-public answer cannot regain it.
-			if (public && nonPublic) || (r.rootSeenPublic && nonPublic) {
+			if blocked {
 				return nil, errBlocked
 			}
 			if public {
 				r.rootSeenPublic = true
 			}
+			privateRootDial = nonPublic
 		} else {
 			for _, ip := range ips {
 				if !publicIP(ip.IP) {
 					return nil, errBlocked
 				}
 			}
+		}
+		if privateRootDial && r.privateDialGuard != nil {
+			release, err := r.privateDialGuard(ctx)
+			if err != nil {
+				if release != nil {
+					release()
+				}
+				if errors.Is(err, rootdns.ErrBlocked) {
+					return nil, errBlocked
+				}
+				return nil, fmt.Errorf("acquire private root dial guard: %w", err)
+			}
+			if release == nil {
+				return nil, errors.New("private root dial guard returned no release function")
+			}
+			// The lease covers every address attempt and ends before the
+			// transport can use a successful connection for HTTP I/O.
+			defer release()
 		}
 		var last error
 		for _, ip := range ips {
@@ -238,6 +281,11 @@ func (r *run) request(ctx context.Context, raw, method string) (*http.Response, 
 		r.requests++
 		response, err := r.client.Do(req)
 		if err != nil {
+			// net/http may reject a malformed relative Location before our
+			// redirect parser sees it, quoting its query inside the error.
+			if strings.Contains(err.Error(), "failed to parse Location header") {
+				return nil, redirects, errInvalidRedirectURL
+			}
 			return nil, redirects, err
 		}
 		if response.StatusCode < 300 || response.StatusCode > 399 || response.StatusCode == 304 {
@@ -253,7 +301,10 @@ func (r *run) request(ctx context.Context, raw, method string) (*http.Response, 
 		}
 		next, err := u.Parse(location)
 		if err != nil {
-			return nil, redirects, err
+			// Parse errors may quote a relative Location containing query tokens.
+			// The malformed destination cannot be used, so keep only a stable
+			// diagnostic in saved results and public responses.
+			return nil, redirects, errInvalidRedirectURL
 		}
 		current = next.String()
 		redirects++
@@ -303,6 +354,7 @@ func (r *run) add(raw string, source models.LinkSource) *models.LinkResult {
 		result = &models.LinkResult{ID: uuid(), TargetURL: normalized, Status: "unchecked", LinkType: classify(u, r.root, source.Element), Sources: []models.LinkSource{}}
 		r.results[normalized] = result
 		r.order = append(r.order, normalized)
+		r.dirty[normalized] = true
 	}
 	if r.sourceCount >= MaxSources {
 		r.job.Truncated = true
@@ -311,10 +363,12 @@ func (r *run) add(raw string, source models.LinkSource) *models.LinkResult {
 	result.Sources = append(result.Sources, source)
 	result.OccurrenceCount++
 	r.sourceCount++
+	r.dirty[normalized] = true
 	return result
 }
 
 func (r *run) outcome(result *models.LinkResult, response *http.Response, redirects int, err error) {
+	r.dirty[result.TargetURL] = true
 	result.RedirectCount = redirects
 	if err != nil {
 		result.Status = "error"
@@ -394,7 +448,23 @@ func (r *run) snapshot() []models.LinkResult {
 }
 
 func (r *run) publish() error {
-	items := r.snapshot()
+	return r.publishWithItems(r.snapshot())
+}
+
+func (r *run) publishWithItems(items []models.LinkResult) error {
+	if r.deltaSink != nil {
+		changed := make([]models.LinkResult, 0, len(r.dirty))
+		for _, item := range items {
+			if r.dirty[item.TargetURL] {
+				changed = append(changed, item)
+			}
+		}
+		if err := r.deltaSink(r.job, changed); err != nil {
+			return err
+		}
+		clear(r.dirty)
+		return nil
+	}
 	if r.sink != nil {
 		return r.sink(r.job, items)
 	}
@@ -407,27 +477,54 @@ type discovered struct {
 	crawl  bool
 }
 
-func textContent(n *html.Node) string {
-	var b strings.Builder
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
-		if b.Len() > 512 {
-			return
+// walkNodes visits a subtree in document order without using the Go call stack.
+// A shared budget lets text extraction bound visits across nested references.
+func walkNodes(ctx context.Context, root *html.Node, remaining *int, visit func(*html.Node) bool) (bool, error) {
+	stack := []*html.Node{root}
+	for len(stack) > 0 {
+		if err := ctx.Err(); err != nil {
+			return false, err
 		}
-		if n.Type == html.TextNode {
-			b.WriteString(n.Data)
-			b.WriteByte(' ')
+		if *remaining == 0 {
+			return true, nil
 		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		*remaining--
+		if !visit(n) {
+			return false, nil
+		}
+		for c := n.LastChild; c != nil; c = c.PrevSibling {
+			stack = append(stack, c)
 		}
 	}
-	walk(n)
+	return false, nil
+}
+
+func textContent(ctx context.Context, n *html.Node, remaining *int) (string, bool, error) {
+	var b strings.Builder
+	exhausted, err := walkNodes(ctx, n, remaining, func(n *html.Node) bool {
+		if n.Type == html.TextNode {
+			left := maxSourceTextBytes - b.Len()
+			if len(n.Data) > left {
+				b.WriteString(n.Data[:left])
+				return false
+			}
+			b.WriteString(n.Data)
+			if b.Len() < maxSourceTextBytes {
+				b.WriteByte(' ')
+			}
+		}
+		return b.Len() < maxSourceTextBytes
+	})
+	if err != nil {
+		return "", false, err
+	}
 	value := strings.Join(strings.Fields(b.String()), " ")
 	if len(value) > 256 {
 		value = value[:256]
 	}
-	return value
+	return value, exhausted, nil
 }
 
 func attr(n *html.Node, key string) string {
@@ -472,37 +569,96 @@ func srcsetURLs(value string) []string {
 	return items
 }
 
-func extract(body []byte, pageURL string, root *url.URL) ([]discovered, error) {
-	doc, err := html.Parse(strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
+type contextHTMLReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r contextHTMLReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
 	}
-	base, _ := url.Parse(pageURL)
-	var findBase func(*html.Node)
+	if len(p) > 4096 {
+		p = p[:4096]
+	}
+	return r.r.Read(p)
+}
+
+// Connection hints prepare an origin; they do not fetch the href as a resource.
+// Preserve mixed relations because a stylesheet, preload, or other relation can
+// still identify a destination whose HTTP availability matters.
+func connectionHintsOnly(rel string) bool {
+	tokens := strings.FieldsFunc(rel, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f'
+	})
+	if len(tokens) == 0 {
+		return false
+	}
+	for _, token := range tokens {
+		switch strings.ToLower(token) {
+		case "preconnect", "dns-prefetch":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func extract(ctx context.Context, body []byte, pageURL string, root *url.URL) ([]discovered, bool, error) {
+	doc, err := html.Parse(contextHTMLReader{ctx: ctx, r: bytes.NewReader(body)})
+	if err != nil {
+		return nil, false, err
+	}
+	base, err := url.Parse(pageURL)
+	if err != nil {
+		return nil, false, err
+	}
+	truncated := false
+	baseUnusable := false
 	found := false
-	findBase = func(n *html.Node) {
-		if n.Type == html.ElementNode && n.Data == "base" && !found {
-			if u, err := base.Parse(attr(n, "href")); err == nil && (u.Scheme == "http" || u.Scheme == "https") {
-				base = u
+	// A base can affect references that precede it in the document. Scan the
+	// entire body-bounded tree before interpreting any relative references.
+	baseNodes := maxBaseNodes
+	exhausted, err := walkNodes(ctx, doc, &baseNodes, func(n *html.Node) bool {
+		if n.Type == html.ElementNode && n.Data == "base" {
+			raw := attr(n, "href")
+			if len(raw) > maxURLBytes {
+				found, baseUnusable, truncated = true, true, true
+				return false
+			}
+			if u, parseErr := base.Parse(raw); parseErr == nil && (u.Scheme == "http" || u.Scheme == "https") {
+				if len(u.String()) > maxURLBytes {
+					baseUnusable, truncated = true, true
+				} else {
+					base = u
+				}
 				found = true
+				return false
 			}
 		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			findBase(c)
-		}
+		return true
+	})
+	if err != nil {
+		return nil, false, err
 	}
-	findBase(doc)
+	if exhausted && !found {
+		baseUnusable, truncated = true, true
+	}
 	items := []discovered{}
-	var walk func(*html.Node)
-	walk = func(n *html.Node) {
-		if len(items) >= MaxSources {
-			return
-		}
+	textNodes := maxTextNodes
+	pageNodes := maxExtractNodes
+	attempts, urlBytes := 0, 0
+	var walkErr error
+	exhausted, err = walkNodes(ctx, doc, &pageNodes, func(n *html.Node) bool {
 		if n.Type == html.ElementNode {
 			attribute := ""
 			switch n.Data {
-			case "a", "area", "link":
+			case "a", "area":
 				attribute = "href"
+			case "link":
+				if !connectionHintsOnly(attr(n, "rel")) {
+					attribute = "href"
+				}
 			case "img", "script", "iframe", "audio", "video", "source", "track", "embed", "input":
 				attribute = "src"
 			case "object":
@@ -521,37 +677,96 @@ func extract(body []byte, pageURL string, root *url.URL) ([]discovered, error) {
 				}
 			}
 			for _, v := range values {
+				if err := ctx.Err(); err != nil {
+					walkErr = err
+					return false
+				}
+				if attempts >= maxExtractCandidates {
+					truncated = true
+					return false
+				}
+				attempts++
 				raw := strings.TrimSpace(v.value)
-				if raw == "" || strings.HasPrefix(raw, "#") {
+				if raw == "" || strings.HasPrefix(raw, "#") || len(raw) > maxURLBytes {
 					continue
 				}
-				u, err := base.Parse(raw)
+				ref, err := url.Parse(raw)
 				if err != nil {
 					continue
 				}
-				normalized, err := Normalize(u.String())
+				if baseUnusable && !ref.IsAbs() {
+					continue
+				}
+				u := base.ResolveReference(ref)
+				resolved := u.String()
+				urlBytes += len(resolved)
+				if urlBytes > maxExtractURLBytes {
+					truncated = true
+					return false
+				}
+				if len(resolved) > maxURLBytes {
+					continue
+				}
+				normalized, err := Normalize(resolved)
 				if err != nil {
 					continue
 				}
 				u, _ = url.Parse(normalized)
 				crawl := (n.Data == "a" || n.Data == "area") && sameOrigin(u, root) && classify(u, root, n.Data) == "internal"
-				items = append(items, discovered{normalized, models.LinkSource{PageURL: pageURL, Element: n.Data, Attribute: v.key, Text: textContent(n)}, crawl})
+				label, textExhausted, textErr := textContent(ctx, n, &textNodes)
+				if textErr != nil {
+					walkErr = textErr
+					return false
+				}
+				items = append(items, discovered{normalized, models.LinkSource{PageURL: pageURL, Element: n.Data, Attribute: v.key, Text: label}, crawl})
+				if textExhausted || len(items) >= MaxSources {
+					truncated = true
+					return false
+				}
 			}
 		}
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walk(c)
-		}
+		return true
+	})
+	if walkErr != nil {
+		return items, truncated, walkErr
 	}
-	walk(doc)
-	return items, nil
+	if err != nil {
+		return items, truncated, err
+	}
+	if exhausted {
+		truncated = true
+	}
+	return items, truncated, nil
 }
 
 // Run fetches source HTML, extracts references, and checks unique HTTP targets.
 // A sink error terminates work; publication is durable before the next batch.
 func (c *Checker) Run(ctx context.Context, job models.LinkCheck, sink func(models.LinkCheck, []models.LinkResult) error) (models.LinkCheck, []models.LinkResult, error) {
-	r, err := c.newRun(job, sink)
+	return c.RunObserved(ctx, job, sink, nil)
+}
+
+// RunObserved uses a durable observer for each resolved trusted-root answer.
+// A durable private-dial guard also closes the gap between observation and dial.
+// Standalone runs can use Run's in-memory guard when no store is involved.
+func (c *Checker) RunObserved(ctx context.Context, job models.LinkCheck, sink func(models.LinkCheck, []models.LinkResult) error, observeRootDNS RootDNSObserver, privateDialGuard ...rootdns.PrivateDialGuard) (models.LinkCheck, []models.LinkResult, error) {
+	return c.runObserved(ctx, job, sink, nil, observeRootDNS, privateDialGuard...)
+}
+
+// RunObservedDelta retains the full final result return while each publication
+// contains only results changed since the preceding successful publication.
+// A failed sink call keeps those rows dirty for a subsequent failure save.
+func (c *Checker) RunObservedDelta(ctx context.Context, job models.LinkCheck, deltaSink func(models.LinkCheck, []models.LinkResult) error, observeRootDNS RootDNSObserver, privateDialGuard ...rootdns.PrivateDialGuard) (models.LinkCheck, []models.LinkResult, error) {
+	return c.runObserved(ctx, job, nil, deltaSink, observeRootDNS, privateDialGuard...)
+}
+
+func (c *Checker) runObserved(ctx context.Context, job models.LinkCheck, sink, deltaSink func(models.LinkCheck, []models.LinkResult) error, observeRootDNS RootDNSObserver, privateDialGuard ...rootdns.PrivateDialGuard) (models.LinkCheck, []models.LinkResult, error) {
+	r, err := c.newRun(job, sink, observeRootDNS)
 	if err != nil {
 		return job, nil, err
+	}
+	r.deltaSink = deltaSink
+	if len(privateDialGuard) > 0 {
+		r.privateDialGuard = privateDialGuard[0]
 	}
 	defer r.client.CloseIdleConnections()
 	ctx, cancel := context.WithTimeout(ctx, JobTimeout)
@@ -658,7 +873,10 @@ func (c *Checker) Run(ctx context.Context, job models.LinkCheck, sink func(model
 				continue
 			}
 			parsedFinal[finalKey] = true
-			items, parseErr := extract(body, final.String(), r.root)
+			items, extractTruncated, parseErr := extract(ctx, body, final.String(), r.root)
+			if extractTruncated {
+				r.job.Truncated = true
+			}
 			if parseErr != nil {
 				r.job.PagesFailed++
 				r.job.Truncated = true
@@ -730,10 +948,8 @@ func (c *Checker) Run(ctx context.Context, job models.LinkCheck, sink func(model
 	if ctx.Err() != nil && errors.Is(ctx.Err(), context.Canceled) {
 		return r.job, items, ctx.Err()
 	}
-	if r.sink != nil {
-		if err := r.sink(r.job, items); err != nil {
-			return r.job, items, err
-		}
+	if err := r.publishWithItems(items); err != nil {
+		return r.job, items, err
 	}
 	return r.job, items, nil
 }

@@ -6,7 +6,7 @@
 #   - you've already run `make build` in the repo root, so dist/shopkeeper
 #     and dist/ui contain the compiled artifacts
 #   - Go, Node, PostgreSQL client/server, and Chromium are installed on the host
-#   - the `lime` system user will own the install path
+#   - root owns Shopkeeper code; the `lime` user owns screenshots and UI data
 #
 # Usage:
 #   sudo ./scripts/debian-install.sh
@@ -94,28 +94,15 @@ if [[ ! -d "${DIST_DIR}/shopkeeper" || ! -d "${DIST_DIR}/ui" ]]; then
   exit 1
 fi
 
-copy_tree() {
-  local source_dir="$1"
-  local target_dir="$2"
-  shift 2
-  local preserve_screenshots=false
+# shellcheck source=scripts/debian-install-safety.sh
+. "${ROOT_DIR}/scripts/debian-install-safety.sh"
 
-  if [[ " $* " == *" --exclude screenshots "* ]]; then
-    preserve_screenshots=true
-  fi
-
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete "$@" "${source_dir}/" "${target_dir}/"
-    return
-  fi
-
-  if [[ "${preserve_screenshots}" == "true" ]]; then
-    find "${target_dir}" -mindepth 1 -maxdepth 1 ! -name screenshots -exec rm -rf {} +
-  else
-    find "${target_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  fi
-  cp -a "${source_dir}/." "${target_dir}/"
-}
+# Validate every destination before user creation, ownership changes, or copy.
+# Existing captures are preserved only when screenshots is a real directory.
+debian_preflight_install "${INSTALL_ROOT}" "${CONFIG_ROOT}" "${SYSTEMD_DIR}"
+INSTALL_ROOT="${DEBIAN_INSTALL_ROOT_PATH}"
+CONFIG_ROOT="${DEBIAN_CONFIG_ROOT_PATH}"
+SYSTEMD_DIR="${DEBIAN_SYSTEMD_DIR_PATH}"
 
 ensure_env_value() {
   local env_file="$1"
@@ -173,27 +160,30 @@ if ! id -u "${LIME_USER}" >/dev/null 2>&1; then
 fi
 
 echo "==> Ensuring directories"
-install -d -o "${LIME_USER}" -g "${LIME_USER}" -m 0755 \
-  "${INSTALL_ROOT}/shopkeeper" \
-  "${INSTALL_ROOT}/ui"
-install -d -o "${LIME_USER}" -g "${LIME_USER}" -m 0700 \
+if [[ ! -d "${INSTALL_ROOT}" ]]; then
+  debian_install_directory root root 0755 "${INSTALL_ROOT}"
+fi
+debian_install_directory root root 0755 "${INSTALL_ROOT}/shopkeeper"
+debian_install_directory "${LIME_USER}" "${LIME_USER}" 0755 "${INSTALL_ROOT}/ui"
+debian_install_directory "${LIME_USER}" "${LIME_USER}" 0700 \
   "${INSTALL_ROOT}/shopkeeper/screenshots"
-install -d -o root -g "${LIME_USER}" -m 0750 "${CONFIG_ROOT}"
+debian_install_directory root "${LIME_USER}" 0750 "${CONFIG_ROOT}"
 
 echo "==> Installing Shopkeeper artifacts"
-copy_tree "${DIST_DIR}/shopkeeper" "${INSTALL_ROOT}/shopkeeper" \
+debian_copy_tree "${DIST_DIR}/shopkeeper" "${INSTALL_ROOT}/shopkeeper" \
   --exclude screenshots
-install -d -o "${LIME_USER}" -g "${LIME_USER}" -m 0700 \
+debian_install_directory root root 0755 "${INSTALL_ROOT}/shopkeeper"
+debian_install_directory "${LIME_USER}" "${LIME_USER}" 0700 \
   "${INSTALL_ROOT}/shopkeeper/screenshots"
-install -d -o "${LIME_USER}" -g "${LIME_USER}" -m 0755 \
+debian_install_directory root root 0755 \
   "${INSTALL_ROOT}/shopkeeper/data"
-copy_tree "${ROOT_DIR}/data" "${INSTALL_ROOT}/shopkeeper/data"
-chown -R "${LIME_USER}:${LIME_USER}" "${INSTALL_ROOT}/shopkeeper"
+debian_copy_tree "${ROOT_DIR}/data" "${INSTALL_ROOT}/shopkeeper/data"
+debian_secure_shopkeeper_code "${INSTALL_ROOT}/shopkeeper"
 
 echo "==> Installing UI artifacts"
-copy_tree "${DIST_DIR}/ui" "${INSTALL_ROOT}/ui"
-install -d -o "${LIME_USER}" -g "${LIME_USER}" -m 0755 "${INSTALL_ROOT}/ui/data"
-copy_tree "${ROOT_DIR}/data" "${INSTALL_ROOT}/ui/data"
+debian_copy_tree "${DIST_DIR}/ui" "${INSTALL_ROOT}/ui"
+debian_install_directory "${LIME_USER}" "${LIME_USER}" 0755 "${INSTALL_ROOT}/ui/data"
+debian_copy_tree "${ROOT_DIR}/data" "${INSTALL_ROOT}/ui/data"
 chown -R "${LIME_USER}:${LIME_USER}" "${INSTALL_ROOT}/ui"
 
 echo "==> Installing systemd units"

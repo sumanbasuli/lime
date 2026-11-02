@@ -12,6 +12,7 @@ type RawResult struct {
 	ScreenshotPath string      `json:"screenshot_path"`
 	Error          string      `json:"error,omitempty"`
 	Canceled       bool        `json:"-"`
+	axeBytes       int
 }
 
 // Violation represents a single axe-core accessibility violation.
@@ -34,6 +35,7 @@ type Node struct {
 	ElementScreenshotPath string   `json:"-"` // populated after scanning
 	CaptureIndex          int      `json:"-"`
 	HasCaptureIndex       bool     `json:"-"`
+	CaptureSuppressed     bool     `json:"-"`
 }
 
 // RuleID stores a rule identifier from axe output categories we do not persist yet.
@@ -48,4 +50,5 @@ type axeResult struct {
 	NotApplicable []RuleID    `json:"notApplicable"`
 	Passes        []RuleID    `json:"passes"`
 	Version       string      `json:"version"`
+	LimitError    string      `json:"limitError"`
 }

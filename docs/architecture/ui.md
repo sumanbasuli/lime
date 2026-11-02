@@ -66,7 +66,7 @@ Polling behavior:
 
 - Navigating away from the scan detail page stops UI polling because the client component unmounts.
 - The scan itself does not depend on the page staying open; Shopkeeper continues processing in the backend.
-- If Shopkeeper restarts, the UI may temporarily stop seeing progress until the backend recovery path re-queues any non-terminal scan.
+- If Shopkeeper restarts, the UI may temporarily stop seeing progress while the backend resets interrupted active scans and resumes queued pending work.
 
 ### Sidebar Navigation
 
@@ -80,7 +80,7 @@ The responsive sidebar uses shared shadcn/ui components and links to:
 - API health → `/api/health`
 - Documentation → `https://lime.heysuman.com/docs/`
 
-The header search submits to `/scans?q=...`. Search matches target URL, tag, status, and scan type; tag filters can be combined with the query.
+The header search submits to `/scans?q=...`. Search matches the public target origin/path (not URL credentials, query, or fragment), tag, status, and scan type; tag filters can be combined with the search term.
 
 ### Link-Check UI Boundary
 
@@ -122,9 +122,9 @@ The browser never needs a deployment-specific backend URL. The Next server proxi
 
 External clients should connect to `/mcp` on the dashboard. It exposes seventeen read tools and, when `mcpAllowWrites` is enabled, twenty-nine tools covering scan and link-check management, false-positive review, and reporting and performance settings. Shopkeeper handles authentication, protocol negotiation, saved-data reads, and scan actions. Next provides the proxy, fresh scores, report and screenshot downloads, and settings changes. MCP cannot change its own permissions or manage keys.
 
-Fresh score enrichment occurs only after Shopkeeper accepts an authenticated `get_scan` read. Link tools do not apply accessibility scoring. There is no public unauthenticated score endpoint or separate MCP scoring formula. Direct Shopkeeper access reads its valid saved score cache and returns null when it is cold or stale; dashboard-owned evidence/settings tools require canonical `/mcp`.
+Fresh score enrichment occurs only after Shopkeeper accepts an authenticated `get_scan` read. Link tools do not apply accessibility scoring. There is no public unauthenticated score endpoint or separate MCP scoring formula. Direct Shopkeeper access reads its valid saved score cache and returns null when it is cold or stale; dashboard-owned evidence/settings tools require canonical `/mcp`. Shopkeeper labels successful MCP responses from the same decoded tool name it dispatches. The canonical route transforms `get_scan`, the three artifact readers, and `update_settings`; other results stream through unchanged without a second response-body copy or JSON parse. If an older backend does not send the label during a rolling upgrade, the canonical route retains its previous response-inspection behavior. Transformed responses still need their existing body materialization; this optimization is not a universal response-size cap.
 
-Score enrichment preserves the original numeric JSON-RPC ID token, including integers larger than JavaScript's safe range, with Node 23+ native JSON parse context/raw JSON support. Native dashboard deployments must meet the documented Node 23+ runtime prerequisite; the Docker image supplies that runtime. Client authors can use string IDs to avoid rounding in their own JSON construction/parsing.
+Score enrichment preserves the original numeric JSON-RPC ID token, including integers larger than JavaScript's safe range, using native JSON parse context/raw JSON features introduced in Node 23. Native dashboard deployments need Node 24.22.1+ on the 24.x LTS line, or a newer maintained release with current security patches; feature availability alone is not a secure runtime baseline. The Docker image supplies the selected runtime. Client authors can use string IDs to avoid rounding in their own JSON construction/parsing.
 
 The MCP proxy accepts request bodies up to 1 MiB. It allows 30 seconds for reading the body and fetching the upstream response, and releases the body reader if the request is cancelled. Failures return HTTP 400, 413, 500, 502, or 504 without exposing private upstream details. Node decodes compressed responses automatically, so the proxy removes stale `Content-Encoding`, `Content-Length`, and hop-by-hop headers.
 
@@ -203,7 +203,9 @@ The `/reports/scans/[id]/issues` document is rendered by Shopkeeper's Chromium P
 
 Two internal URLs are required for split deployments: UI `SHOPKEEPER_URL` points to the backend, while backend `REPORT_BASE_URL` points to the dashboard document renderer. Protecting the public UI with an external login gateway must not prevent Shopkeeper from loading its configured internal report URL. There is no application login/tenant boundary for ordinary dashboard/API routes; MCP's bearer key protects `/mcp`, not the whole dashboard. Operators must choose appropriate network/reverse-proxy access controls.
 
-The Next PDF concurrency limiter is an outer per-UI-process guard for dashboard requests. It admits up to 20 waiting PDF requests per process, removes requests cancelled while waiting, and returns HTTP 503 with `Retry-After` when the queue is full. Shopkeeper separately enforces backend PDF admission. CSV full mode streams occurrences in 5000-row batches; small CSV, PDF, and LLM use configured samples. Both issue CSV modes use the same cell formatter: formula-like text from scanned pages is prefixed with an apostrophe before CSV quoting, while numeric columns remain numeric. Stored issue evidence and non-CSV reports are unchanged. `scan_report_data_cache` and its TTL setting currently have no runtime consumer. See [Performance And Caching](../performance.md) for the implemented bounds.
+The Next PDF concurrency limiter is an outer per-UI-process guard for dashboard requests. It admits up to 20 waiting PDF requests per process, removes requests cancelled while waiting, and returns HTTP 503 with `Retry-After` when the queue is full. Its active permit remains held through download completion/cancellation, with a 64 MiB response ceiling. Shopkeeper separately enforces backend PDF admission and the same generated-file size ceiling. CSV full mode streams occurrences in 5000-row batches; small CSV, PDF, and LLM use configured samples. Both issue CSV modes use the same cell formatter: formula-like text from scanned pages is prefixed with an apostrophe before CSV quoting, while numeric columns remain numeric. Stored issue evidence and non-CSV reports are unchanged. `scan_report_data_cache` and its TTL setting currently have no runtime consumer. See [Performance And Caching](../performance.md) for the implemented bounds.
+
+Canonical MCP CSV/LLM preparation passes a trusted `ReportReadContext` through settings, scoped issue lookup, scoring, report loaders, and full CSV batches. `mcp-report-read.ts` owns one dedicated read-only repeatable-read connection, serializes each SQL preflight/read pair, and charges selected logical TEXT and rows before materialization. Projection width is checked by SQL, not inferred from formatted output. MCP computes a stale score with the same scorer but does not refresh caches from its read-only snapshot. Ordinary calls omit the context and retain their existing pool/cache behavior. Both ordinary and MCP small CSV stream saved samples, and LLM streams header/group parts, using the same formatting. MCP alone consumes these streams through the exact artifact byte limit; ordinary downloads remain complete. Do not replace the context lifetime with a `Promise.race` that releases admission while its SQL is still running.
 
 ### Visual Conventions
 

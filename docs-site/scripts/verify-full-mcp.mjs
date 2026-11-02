@@ -238,7 +238,8 @@ export async function verifyFullMcp(options) {
       await toolError(client, "create_link_check", { url: `${fixtureOrigin}/links/good`, check_type: "single", request_id: createArgs.request_id }, /request_id|different|conflict/i);
       await waitForScan(created.id);
       const scan = await call("get_scan", { scan_id: created.id });
-      assert.equal(scan.scan.sitemap_url, createArgs.sitemap_url, "The saved target retains this run's isolation query");
+      assert.equal(scan.scan.sitemap_url, createArgs.sitemap_url.split("?")[0], "MCP hides the saved target's isolation query");
+      assert.equal(await verificationSql(`SELECT sitemap_url FROM scans WHERE id='${created.id}'`), createArgs.sitemap_url, "The private scan target retains its isolation query for execution and retry");
       assert.equal(scan.scan.viewport_preset, "mobile");
       assert.deepEqual([scan.scan.viewport_width, scan.scan.viewport_height], [390, 844]);
       assert.equal(scan.scan.include_link_check, true);

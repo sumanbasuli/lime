@@ -13,6 +13,7 @@ import { MaterialSymbol } from "@/components/material-symbol";
 import { measureServerAction } from "@/lib/performance-logging";
 import { getScanScoreSummaries } from "@/lib/scan-score-data";
 import type { ScanScoreSummary } from "@/lib/scan-scoring";
+import { redactUrlUserinfo } from "@/lib/url-presentation";
 
 export const dynamic = "force-dynamic";
 
@@ -38,10 +39,11 @@ function formatTarget(value: string): { domain: string; url: string } {
     const parsed = new URL(value);
     return {
       domain: parsed.hostname.replace(/^www\./, ""),
-      url: value,
+      url: redactUrlUserinfo(value),
     };
   } catch {
-    return { domain: value, url: value };
+    const redacted = redactUrlUserinfo(value);
+    return { domain: redacted, url: redacted };
   }
 }
 

@@ -4,7 +4,7 @@ Use LIME's test suites to check a change from the browser through the API and sa
 
 ## Run the project
 
-From a new checkout, copy `.env.example` to `.env` and run `make start-all`. The dashboard opens at `http://localhost:3000/`. Use `make start-dev` for dashboard hot reload.
+From a new checkout, start Docker, then run `make init-env` and `make start-all`. The initializer creates a private database password and refuses existing `.env` files and database volumes. The dashboard opens at `http://localhost:3000/`. Use `make start-dev` for dashboard hot reload.
 
 For the marketing site and documentation:
 
@@ -20,7 +20,7 @@ Open `http://localhost:3001/`. For a preview of the built static site, use `make
 | Area | Main source directories |
 | --- | --- |
 | Scan lifecycle and API | `shopkeeper/internal/handler/`, `router/`, `scanner/` |
-| Sitemap discovery | `shopkeeper/internal/profiler/` |
+| Sitemap discovery | `shopkeeper/internal/profiler/`, `scanner/discovery.go`, `repository/discovery.go`, migration `000020` |
 | Browser audits and screenshots | `shopkeeper/internal/juicer/`, `screenshots/` |
 | Results and database migrations | `shopkeeper/internal/sweetner/`, `repository/`, `migrations/` |
 | Dashboard and reports | `lime/src/app/`, `lime/src/components/`, `lime/src/lib/` |
@@ -44,14 +44,28 @@ npm --prefix docs-site ci
 | Go backend | `(cd shopkeeper && go test ./...)` |
 | Dashboard | `npm --prefix lime run lint` and `(cd lime && npx tsc --noEmit)` |
 | MCP routes and reports | `npm --prefix lime run test:mcp-transport` and `npm --prefix lime run test:mcp-dashboard-tools` |
+| MCP report preparation | `npm --prefix lime run test:mcp-report-read` (no database); `npm --prefix lime run test:mcp-report-preparation` requires the disposable private-socket PostgreSQL fixture described in the internal verification guide and otherwise explicitly skips SQL cases |
+| HTML/PDF report size | `npm --prefix lime run test:html-report-read` for the page/data boundary; `npm --prefix lime run test:html-report-sql-fixture` is an opt-in real PostgreSQL check and skips its SQL case without `LIME_TEST_DATABASE_URL` |
 | Browser write boundary | `npm --prefix lime run test:ordinary-api-origin` and `(cd shopkeeper && go test ./internal/router)` |
+| Host admission and backend memory defaults | `npm --prefix lime run test:allowed-hosts`, `(cd shopkeeper && go test ./internal/router)`, and `node scripts/verify-backend-memory.mjs` (all three Compose files, release archive, native unit; Docker Compose CLI needed, but the daemon stays stopped) |
+| Native nginx example | `LIME_TEST_NGINX=/absolute/path/to/nginx npm --prefix lime run test:nginx-proxy` (private HTTP/HTTPS/HTTP2 fixtures; needs OpenSSL and never uses an installed service; skips explicitly when the binary is not selected) |
+| Runtime version consistency | `npm --prefix lime run test:runtime-versions` (Go/Node image and CI pins, both Next lockfiles, prerequisites, and bundled PostgreSQL) |
+| Native production dependency installation | `node --test scripts/verify-native-build.mjs` (actual Makefile with fake npm; install/build failure and stale-dependency controls) and `bash scripts/verify-debian-cutover.sh` |
+| Release bundle path safety | `node --test scripts/verify-release-bundle.mjs` (disposable checkout fixture; rejects unsafe versions and keeps ordinary Makefile/direct-script builds working) |
+| Release image publishing | `bash scripts/verify-release-image-tags.sh` (disposable local Git remote and fake Docker; tag claims, clean build context, both builds before the first push, and failure handling) |
+| Fresh source credentials | `node scripts/verify-init-env.mjs` (private random `.env`, no overwrite, symlink and malformed-template guards; no Docker daemon) |
+| Isolated verification credentials | `node --test scripts/verify-docs-db-credential.mjs` (random and explicit secrets, retained-project refusal, daemon-free Compose interpolation) |
+| Scan browser network and evidence limits | `(cd shopkeeper && go test ./internal/egressproxy ./internal/juicer ./internal/profiler ./internal/scanner)`; for opt-in local Chrome fixtures, set `LIME_TEST_CHROME` to the browser binary and run those packages with `-run 'TestChrome|TestPageScanProtects|TestFullPageClipGeometry'` |
+| Scan checkpoints and screenshot access | `(cd shopkeeper && go test ./internal/scanner ./internal/juicer ./internal/screenshots ./internal/handler)`; repository recovery and screenshot-visibility SQL tests run with `LIME_TEST_DATABASE_URL` pointed only at a disposable PostgreSQL database and otherwise skip |
+| Checkpointed sitemap discovery | `(cd shopkeeper && go test ./internal/profiler ./internal/scanner ./internal/repository)`; set `LIME_TEST_DATABASE_URL` to a disposable PostgreSQL database for SQL checkpoint, publication, migration, and restart cases. Cover ten-minute requeue, pause/resume, retained request/XML counters, nested failures, legacy saved scans, and all-or-nothing URL publication. No host Docker service is required for the focused tests. |
+| External database backup argument safety | `bash scripts/verify-backup-argv.sh` |
 | Installer hot-reload ports | `node --test scripts/verify-start-dev.mjs` (Compose config check runs when the CLI is available; no daemon is used) |
 | MCP settings | `node --test lime/scripts/verify-mcp-settings-timeouts.mjs` |
 | Link-check client and presentation | `npm --prefix lime run test:link-check-api` and `npm --prefix lime run test:link-presentation` |
+| Link-check source storage | `(cd shopkeeper && go test ./internal/repository -run 'TestLinkSource|TestStreamLinkExport|TestLinkCheckSource')` with `LIME_TEST_DATABASE_URL` pointed only at a disposable PostgreSQL database; covers legacy/row storage, migration down/up, paging, MCP admission, replay, and CSV snapshots |
 | Update notices | `npm --prefix lime run test:update-notice` |
 | Agent configuration and skills | `npm --prefix agent test` |
 | Marketing and docs | `npm --prefix docs-site run lint` and `make docs-verify` |
-| Fly deployment helper | `bash scripts/verify-fly-deploy.sh` (fake `flyctl`; no Fly account or apps needed) |
 
 Run `make verify-app` for changes that affect product workflows. This builds and tests a complete LIME stack, including the dashboard, backend, database, MCP clients, and saved reports.
 
@@ -59,7 +73,10 @@ Run `make verify-app` for changes that affect product workflows. This builds and
 
 `make verify-app` creates a separate Docker Compose project named `lime-verification`, with its own database and screenshot storage. Tests use local pages with known results, so the same failures, redirects, and recovery cases can be reproduced.
 
+The runner generates a fresh database password for a new test stack and refuses to take over an existing `lime-verification` project or volume. Inspect any leftover project before removing its test data. A password supplied to a previously initialized PostgreSQL volume cannot be changed just by editing the Compose environment; use that volume's original password or deliberately replace only the disposable test volume.
+
 You need Docker Compose, curl, Bash, installed docs-site dependencies, and Playwright Chromium. The first run may download container images, packages, and the MCP bridge.
+On Linux, the runner adds the repository's verification-only `host-gateway` override so the container can reach the controlled fixture on the host. Docker Desktop supplies that hostname directly on macOS.
 
 | Service | Default port |
 | --- | --- |
@@ -109,12 +126,14 @@ Set `LIME_MCP_SCAN_ID` or `LIME_MCP_LINK_CHECK_ID` to select particular saved re
 To repeat full MCP tests during development, first start the disposable stack:
 
 ```bash
+export LIME_DOCS_DB_PASSWORD="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(24).toString("hex"))')"
 LIME_DOCS_DB_PORT=16432 LIME_DOCS_API_PORT=19080 LIME_DOCS_UI_PORT=14000 \
   docker compose -p lime-verification -f docker-compose.docs.yml up -d --build --wait
 npm --prefix docs-site run verify:mcp-full -- --restart-backend
 ```
 
-The focused runner changes test keys, permissions, settings, and records. It connects only to the disposable stack and leaves that stack running for debugging. `--restart-backend` restarts its backend to check recovery and saved request replay.
+Keep `LIME_DOCS_DB_PASSWORD` exported for the focused tests, including the database-lock check. The focused runner changes test keys, permissions, settings, and records. It connects only to the disposable stack and leaves that stack running for debugging. `--restart-backend` restarts its backend to check recovery and saved request replay.
+The demo database, API, and dashboard ports bind to localhost by default. For intentional access from another machine, set `LIME_DOCS_API_BIND_HOST=0.0.0.0` or `LIME_DOCS_UI_BIND_HOST=0.0.0.0` and protect these unauthenticated test services with a firewall or access proxy. The verification commands still connect through localhost, so binding to only a specific LAN address would make their local checks fail.
 
 Optional commands against the same stack:
 
@@ -134,6 +153,7 @@ After the focused tests, remove the disposable stack:
 ```bash
 LIME_DOCS_DB_PORT=16432 LIME_DOCS_API_PORT=19080 LIME_DOCS_UI_PORT=14000 \
   docker compose -p lime-verification -f docker-compose.docs.yml down --volumes
+unset LIME_DOCS_DB_PASSWORD
 ```
 
 ## Debugging a failed check

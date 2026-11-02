@@ -6,6 +6,8 @@ import type {
   ReportOccurrence,
 } from "@/lib/issues-report-data";
 import type { QueryResultRow } from "pg";
+import { redactOptionalUrlUserinfo, redactUrlUserinfo } from "@/lib/url-presentation";
+import type { ReportReadContext } from "@/lib/mcp-report-read";
 
 type CsvValue = string | number | boolean | null | undefined;
 const CSV_OCCURRENCE_BATCH_SIZE = 5000;
@@ -62,7 +64,7 @@ function formatCsvRow(values: CsvValue[]): string {
 }
 
 function formatActRuleUrls(group: ReportIssueGroup): string {
-  return group.issue.actRules.map((rule) => rule.ruleUrl).join("; ");
+  return group.issue.actRules.map((rule) => redactUrlUserinfo(rule.ruleUrl)).join("; ");
 }
 
 function formatRequirements(group: ReportIssueGroup): string {
@@ -87,10 +89,10 @@ function buildRowForOccurrence(
     group.issue.severity,
     weight > 0 ? weight : "not scored",
     group.occurrenceCount,
-    occurrence?.pageUrl,
+    occurrence ? redactUrlUserinfo(occurrence.pageUrl) : null,
     occurrence?.cssSelector,
     occurrence?.htmlSnippet,
-    group.issue.helpUrl,
+    redactOptionalUrlUserinfo(group.issue.helpUrl),
     formatActRuleUrls(group),
     formatRequirements(group),
   ];
@@ -128,7 +130,8 @@ const ISSUE_REPORT_CSV_HEADER = [
 
 async function loadFailedOccurrenceBatch(
   issueId: string,
-  cursor: OccurrenceCursor | null
+  cursor: OccurrenceCursor | null,
+  context?: ReportReadContext,
 ): Promise<CsvOccurrenceRow[]> {
   const cursorClause = cursor
     ? "AND (u.url, io.created_at, io.id) > ($2::text, $3::timestamp, $4::uuid)"
@@ -143,8 +146,7 @@ async function loadFailedOccurrenceBatch(
       ]
     : [issueId, CSV_OCCURRENCE_BATCH_SIZE];
   const limitParam = cursor ? "$5" : "$2";
-  const result = await pool.query<CsvOccurrenceRow>(
-    `
+  const query = `
       SELECT
         io.id::text AS id,
         io.id::text AS "cursorId",
@@ -160,9 +162,10 @@ async function loadFailedOccurrenceBatch(
       ${cursorClause}
       ORDER BY u.url, io.created_at, io.id
       LIMIT ${limitParam}
-    `,
-    params
-  );
+    `;
+  const result = context
+    ? await context.query<CsvOccurrenceRow>(query, params, 8)
+    : await pool.query<CsvOccurrenceRow>(query, params);
 
   return result.rows;
 }
@@ -170,7 +173,8 @@ async function loadFailedOccurrenceBatch(
 async function loadNeedsReviewOccurrenceBatch(
   scanId: string,
   ruleId: string,
-  cursor: OccurrenceCursor | null
+  cursor: OccurrenceCursor | null,
+  context?: ReportReadContext,
 ): Promise<CsvOccurrenceRow[]> {
   const cursorClause = cursor
     ? "AND (u.url, uao.created_at, uao.id) > ($3::text, $4::timestamp, $5::uuid)"
@@ -186,8 +190,7 @@ async function loadNeedsReviewOccurrenceBatch(
       ]
     : [scanId, ruleId, CSV_OCCURRENCE_BATCH_SIZE];
   const limitParam = cursor ? "$6" : "$3";
-  const result = await pool.query<CsvOccurrenceRow>(
-    `
+  const query = `
       SELECT
         uao.id::text AS id,
         uao.id::text AS "cursorId",
@@ -206,9 +209,10 @@ async function loadNeedsReviewOccurrenceBatch(
         ${cursorClause}
       ORDER BY u.url, uao.created_at, uao.id
       LIMIT ${limitParam}
-    `,
-    params
-  );
+    `;
+  const result = context
+    ? await context.query<CsvOccurrenceRow>(query, params, 8)
+    : await pool.query<CsvOccurrenceRow>(query, params);
 
   return result.rows;
 }
@@ -216,7 +220,8 @@ async function loadNeedsReviewOccurrenceBatch(
 async function loadNeedsReviewAuditFallbackBatch(
   scanId: string,
   ruleId: string,
-  cursor: OccurrenceCursor | null
+  cursor: OccurrenceCursor | null,
+  context?: ReportReadContext,
 ): Promise<CsvOccurrenceRow[]> {
   const cursorClause = cursor
     ? "AND (u.url, ua.created_at, ua.id) > ($3::text, $4::timestamp, $5::uuid)"
@@ -232,8 +237,7 @@ async function loadNeedsReviewAuditFallbackBatch(
       ]
     : [scanId, ruleId, CSV_OCCURRENCE_BATCH_SIZE];
   const limitParam = cursor ? "$6" : "$3";
-  const result = await pool.query<CsvAuditFallbackRow>(
-    `
+  const query = `
       SELECT
         ua.id::text AS "cursorId",
         to_char(ua.created_at, 'YYYY-MM-DD HH24:MI:SS.US') AS "cursorCreatedAt",
@@ -248,9 +252,10 @@ async function loadNeedsReviewAuditFallbackBatch(
         ${cursorClause}
       ORDER BY u.url, ua.created_at, ua.id
       LIMIT ${limitParam}
-    `,
-    params
-  );
+    `;
+  const result = context
+    ? await context.query<CsvAuditFallbackRow>(query, params, 4)
+    : await pool.query<CsvAuditFallbackRow>(query, params);
 
   return result.rows.map((row) => ({
     id: `${ruleId}-${row.urlId}-${row.cursorId}`,
@@ -266,34 +271,38 @@ async function loadNeedsReviewAuditFallbackBatch(
 
 async function loadOccurrenceBatch(
   group: ReportIssueGroup,
-  cursor: OccurrenceCursor | null
+  cursor: OccurrenceCursor | null,
+  context?: ReportReadContext,
 ): Promise<CsvOccurrenceRow[]> {
   if (group.occurrenceSource === "issue_occurrences") {
-    return loadFailedOccurrenceBatch(group.issue.id, cursor);
+    return loadFailedOccurrenceBatch(group.issue.id, cursor, context);
   }
 
   if (group.occurrenceSource === "url_audit_occurrences") {
     return loadNeedsReviewOccurrenceBatch(
       group.issue.scanId,
       group.issue.violationType,
-      cursor
+      cursor,
+      context,
     );
   }
 
   return loadNeedsReviewAuditFallbackBatch(
     group.issue.scanId,
     group.issue.violationType,
-    cursor
+    cursor,
+    context,
   );
 }
 
 async function* streamOccurrencesForGroup(
-  group: ReportIssueGroup
+  group: ReportIssueGroup,
+  context?: ReportReadContext,
 ): AsyncGenerator<CsvReportOccurrence> {
   let cursor: OccurrenceCursor | null = null;
 
   for (;;) {
-    const rows = await loadOccurrenceBatch(group, cursor);
+    const rows = await loadOccurrenceBatch(group, cursor, context);
     if (rows.length === 0) {
       return;
     }
@@ -316,14 +325,15 @@ async function* streamOccurrencesForGroup(
 }
 
 async function* streamIssueReportCsvRows(
-  data: IssueReportData
+  data: IssueReportData,
+  context?: ReportReadContext,
 ): AsyncGenerator<string> {
   yield formatCsvRow(ISSUE_REPORT_CSV_HEADER);
 
   for (const group of data.issuesWithOccurrences) {
     let wroteOccurrence = false;
 
-    for await (const occurrence of streamOccurrencesForGroup(group)) {
+    for await (const occurrence of streamOccurrencesForGroup(group, context)) {
       yield formatCsvRow(buildRowForOccurrence(group, occurrence));
       wroteOccurrence = true;
     }
@@ -334,9 +344,25 @@ async function* streamIssueReportCsvRows(
   }
 }
 
-export function buildIssueReportCsvStream(data: IssueReportData): ReadableStream {
+export function buildIssueReportCsvStream(data: IssueReportData, context?: ReportReadContext): ReadableStream {
+  const rows = streamIssueReportCsvRows(data, context);
+  return csvRowsStream(rows);
+}
+
+function* sampledCsvRows(data: IssueReportData): Generator<string> {
+  yield formatCsvRow(ISSUE_REPORT_CSV_HEADER);
+  for (const group of data.issuesWithOccurrences) {
+    const occurrences: Array<ReportOccurrence | null> = group.occurrences.length ? group.occurrences : [null];
+    for (const occurrence of occurrences) yield formatCsvRow(buildRowForOccurrence(group, occurrence));
+  }
+}
+
+export function buildIssueReportCsvSampleStream(data: IssueReportData): ReadableStream {
+  return csvRowsStream(sampledCsvRows(data));
+}
+
+function csvRowsStream(rows: AsyncGenerator<string> | Generator<string>): ReadableStream {
   const encoder = new TextEncoder();
-  const rows = streamIssueReportCsvRows(data);
   let wroteRow = false;
 
   return new ReadableStream({

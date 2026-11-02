@@ -43,6 +43,21 @@ case "__SHELL{0##*/}" in
       printf 'start-all:\\n\\t@true\\n' > "$destination/Makefile"
       printf 'services: {}\\n' > "$destination/docker-compose.yml"
       printf '2.0.0\\n' > "$destination/VERSION"
+      mkdir -p "$destination/data"
+      for catalog in act-rules axe-guidance axe-rules axe-act-mapping; do printf '{}\\n' > "$destination/data/$catalog.json"; done
+      if [[ "$LIME_TEST_CASE" == catalog-file-symlink || "$LIME_TEST_CASE" == catalog-directory-symlink ]]; then
+        mkdir "$LIME_TEST_ROOT/private-catalog"
+        printf 'keep private catalog\\n' > "$LIME_TEST_ROOT/private-catalog/sentinel.json"
+        chmod 0700 "$LIME_TEST_ROOT/private-catalog"
+        chmod 0600 "$LIME_TEST_ROOT/private-catalog/sentinel.json"
+        if [[ "$LIME_TEST_CASE" == catalog-file-symlink ]]; then
+          rm "$destination/data/act-rules.json"
+          ln -s "$LIME_TEST_ROOT/private-catalog/sentinel.json" "$destination/data/act-rules.json"
+        else
+          rm -r "$destination/data"
+          ln -s "$LIME_TEST_ROOT/private-catalog" "$destination/data"
+        fi
+      fi
     elif [[ "$*" == *'rev-parse --short HEAD'* ]]; then printf 'deadbeef1234\\n'; fi;;
   make)
     [[ "$LIME_TEST_CASE" != build-failure ]] || exit 42;;
@@ -80,7 +95,7 @@ esac
 `.replaceAll("__SHELL{", "${");
   const commands = ["uname", "id", "xcode-select", "open", "sleep", "sudo", "systemctl", "apt-get", "dnf", "yum", "install", "dpkg", "dpkg-query", "brew", "sed", "openssl", "git", "make", "docker", "curl"];
   for (const command of commands) await writeFile(path.join(bin, command), shim, { mode: 0o700 });
-  await writeFile(path.join(root, "template.env"), "POSTGRES_USER=lime\nPOSTGRES_PASSWORD=lime_dev_password\nPOSTGRES_DB=lime_db\nDATABASE_URL=original\nSHOPKEEPER_URL=http://localhost:8080\nLIME_API_PORT=8080\nLIME_UI_PORT=3000\nLIME_UPDATE_CHECK=true\n");
+  await writeFile(path.join(root, "template.env"), "POSTGRES_USER=lime\nPOSTGRES_PASSWORD=\nPOSTGRES_DB=lime_db\nDATABASE_URL=\nSHOPKEEPER_URL=http://localhost:8080\nLIME_API_PORT=8080\nLIME_UI_PORT=3000\nLIME_UPDATE_CHECK=true\n");
   // Hide a shim only until a simulated package/cask install completes. This
   // intercepts command lookup, never delegates hidden commands to the host.
   const shellEnvironment = `command() {
@@ -115,7 +130,10 @@ openssl() { "$LIME_TEST_ROOT/bin/openssl" "$@"; }
     LIME_UI_PORT: "15000", LIME_API_PORT: "18080", LIME_DB_PORT: "17432",
     ...options.env,
   };
-  const result = spawnSync("/bin/bash", [scriptPath, ...(options.args || [])], { env, cwd: root, encoding: "utf8", timeout: 15_000 });
+  const arguments_ = [scriptPath, ...(options.args || [])];
+  const result = spawnSync("/bin/bash", options.umask
+    ? ["-c", 'umask "$1"; shift; exec /bin/bash "$@"', "fixture", options.umask, ...arguments_]
+    : arguments_, { env, cwd: root, encoding: "utf8", timeout: 15_000 });
   const calls = await readFile(path.join(root, "calls"), "utf8").catch(() => "");
   let configuration;
   try { configuration = await readFile(path.join(target, ".env"), "utf8"); } catch { /* refusal/no clone is expected */ }
@@ -133,7 +151,7 @@ async function assertNoInstallActivity(fixture, existingDirectory = false) {
   ].sort(), "Only test harness files and a pre-existing directory remain; no installation files are created");
 }
 
-test("--help and -h explain local installation and separate Fly workflow without installing", async () => {
+test("--help and -h explain local installation without installing", async () => {
   for (const argument of ["--help", "-h"]) {
     for (const name of ["help", "existing-directory"]) {
       const fixture = await scenario(name, {
@@ -151,7 +169,6 @@ test("--help and -h explain local installation and separate Fly workflow without
         assert.match(fixture.result.stdout, /Linux/i);
         assert.match(fixture.result.stdout, /Docker/i);
         assert.match(fixture.result.stdout, /local/i);
-        assert.match(fixture.result.stdout, /does not deploy to Fly\.io|Fly\.io[^\n]*(?:separate|not automatic)|separate[^\n]*Fly\.io/i);
         assert.doesNotMatch(fixture.result.stdout, /LIME is ready|Cloning sumanbasuli/);
         await assertNoInstallActivity(fixture, name === "existing-directory");
       } finally { await fixture.cleanup(); }
@@ -160,7 +177,7 @@ test("--help and -h explain local installation and separate Fly workflow without
 });
 
 test("unknown arguments and extra arguments fail before environment, platform or installation checks", async () => {
-  for (const args of [["--version"], ["--fly"], ["install"], ["--"], [""], ["--help", "extra"], ["-h", "--help"], ["--help", "--help"], ["--fly", "--help"]]) {
+  for (const args of [["--version"], ["--cloud"], ["install"], ["--"], [""], ["--help", "extra"], ["-h", "--help"], ["--help", "--help"], ["--cloud", "--help"]]) {
     const fixture = await scenario("existing-directory", {
       args,
       os: "UnsupportedOS",
@@ -200,6 +217,35 @@ test("Linux and macOS existing Docker install fresh, private-port isolated deplo
       assert.match(fixture.calls, /curl .*http:\/\/127\.0\.0\.1:15000\/api\/scans/);
       assert.match(fixture.result.stdout, /LIME is ready at http:\/\/localhost:15000/);
       assert.doesNotMatch(fixture.calls, /docker (?:stop|rm|compose down)|usermod|groupadd/);
+    } finally { await fixture.cleanup(); }
+  }
+});
+
+test("a private install umask keeps mounted public catalogs readable without exposing configuration or other code", async () => {
+  const fixture = await scenario("success", { umask: "077" });
+  try {
+    assert.equal(fixture.result.status, 0, fixture.result.stderr);
+    assert.equal((await stat(path.join(fixture.target, "data"))).mode & 0o777, 0o755);
+    for (const name of ["act-rules", "axe-guidance", "axe-rules", "axe-act-mapping"]) {
+      assert.equal((await stat(path.join(fixture.target, "data", `${name}.json`))).mode & 0o777, 0o644);
+    }
+    assert.equal((await stat(path.join(fixture.target, ".env"))).mode & 0o777, 0o600);
+    assert.equal((await stat(path.join(fixture.target, "Makefile"))).mode & 0o777, 0o600);
+    assert.equal((await stat(fixture.target)).mode & 0o777, 0o700);
+  } finally { await fixture.cleanup(); }
+});
+
+test("catalog links cannot broaden a private file or directory's permissions", async () => {
+  for (const name of ["catalog-file-symlink", "catalog-directory-symlink"]) {
+    const fixture = await scenario(name);
+    try {
+      assert.equal(fixture.result.status, 1);
+      assert.match(fixture.result.stderr, /symlink|ordinary JSON/);
+      assert.doesNotMatch(fixture.calls, /make -C/);
+      assert.equal(fixture.configuration, undefined);
+      assert.equal((await stat(path.join(fixture.root, "private-catalog"))).mode & 0o777, 0o700);
+      assert.equal((await stat(path.join(fixture.root, "private-catalog/sentinel.json"))).mode & 0o777, 0o600);
+      assert.equal(await readFile(path.join(fixture.root, "private-catalog/sentinel.json"), "utf8"), "keep private catalog\n");
     } finally { await fixture.cleanup(); }
   }
 });

@@ -2,12 +2,22 @@ package sweetner
 
 import (
 	"context"
-	"log"
+	"fmt"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/juicer"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
+	log "github.com/sumanbasuli/lime/shopkeeper/internal/safelog"
 )
+
+type issueStore interface {
+	GetScanIssueMap(context.Context, string) (map[string]string, error)
+	GetInheritedFalsePositiveStates(context.Context, string, []string) (map[string]bool, error)
+	CreateURLAudits(context.Context, []models.URLAudit) error
+	CreateURLAuditOccurrences(context.Context, []models.URLAuditOccurrence) error
+	CreateIssue(context.Context, string, string, string, string, *string, bool) (*models.Issue, error)
+	CreateIssueOccurrence(context.Context, string, string, *string, *string, *string, *string) error
+}
 
 // Process takes raw scan results from the Juicer, deduplicates violations,
 // groups them by violation type (axe-core rule ID), and persists to the database.
@@ -17,6 +27,10 @@ import (
 //   - We create ONE Issue record per unique violation type per scan.
 //   - Each occurrence (URL + DOM node) becomes an IssueOccurrence record.
 func Process(ctx context.Context, repo *repository.Repository, scanID string, results []juicer.RawResult) error {
+	return processWithStore(ctx, repo, scanID, results)
+}
+
+func processWithStore(ctx context.Context, repo issueStore, scanID string, results []juicer.RawResult) error {
 	// Map of violation ID → issue DB ID. Seed with any issues already persisted for
 	// this scan so resumed batches append to the existing issue groups.
 	issueMap, err := repo.GetScanIssueMap(ctx, scanID)
@@ -66,8 +80,7 @@ func Process(ctx context.Context, repo *repository.Repository, scanID string, re
 					inheritedFalsePositiveStates[violation.ID],
 				)
 				if err != nil {
-					log.Printf("Sweetner: failed to create issue for violation %s: %v", violation.ID, err)
-					continue
+					return fmt.Errorf("create issue for violation %s: %w", violation.ID, err)
 				}
 				issueID = issue.ID
 				issueMap[violation.ID] = issueID
@@ -97,8 +110,7 @@ func Process(ctx context.Context, repo *repository.Repository, scanID string, re
 				}
 
 				if err := repo.CreateIssueOccurrence(ctx, issueID, result.URLID, htmlPtr, screenshotPtr, elemScreenshotPtr, cssSelectorPtr); err != nil {
-					log.Printf("Sweetner: failed to create occurrence for issue %s on URL %s: %v", issueID, result.URLID, err)
-					continue
+					return fmt.Errorf("create occurrence for issue %s on URL %s: %w", issueID, result.URLID, err)
 				}
 				totalOccurrences++
 			}
@@ -111,8 +123,7 @@ func Process(ctx context.Context, repo *repository.Repository, scanID string, re
 				}
 
 				if err := repo.CreateIssueOccurrence(ctx, issueID, result.URLID, nil, screenshotPtr, nil, nil); err != nil {
-					log.Printf("Sweetner: failed to create occurrence for issue %s on URL %s: %v", issueID, result.URLID, err)
-					continue
+					return fmt.Errorf("create occurrence for issue %s on URL %s: %w", issueID, result.URLID, err)
 				}
 				totalOccurrences++
 			}

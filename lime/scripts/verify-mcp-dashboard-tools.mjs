@@ -10,6 +10,7 @@ const ts = require("typescript");
 const scanId = "00000000-0000-4000-8000-000000000001";
 const issueId = "00000000-0000-4000-8000-000000000002";
 const checkId = "00000000-0000-4000-8000-000000000003";
+class PreparationBusyError extends Error {}
 
 class ArtifactRequest extends Request {
   constructor(input, options) {
@@ -30,6 +31,7 @@ async function loadTool(overrides = {}, globals = {}) {
     llm: async (request, context) => { calls.push(["llm", request.nextUrl.href, await context.params]); return new Response("label: input needs a name", { headers: { "Content-Type": "text/plain" } }); },
     proxy: async (request, options) => { calls.push(["proxy", request.nextUrl.href, options]); return new Response("fixture image bytes", { headers: { "Content-Type": "image/png" } }); },
     issueRows: [{ id: issueId }],
+    prepare: async (_signal, work) => work(),
     ...overrides,
   };
   const selected = {
@@ -48,6 +50,11 @@ async function loadTool(overrides = {}, globals = {}) {
     "@/app/api/scans/[id]/issues/report.llm.txt/route": { GET: handlers.llm },
     "@/lib/report-settings": { requireMcpAccess: handlers.auth, saveSystemSettings: handlers.save },
     "@/lib/shopkeeper-proxy": { proxyShopkeeperRequest: handlers.proxy },
+    "@/lib/mcp-report-read": {
+      McpReadPreparationBusyError: PreparationBusyError,
+      readReportQuery: async (query) => await query,
+      withMcpReportRead: handlers.prepare,
+    },
   };
   const source = await readFile(new URL("../src/lib/mcp-dashboard-tools.ts", import.meta.url), "utf8");
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -151,10 +158,28 @@ test("wrong report/export MIME, empty artifacts and invalid PDF magic never repo
 });
 
 test("link CSV export is actual bounded saved text and origin-relative metadata", async () => {
-  const tool = await loadTool({ proxy: async () => new Response("target_url,status\nhttps://fixture.test/,healthy\n", { headers: { "Content-Type": "text/csv" } }) });
+  let exportRequest;
+  const tool = await loadTool({ proxy: async (request) => {
+    exportRequest = request;
+    return new Response("target_url,status\nhttps://fixture.test/,healthy\n", { headers: { "Content-Type": "text/csv" } });
+  } });
   const result = await tool.runDashboardMcpTool(tool.request(), "get_link_check_export", { check_id: checkId });
   assert.equal(metadata(result).download_path, `/api/link-checks/${checkId}/export.csv`);
   assert.match(result.content[1].text, /fixture\.test/);
+  assert.equal(exportRequest.headers.get("X-Lime-Export-Max-Bytes"), String(tool.MCP_ARTIFACT_LIMIT));
+  assert.equal(exportRequest.nextUrl.search, "", "the complete download path remains uncapped");
+});
+
+test("oversized link CSV is rejected before delivery with the complete download path", async () => {
+  const tool = await loadTool({ proxy: async (request) => {
+    assert.equal(request.headers.get("X-Lime-Export-Max-Bytes"), String(4 * 1024 * 1024));
+    return new Response('{"error":"private backend detail"}', { status: 413, headers: { "Content-Type": "application/json" } });
+  } });
+  const result = await tool.runDashboardMcpTool(tool.request(), "get_link_check_export", { check_id: checkId });
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /4 MiB/);
+  assert.equal(result.structuredContent.download_path, `/api/link-checks/${checkId}/export.csv`);
+  assert.doesNotMatch(JSON.stringify(result), /private backend detail/);
 });
 
 test("HTTP failure does not leak private upstream error body or pretend success", async () => {
@@ -279,20 +304,50 @@ test("write revocation under settings row lock prevents a setting success respon
   assert.doesNotMatch(JSON.stringify(result), /write access revoked under lock/);
 });
 
-async function loadCanonicalRoute(upstream, { status = 200, scorer, globals = {} } = {}) {
+test("shared database preparation exhaustion returns a retry hint before report work", async () => {
+  const tool = await loadTool({ prepare: async () => { throw new PreparationBusyError("MCP database read capacity is busy. Retry after 1 second."); } });
+  for (const format of ["csv", "llm"]) {
+    const result = await tool.runDashboardMcpTool(tool.request(), "get_report", { scan_id: scanId, format });
+    assert.equal(result.isError, true);
+    assert.equal(result.structuredContent.http_status, 503);
+    assert.equal(result.structuredContent.retry_after_seconds, 1);
+  }
+  assert.deepEqual(tool.calls, [], "Do not authorize, query or render a report after the gate rejects it");
+});
+
+async function loadCanonicalRoute(upstream, { status = 200, scorer, globals = {}, toolName = "get_report" } = {}) {
   const calls = [];
+  const deliverySource = await readFile(new URL("../src/lib/mcp-artifact-delivery.ts", import.meta.url), "utf8");
+  const deliveryCompiled = ts.transpileModule(deliverySource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const delivery = {};
+  vm.runInNewContext(deliveryCompiled, { exports: delivery, Response, Headers, ReadableStream, Uint8Array, setTimeout, clearTimeout, crypto, __limeMcpArtifactTransportBinding: () => {} });
   const source = await readFile(new URL("../src/app/mcp/route.ts", import.meta.url), "utf8");
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exports = {};
+  const boundedBody = {};
+  const boundedSource = await readFile(new URL("../src/lib/bounded-json-body.ts", import.meta.url), "utf8");
+  vm.runInNewContext(ts.transpileModule(boundedSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText,
+    { exports: boundedBody, AbortSignal, Response, Uint8Array, setTimeout });
   const dependencies = {
+    "@/lib/bounded-json-body": boundedBody,
+    "@/lib/mcp-report-read": {
+      McpReadPreparationBusyError: PreparationBusyError,
+      withMcpReportRead: async (_signal, work) => work({ controlledScoreRead: true }),
+    },
+    "@/lib/mcp-artifact-delivery": delivery,
     "@/lib/shopkeeper-proxy": { proxyShopkeeperRequest: async () => new Response(JSON.stringify(upstream), { status, headers: { "Access-Control-Allow-Origin": "http://localhost:3002", "Content-Length": "1", "Content-Encoding": "identity" } }) },
     "@/lib/scan-score-data": { getScanScoreSummaries: scorer ?? (async () => assert.fail("Marker dispatch must not invoke scoring")) },
     "@/lib/mcp-dashboard-tools": { runDashboardMcpTool: async (_request, operation, args) => { calls.push([operation, args]); return { content: [{ type: "text", text: "verified artifact" }], structuredContent: { operation } }; } },
   };
-  vm.runInNewContext(compiled, { exports, JSON, Response, Headers, Date, AbortSignal, AbortController, require: (name) => { assert.ok(name in dependencies); return dependencies[name]; }, ...globals });
-  // Existing marker tests use lightweight request objects. Supply a genuine
-  // signal by default, matching NextRequest, while preserving explicit aborts.
-  const handlers = Object.fromEntries(Object.entries(exports).map(([method, handler]) => [method, (request) => handler({ signal: new AbortController().signal, ...request })]));
+  vm.runInNewContext(compiled, { exports, Buffer, JSON, Request, Response, Headers, Date, AbortSignal, AbortController, require: (name) => { assert.ok(name in dependencies); return dependencies[name]; }, ...globals });
+  const handlers = Object.fromEntries(Object.entries(exports).map(([method, handler]) => [method, (input = {}) => {
+    const body = input.body ?? JSON.stringify({ jsonrpc: "2.0", id: "canonical-test", method: "tools/call", params: { name: toolName, arguments: {} } });
+    return handler(new Request("http://dashboard.test:14000/mcp", {
+      method,
+      ...(method === "POST" ? { body } : {}),
+      signal: input.signal ?? new AbortController().signal,
+    }));
+  }]));
   return { ...handlers, calls };
 }
 
@@ -315,8 +370,8 @@ test("canonical route handles only an authenticated validated backend marker and
 });
 
 test("request-supplied markers, unauthorized HTTP and malformed markers cannot dispatch artifacts", async () => {
-  for (const [upstream, options, method] of [
-    [{ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "unknown tool" } }, {}, "POST"],
+  for (const [upstream, options, method, body] of [
+    [{ jsonrpc: "2.0", id: 1, error: { code: -32602, message: "unknown tool" } }, {}, "POST", JSON.stringify(trustedMarker())],
     [trustedMarker(), { status: 401 }, "POST"],
     [trustedMarker(), {}, "GET"],
     [trustedMarker(null), {}, "POST"],
@@ -324,7 +379,7 @@ test("request-supplied markers, unauthorized HTTP and malformed markers cannot d
     [{ ...trustedMarker(), result: { ...trustedMarker().result, isError: false } }, {}, "POST"],
   ]) {
     const route = await loadCanonicalRoute(upstream, options);
-    const result = await route[method]({ method, body: JSON.stringify(trustedMarker()) });
+    const result = await route[method](body ? { body } : undefined);
     assert.deepEqual(route.calls, []);
     assert.deepEqual(await result.json(), upstream);
   }
@@ -340,6 +395,7 @@ const scanReadResponse = () => ({
 test("canonical get_scan bounds a stalled dashboard scorer with the same MCP deadline", async () => {
   let scoreCalls = 0;
   const route = await loadCanonicalRoute(scanReadResponse(), {
+    toolName: "get_scan",
     scorer: () => { scoreCalls += 1; return new Promise(() => {}); },
     globals: { AbortSignal: { any: AbortSignal.any, timeout: (timeout) => { assert.equal(timeout, 30_000); return AbortSignal.timeout(20); } } },
   });
@@ -362,6 +418,7 @@ test("canonical get_scan rejects caller-aborted enrichment and never sends late 
   const scoreStarted = new Promise((resolve) => { started = resolve; });
   const lateScore = new Promise((resolve) => { release = resolve; });
   const route = await loadCanonicalRoute(scanReadResponse(), {
+    toolName: "get_scan",
     scorer: () => { started(); return lateScore; },
   });
   const controller = new AbortController();
@@ -369,11 +426,12 @@ test("canonical get_scan rejects caller-aborted enrichment and never sends late 
   await scoreStarted;
   controller.abort(new Error("private scorer cancellation details"));
   const response = await work;
-  const payload = await response.json();
-  assert.equal(payload.result.isError, true);
-  assert.doesNotMatch(JSON.stringify(payload), /private scorer cancellation details/);
+  await assert.rejects(response.json(), (error) => {
+    assert.match(error.message, /disconnected/);
+    assert.doesNotMatch(error.message, /private scorer cancellation details/);
+    return true;
+  });
   release({ [scanId]: { score: 100, hasScore: true } });
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.equal(payload.result.isError, true, "A delayed score result cannot replace the earlier error");
-  assert.ok(!payload.result.structuredContent);
+  await assert.rejects(response.text(), /disconnected|Body.*(?:read|unusable)/, "A delayed score cannot reopen the aborted response");
 });

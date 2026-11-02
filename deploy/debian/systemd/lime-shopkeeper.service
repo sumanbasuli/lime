@@ -9,9 +9,14 @@ User=lime
 Group=lime
 UMask=0077
 WorkingDirectory=/opt/lime/shopkeeper
-# EnvironmentFile must define DATABASE_URL and optionally SHOPKEEPER_PORT,
-# ACT_RULES_PATH, AXE_BUNDLE_PATH, CHROMIUM_PATH.
+# EnvironmentFile must define DATABASE_URL and may define SHOPKEEPER_PORT,
+# ACT_RULES_PATH, SHOPKEEPER_SCREENSHOT_DIR, and REPORT_BASE_URL.
 EnvironmentFile=/etc/lime/shopkeeper.env
+RuntimeDirectory=lime-shopkeeper
+RuntimeDirectoryMode=0700
+Environment=HOME=/run/lime-shopkeeper
+Environment=XDG_CONFIG_HOME=/run/lime-shopkeeper/.config
+Environment=XDG_CACHE_HOME=/run/lime-shopkeeper/.cache
 ExecStart=/opt/lime/shopkeeper/shopkeeper
 Restart=on-failure
 RestartSec=5
@@ -21,6 +26,9 @@ PrivateTmp=yes
 ProtectSystem=full
 ProtectHome=yes
 NoNewPrivileges=yes
+MemoryAccounting=yes
+MemoryMax=2G
+MemorySwapMax=0
 LimitNOFILE=65536
 
 [Install]

@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 )
@@ -45,6 +46,24 @@ type stubRepository struct {
 	linkErr     error
 }
 
+type heldMCPBody struct {
+	started chan struct{}
+	release chan struct{}
+	reader  *strings.Reader
+	held    bool
+}
+
+func (b *heldMCPBody) Read(p []byte) (int, error) {
+	if !b.held {
+		b.held = true
+		close(b.started)
+		<-b.release
+	}
+	return b.reader.Read(p)
+}
+
+func (b *heldMCPBody) Close() error { return nil }
+
 func newStubRepository() *stubRepository {
 	sum := sha256.Sum256([]byte(testToken))
 	hash := hex.EncodeToString(sum[:])
@@ -68,6 +87,13 @@ func newStubRepository() *stubRepository {
 func (r *stubRepository) GetMCPAuthSettings(context.Context) (*models.MCPAuthSettings, error) {
 	return r.auth, nil
 }
+
+func (r *stubRepository) BeginMCPRead(ctx context.Context) (context.Context, func() time.Time, error) {
+	return ctx, func() time.Time { return time.Time{} }, nil
+}
+func (r *stubRepository) BeginMCPActionCall(ctx context.Context) (context.Context, func() time.Time, error) {
+	return ctx, func() time.Time { return time.Time{} }, nil
+}
 func (r *stubRepository) ListMCPScans(_ context.Context, limit, offset int) ([]models.Scan, error) {
 	r.calls++
 	r.limit, r.offset = limit, offset
@@ -76,6 +102,12 @@ func (r *stubRepository) ListMCPScans(_ context.Context, limit, offset int) ([]m
 func (r *stubRepository) GetScan(context.Context, string) (*models.Scan, error) {
 	r.calls++
 	return r.scan, r.err
+}
+func (r *stubRepository) GetMCPScanReference(ctx context.Context, id string) (*models.Scan, error) {
+	return r.GetScan(ctx, id)
+}
+func (r *stubRepository) GetMCPReportSettings(ctx context.Context) (*models.MCPVisibleSettings, error) {
+	return r.GetMCPVisibleSettings(ctx)
 }
 func (r *stubRepository) GetMCPScanScoreSummary(context.Context, string) (*models.MCPScanScoreSummary, error) {
 	r.calls++
@@ -253,6 +285,105 @@ func TestProtocolTransportAndAuthentication(t *testing.T) {
 		if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != "POST" {
 			t.Fatalf("%s expected 405 with Allow: POST", method)
 		}
+	}
+}
+
+func TestDashboardTransformHeaderMatchesDispatchedTool(t *testing.T) {
+	issueArguments := `{"scan_id":"` + testScanID + `","kind":"failed","key":"` + testIssueID + `"}`
+	reportArguments := `{"scan_id":"` + testScanID + `","format":"pdf"}`
+	cases := []struct {
+		name       string
+		params     string
+		wantHeader string
+		wantMarker bool
+	}{
+		{"ordinary read", `{"name":"get_issue_detail","arguments":` + issueArguments + `}`, "none", false},
+		{"scan score", `{"name":"get_scan","arguments":{"scan_id":"` + testScanID + `"}}`, "dashboard", false},
+		{"dashboard read", `{"name":"get_report","arguments":` + reportArguments + `}`, "dashboard", true},
+		{"screenshot", `{"name":"get_screenshot","arguments":{"scan_id":"` + testScanID + `","filename":"saved-page.png"}}`, "dashboard", true},
+		{"link export", `{"name":"get_link_check_export","arguments":{"check_id":"` + testCheckID + `"}}`, "dashboard", true},
+		{"settings update", `{"name":"update_settings","arguments":{"confirm":true,"small_csv_occurrence_limit":10}}`, "dashboard", true},
+		{"lowercase followed by uppercase ordinary", `{"name":"get_report","Name":"get_issue_detail","arguments":` + issueArguments + `}`, "none", false},
+		{"lowercase followed by uppercase dashboard", `{"name":"get_issue_detail","Name":"get_report","arguments":` + reportArguments + `}`, "dashboard", true},
+		{"uppercase followed by lowercase ordinary", `{"Name":"get_report","name":"get_issue_detail","arguments":` + issueArguments + `}`, "none", false},
+		{"uppercase followed by lowercase dashboard", `{"Name":"get_issue_detail","name":"get_report","arguments":` + reportArguments + `}`, "dashboard", true},
+		{"duplicate lowercase ordinary", `{"name":"get_report","name":"get_issue_detail","arguments":` + issueArguments + `}`, "none", false},
+		{"duplicate lowercase dashboard", `{"name":"get_issue_detail","name":"get_report","arguments":` + reportArguments + `}`, "dashboard", true},
+		{"mixed case alias ordinary", `{"name":"get_report","nAmE":"get_issue_detail","arguments":` + issueArguments + `}`, "none", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			response := postRPC(New(newActionRepository(), http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Fatal("dashboard tool unexpectedly reached the REST router")
+			})), `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":`+tc.params+`}`, nil)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+			}
+			if got := response.Header().Get("X-Lime-MCP-Transform"); got != tc.wantHeader {
+				t.Fatalf("transform header = %q, want %q", got, tc.wantHeader)
+			}
+			result := responseObject(t, response)["result"].(map[string]any)
+			marker, _ := result["structuredContent"].(map[string]any)
+			if got := marker["requires_dashboard"] == true; got != tc.wantMarker {
+				t.Fatalf("dashboard marker = %t, want %t; body = %s", got, tc.wantMarker, response.Body.String())
+			}
+		})
+	}
+	response := postRPC(New(newStubRepository()), `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, nil)
+	if got := response.Header().Get("X-Lime-MCP-Transform"); got != "none" {
+		t.Fatalf("tools/list transform header = %q", got)
+	}
+	for name, body := range map[string]string{
+		"unauthorized": `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_report","arguments":` + reportArguments + `}}`,
+		"malformed":    `{`,
+	} {
+		var result *httptest.ResponseRecorder
+		if name == "unauthorized" {
+			result = postRPC(New(newStubRepository()), body, map[string]string{"Authorization": "Bearer wrong"})
+		} else {
+			result = postRPC(New(newStubRepository()), body, nil)
+		}
+		if got := result.Header().Get("X-Lime-MCP-Transform"); got != "" {
+			t.Fatalf("%s exposed transform header %q", name, got)
+		}
+	}
+}
+
+func TestRotatedKeyCannotDispatchAfterBodyRead(t *testing.T) {
+	repo := newActionRepository()
+	called := 0
+	server := New(repo, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called++
+		writeJSON(w, http.StatusOK, map[string]any{})
+	}))
+	body := &heldMCPBody{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		reader:  strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"pause_scan","arguments":{"scan_id":"` + testScanID + `"}}}`),
+	}
+	request := httptest.NewRequest(http.MethodPost, "/mcp", nil)
+	request.Body = body
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	finished := make(chan struct{})
+	go func() {
+		server.ServeHTTP(response, request)
+		close(finished)
+	}()
+	<-body.started // Initial authentication has completed before body reading.
+	rotatedToken := "rotated-test-key"
+	sum := sha256.Sum256([]byte(rotatedToken))
+	hash := hex.EncodeToString(sum[:])
+	repo.auth.KeyHash = &hash
+	close(body.release)
+	<-finished
+	if response.Code != http.StatusUnauthorized || called != 0 || len(repo.entries) != 0 {
+		t.Fatalf("rotated token dispatched action: status=%d calls=%d entries=%d body=%s", response.Code, called, len(repo.entries), response.Body.String())
+	}
+	fresh := postRPC(server, `{"jsonrpc":"2.0","id":2,"method":"ping"}`, map[string]string{"Authorization": "Bearer " + rotatedToken})
+	if fresh.Code != http.StatusOK {
+		t.Fatalf("new key rejected: status=%d body=%s", fresh.Code, fresh.Body.String())
 	}
 }
 

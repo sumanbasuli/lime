@@ -1,13 +1,16 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
 )
@@ -62,6 +65,16 @@ func TestCreateScanWithLinksRejectsCredentialsBeforePersisting(t *testing.T) {
 	h.CreateScan(w, httptest.NewRequest("POST", "/api/scans", strings.NewReader(`{"sitemap_url":"https://user:secret@example.test/","scan_type":"single","include_link_check":true}`)))
 	if w.Code != http.StatusBadRequest || repo.linkCalls != 0 || repo.legacyCalls != 0 {
 		t.Fatal("credentials accepted or persisted before validation")
+	}
+}
+
+func TestCreateLinkCheckParseErrorDoesNotEchoSubmittedQuery(t *testing.T) {
+	h := &Handler{}
+	w := httptest.NewRecorder()
+	h.CreateLinkCheck(w, httptest.NewRequest(http.MethodPost, "/api/link-checks", strings.NewReader(
+		`{"url":"https://example.test/%ZZ?token=QUERY_TOKEN_CANARY","check_type":"single"}`)))
+	if w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), "QUERY_TOKEN_CANARY") {
+		t.Fatalf("unsafe parse rejection: status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 
@@ -135,5 +148,60 @@ func TestCSVNeutralizesUntrustedFormulaCells(t *testing.T) {
 		if csvSafe(raw) != raw {
 			t.Errorf("ordinary value changed %q", raw)
 		}
+	}
+}
+
+func TestLinkCSVRowHidesQueryAndURLBearingError(t *testing.T) {
+	const raw = "https://example.test/path?token=QUERY_TOKEN_CANARY"
+	final := "https://other.test/final?token=QUERY_TOKEN_CANARY"
+	errText := "GET " + raw + ": timeout"
+	var body bytes.Buffer
+	writer := csv.NewWriter(&body)
+	if err := writeLinkCSVRow(writer, models.LinkResult{TargetURL: raw, FinalURL: &final, Error: &errText}, models.LinkSource{PageURL: raw}); err != nil {
+		t.Fatal(err)
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(body.String(), "QUERY_TOKEN_CANARY") || !strings.Contains(body.String(), "https://example.test/path") || !strings.Contains(body.String(), "https://other.test/final") {
+		t.Fatalf("unsafe link CSV row: %q", body.String())
+	}
+}
+
+type recheckLinkRepo struct {
+	LinkRepository
+	job     models.LinkCheck
+	fromID  string
+	created models.LinkCheck
+}
+
+func (r *recheckLinkRepo) GetLinkCheck(_ context.Context, id string) (*models.LinkCheck, error) {
+	if id != r.job.ID {
+		return nil, nil
+	}
+	return &r.job, nil
+}
+
+func (r *recheckLinkRepo) CreateLinkCheckFrom(_ context.Context, sourceJobID string) (*models.LinkCheck, error) {
+	r.fromID = sourceJobID
+	return &r.created, nil
+}
+
+func TestRecheckUsesSourceJobForDetachedCreation(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+	repo := &recheckLinkRepo{
+		job:     models.LinkCheck{ID: id, URL: "https://example.test/", CheckType: "scan", Status: "completed", SeedURLs: []string{"https://example.test/page"}},
+		created: models.LinkCheck{ID: "22222222-2222-4222-8222-222222222222", URL: "https://example.test/", CheckType: "scan", Status: "queued"},
+	}
+	h := &Handler{links: repo}
+	req := httptest.NewRequest(http.MethodPost, "/api/link-checks/"+id+"/recheck", nil)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("id", id)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
+	w := httptest.NewRecorder()
+	h.RecheckLinks(w, req)
+	if w.Code != http.StatusCreated || repo.fromID != id {
+		t.Fatalf("recheck status=%d from=%q body=%s", w.Code, repo.fromID, w.Body.String())
 	}
 }

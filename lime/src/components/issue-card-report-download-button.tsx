@@ -70,6 +70,12 @@ async function getErrorMessage(response: Response): Promise<string> {
   return text || "Failed to generate report";
 }
 
+class ReportDownloadError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 async function downloadFile(url: string, fallbackFilename: string) {
   const response = await fetch(url, {
     method: "GET",
@@ -77,7 +83,7 @@ async function downloadFile(url: string, fallbackFilename: string) {
   });
 
   if (!response.ok) {
-    throw new Error(await getErrorMessage(response));
+    throw new ReportDownloadError(await getErrorMessage(response), response.status);
   }
 
   const blob = await response.blob();
@@ -148,6 +154,7 @@ export function IssueCardReportDownloadButton({
   const menuItems = buildMenuItems(settings);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [pdfTooLarge, setPdfTooLarge] = useState(false);
 
   if (menuItems.length === 0) {
     return null;
@@ -159,11 +166,15 @@ export function IssueCardReportDownloadButton({
     }
 
     setPdfError(null);
+    setPdfTooLarge(false);
     setIsGeneratingPdf(true);
 
     try {
       await downloadFile(href, `lime-issue-report-${scanId}.pdf`);
     } catch (error) {
+      if (error instanceof ReportDownloadError && error.status === 413) {
+        setPdfTooLarge(true);
+      }
       setPdfError(
         error instanceof Error ? error.message : "Failed to generate PDF report"
       );
@@ -243,6 +254,14 @@ export function IssueCardReportDownloadButton({
                     ? "This can take a while for large issues. Your download will start automatically when the PDF is ready."
                     : pdfError}
                 </p>
+                {pdfTooLarge && settings.csvReportsEnabled ? (
+                  <a
+                    className="mt-2 inline-flex text-sm font-semibold text-foreground underline underline-offset-4 hover:text-foreground/70"
+                    href={`/api/scans/${scanId}/issues/report.csv?${buildIssueReportScopeQuery(scope, { mode: "full" })}`}
+                  >
+                    Download Full CSV
+                  </a>
+                ) : null}
                 <p className="mt-2 truncate text-xs font-medium text-foreground/70">
                   {issueTitle}
                 </p>

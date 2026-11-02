@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { redactUrlUserinfo } from "@/lib/url-presentation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BootstrapIcon, type BootstrapIconName } from "@/components/bootstrap-icon";
@@ -55,7 +56,7 @@ function TargetSources({ checkId, target }: { checkId: string; target: LinkTarge
       <BootstrapIcon name={open ? "chevron-up" : "chevron-down"} size={14} />{open ? "Hide sources" : "Show sources"} ({target.occurrence_count})
     </button>
     {open ? <div id={`sources-${target.id}`} className="mt-2 min-w-0 space-y-4 rounded-xl border border-black/10 bg-[#FBFAF6] p-3 sm:p-4" aria-busy={loading}>
-      <div className="min-w-0 rounded-lg border border-black/8 bg-white p-3"><p className="lime-eyebrow">Full destination URL</p><code className="mt-2 block whitespace-normal font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">{target.target_url}</code></div>
+      <div className="min-w-0 rounded-lg border border-black/8 bg-white p-3"><p className="lime-eyebrow">Destination URL</p><code className="mt-2 block whitespace-normal font-mono text-[11px] leading-5 [overflow-wrap:anywhere]">{redactUrlUserinfo(target.target_url)}</code></div>
       <div><h4 className="font-sans text-sm font-semibold">Referenced from</h4><p className="mt-1 text-xs leading-5 text-muted-foreground">Use the source page and captured HTML context to locate each reference. Repeated occurrences are kept separately.</p></div>
       {error ? <div role="alert" className="rounded-lg bg-[#F8E8E9] p-3 text-xs text-[#8F2D31]"><p>{error}</p><p className="mt-1">This page of references could not be loaded. Previously loaded rows are hidden to avoid showing the wrong page.</p><button type="button" className={`${linkCheckButtonClass} mt-2`} onClick={() => { setLoading(true); setError(null); setRetry((value) => value + 1); }}>Retry sources</button></div> : null}
       {loading ? <p role="status" className="py-3 text-xs text-muted-foreground">Loading source references…</p> : null}
@@ -72,7 +73,7 @@ function TargetSources({ checkId, target }: { checkId: string; target: LinkTarge
             {source.element === "page" ? <p className="mt-3 border-t border-black/8 pt-3 leading-5 text-muted-foreground">This is the source-page inventory entry, not an extracted HTML link.</p> : null}
           </li>)}
         </ul>}
-        <div role="group" aria-label={`Source reference pages for ${target.target_url}`}><LinkCheckPagination offset={offset} limit={PAGE_SIZE} total={page.total} hasMore={page.has_more} loading={loading} onPage={(next) => { setLoading(true); setError(null); setOffset(next); }} /></div>
+        <div role="group" aria-label={`Source reference pages for ${redactUrlUserinfo(target.target_url)}`}><LinkCheckPagination offset={offset} limit={PAGE_SIZE} total={page.total} hasMore={page.has_more} loading={loading} onPage={(next) => { setLoading(true); setError(null); setOffset(next); }} /></div>
       </> : null}
     </div> : null}
   </div>;
@@ -83,7 +84,7 @@ function TargetRow({ checkId, target }: { checkId: string; target: LinkTarget })
   const explanation = targetExplanation(target);
   return <article className="min-w-0 overflow-hidden rounded-2xl border border-black/10 bg-white p-4 sm:p-5">
     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex min-w-0 flex-1 items-start gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-black/8 bg-[#F4F3EE] text-black" data-destination-icon={destination.icon}><BootstrapIcon name={destination.icon} size={20} /></span><div className="min-w-0 flex-1"><h3 className="font-sans text-sm font-semibold"><LinkUrl url={target.target_url}>{destination.label}</LinkUrl></h3><p className="mt-1 truncate font-mono text-[11px] leading-5 text-muted-foreground" title={target.target_url}>{target.target_url}</p><p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground"><span className="rounded-md bg-black/5 px-2 py-1">{target.link_type === "media" ? "Page resource" : target.link_type === "document" ? "Document" : target.link_type === "internal" ? "Internal" : "External"}</span>{target.status_code ? <span className="rounded-md bg-black/5 px-2 py-1 font-mono">HTTP {target.status_code}</span> : null}{target.redirect_count > 0 ? <span>{target.redirect_count} redirect hop{target.redirect_count === 1 ? "" : "s"}</span> : null}<span>{target.occurrence_count} reference{target.occurrence_count === 1 ? "" : "s"}</span></p></div></div>
+      <div className="flex min-w-0 flex-1 items-start gap-3"><span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-black/8 bg-[#F4F3EE] text-black" data-destination-icon={destination.icon}><BootstrapIcon name={destination.icon} size={20} /></span><div className="min-w-0 flex-1"><h3 className="font-sans text-sm font-semibold"><LinkUrl url={target.target_url}>{destination.label}</LinkUrl></h3><p className="mt-1 truncate font-mono text-[11px] leading-5 text-muted-foreground" title={redactUrlUserinfo(target.target_url)}>{redactUrlUserinfo(target.target_url)}</p><p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground"><span className="rounded-md bg-black/5 px-2 py-1">{target.link_type === "media" ? "Page resource" : target.link_type === "document" ? "Document" : target.link_type === "internal" ? "Internal" : "External"}</span>{target.status_code ? <span className="rounded-md bg-black/5 px-2 py-1 font-mono">HTTP {target.status_code}</span> : null}{target.redirect_count > 0 ? <span>{target.redirect_count} redirect hop{target.redirect_count === 1 ? "" : "s"}</span> : null}<span>{target.occurrence_count} reference{target.occurrence_count === 1 ? "" : "s"}</span></p></div></div>
       <div className="shrink-0"><LinkTargetBadge status={target.status} timeout={target.error_kind === "timeout"} /></div>
     </div>
     {target.status !== "healthy" ? <div className={`mt-4 flex items-start gap-2.5 rounded-xl p-3 ${target.status === "broken" || target.status === "error" ? "bg-[#F8E8E9]/65 text-[#6F2428]" : "bg-[#F4F3EE] text-black/70"}`}><BootstrapIcon name={explanation.icon} size={16} className="mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs font-semibold">{explanation.title}</p><p className="mt-1 text-xs leading-5">{explanation.detail}</p></div></div> : null}

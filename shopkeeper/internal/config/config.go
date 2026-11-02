@@ -9,10 +9,11 @@ type Config struct {
 	ReportBaseURL string
 }
 
-// Load reads configuration from environment variables with sensible defaults.
+// Load reads configuration from environment variables. A database URL is
+// required; silently using a published development credential is unsafe.
 func Load() *Config {
 	return &Config{
-		DatabaseURL:   getEnv("DATABASE_URL", "postgresql://lime:lime_dev_password@localhost:5432/lime_db?sslmode=disable"),
+		DatabaseURL:   getEnv("DATABASE_URL", ""),
 		Port:          getEnv("SHOPKEEPER_PORT", "8080"),
 		ReportBaseURL: getEnv("REPORT_BASE_URL", "http://localhost:3000"),
 	}

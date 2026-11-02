@@ -16,7 +16,7 @@ Available in LIME 2.0:
 - A dashboard for managing scans and results, with a public website and documentation.
 - MCP support for reading findings and exports, managing scans and link checks, reviewing false positives, and changing reporting and performance settings. Connections are read-only by default, with write access enabled separately in Settings. Setup examples cover Codex, Claude Code, and OpenCode.
 - A LIME agent with reusable skills and an OpenClaw configuration example.
-- Source-built Docker development, published images/release bundles, and Docker, Fly.io, and Debian deployment/update helpers.
+- Source-built Docker development, published images/release bundles, and Docker and Debian deployment/update helpers.
 - Contributor/security guidance and release publishing tied to `VERSION` and `CHANGELOG.md`.
 
 See [Verification](verification.md) for the test suite and [MCP Integration](mcp.md) for supported tools and client setup.

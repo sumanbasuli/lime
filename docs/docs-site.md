@@ -15,7 +15,7 @@ The public docs build is a static export. CI builds the site and uploads `docs-s
 
 ## Commands
 
-From the repository root, install the locked dependencies with `npm --prefix docs-site ci`. The docs CI uses Node 24; use a supported Node version compatible with the lockfile. Keep Bash on `PATH`: every production build and `test:docs-content` run uses `bash -n` to syntax-check shell examples without executing them. Browser checks also need Playwright Chromium (`cd docs-site && npx playwright install chromium`). Screenshot refresh and product verification additionally need Docker with Compose and curl; ordinary content development/building does not need the scan stack.
+From the repository root, install the locked dependencies with `npm --prefix docs-site ci`. The docs CI uses Node 24.22.1; use that patch or newer on the 24.x LTS line, or a newer maintained release with current security fixes. Keep Bash on `PATH`: every production build and `test:docs-content` run uses `bash -n` to syntax-check shell examples without executing them. Browser checks also need Playwright Chromium (`cd docs-site && npx playwright install chromium`). Screenshot refresh and product verification additionally need Docker with Compose and curl; ordinary content development/building does not need the scan stack.
 
 ```bash
 make docs-dev      # hot-reload docs development server on LIME_DOCS_PORT, default 3001
@@ -141,6 +141,8 @@ The command runs `scripts/docs-refresh.sh`, which:
 10. Passes explicit accessibility, partial-retry, and link-check IDs to the capture runner, which captures ten images with browser, framework-overlay, expected-element, response, and file-size checks.
 11. Builds the static docs site and validates every required route, internal link, asset, and all ten product screenshots in the export.
 12. Stops the isolated docs stack on success or failure unless `LIME_DOCS_KEEP_STACK=true`.
+
+Each refresh generates a new password for its reset docs-demo database. If you opt to keep the stack running, set and retain your own URL-safe `LIME_DOCS_DB_PASSWORD` before running `make docs` so you can access its database later. Changing that variable does not rotate the password inside an existing PostgreSQL volume. The default refresh stops its stack and needs no saved credential.
 
 The link demo checks the configured public target from the isolated backend. Results can vary between refreshes and may include broken links, redirects, errors, blocked destinations, or incomplete coverage. Keep those actual results in screenshots. Run the product verification suite separately to check behavior against controlled fixtures.
 

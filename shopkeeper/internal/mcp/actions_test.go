@@ -10,9 +10,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
 )
 
 const testRequestID = "33333333-3333-4333-8333-333333333333"
@@ -69,6 +71,28 @@ func callAction(t *testing.T, server *Server, name string, args string) map[stri
 
 func resultText(result map[string]any) string {
 	return result["content"].([]map[string]string)[0]["text"]
+}
+
+func TestNewRequestIDRateDenialUsesSameUUIDAfterWindow(t *testing.T) {
+	r := newActionRepository()
+	retryAt := time.Date(2026, time.October, 24, 0, 0, 0, 0, time.UTC)
+	r.beginErr = &repository.MCPActionRateLimitError{RetryAt: retryAt, RetryAfterSeconds: 3600}
+	var calls atomic.Int32
+	s := New(r, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls.Add(1)
+		writeJSON(w, http.StatusCreated, map[string]any{"id": testScanID})
+	}))
+	args := `{"request_id":"` + testRequestID + `","sitemap_url":"https://example.test"}`
+	denied := callAction(t, s, "create_scan", args)
+	data := denied["structuredContent"].(map[string]any)
+	if denied["isError"] != true || data["http_status"] != http.StatusTooManyRequests || data["retry_with_same_request_id"] != true || data["retry_with_new_request_id"] != nil || data["retry_after_seconds"] != 3600 || data["retry_after_utc"] != retryAt.Format(time.RFC3339) || data["request_id"] != testRequestID || calls.Load() != 0 || len(r.entries) != 0 {
+		t.Fatal("rate denial did not preserve a safe same-ID retry", denied, calls.Load(), len(r.entries))
+	}
+	r.beginErr = nil
+	admitted := callAction(t, s, "create_scan", args)
+	if admitted["isError"] == true || admitted["structuredContent"].(map[string]any)["http_status"] != http.StatusCreated || calls.Load() != 1 || len(r.entries) != 1 {
+		t.Fatal("same UUID was not admitted after window reset", admitted, calls.Load(), len(r.entries))
+	}
 }
 
 func TestActionCatalogAndLivePermissionGate(t *testing.T) {
@@ -249,6 +273,146 @@ func TestDurableActionReplayCanonicalDefaultsAndCollisions(t *testing.T) {
 	r.auth.AllowWrites = false
 	if result := callAction(t, s, "create_scan", firstArgs); result["isError"] != true || calls != 1 {
 		t.Fatal("replay bypassed revoked write access", result)
+	}
+}
+
+func TestQueueFullActionReplaysRejectionAndRequiresFreshRequestID(t *testing.T) {
+	r := newActionRepository()
+	queueFull := true
+	calls := 0
+	s := New(r, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls++
+		if queueFull {
+			w.Header().Set("Retry-After", "30")
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "The scan or link check queue is full; retry later"})
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"id": testScanID})
+	}))
+	args := `{"request_id":"` + testRequestID + `","sitemap_url":"https://example.test"}`
+	first := callAction(t, s, "create_scan", args)
+	data := first["structuredContent"].(map[string]any)
+	if first["isError"] != true || data["retry_with_new_request_id"] != true || data["retry_after_seconds"] != 30 || data["replayed"] != false || calls != 1 {
+		t.Fatal("queue-full action did not explain a definitive retry", first, calls)
+	}
+
+	queueFull = false
+	replay := callAction(t, s, "create_scan", args)
+	data = replay["structuredContent"].(map[string]any)
+	if replay["isError"] != true || data["retry_with_new_request_id"] != true || data["replayed"] != true || calls != 1 {
+		t.Fatal("same request ID did not replay the saved rejection", replay, calls)
+	}
+
+	const freshID = "44444444-4444-4444-8444-444444444444"
+	fresh := callAction(t, s, "create_scan", `{"request_id":"`+freshID+`","sitemap_url":"https://example.test"}`)
+	data = fresh["structuredContent"].(map[string]any)
+	if fresh["isError"] == true || data["http_status"] != http.StatusCreated || data["retry_with_new_request_id"] != nil || calls != 2 {
+		t.Fatal("fresh request ID did not create the job after capacity freed", fresh, calls)
+	}
+}
+
+func TestLegacyQueueFullReplayAddsRetryHintWithoutChangingSavedResponse(t *testing.T) {
+	r := newActionRepository()
+	calls := 0
+	s := New(r, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls++
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "The scan or link check queue is full; retry later"})
+	}))
+	args := `{"request_id":"` + testRequestID + `","sitemap_url":"https://example.test"}`
+	callAction(t, s, "create_scan", args)
+	// Simulate the exact response stored before queue-full retry hints existed.
+	legacy := []byte(`{"action":"create_scan","http_status":503,"data":{"error":"The scan or link check queue is full; retry later"},"request_id":"` + testRequestID + `","replayed":false}`)
+	r.entries[testRequestID].Response = append([]byte(nil), legacy...)
+	replay := callAction(t, s, "create_scan", args)
+	data := replay["structuredContent"].(map[string]any)
+	if replay["isError"] != true || data["http_status"] != float64(http.StatusServiceUnavailable) || data["retry_with_new_request_id"] != true || data["retry_with_same_request_id"] != nil || data["retry_after_seconds"] != 30 || data["replayed"] != true || calls != 1 {
+		t.Fatal("legacy queue-full replay lost retry semantics", replay, calls)
+	}
+	if string(r.entries[testRequestID].Response) != string(legacy) {
+		t.Fatal("legacy ledger response was rewritten during replay")
+	}
+}
+
+func TestOtherServiceUnavailableActionDoesNotClaimDefiniteRejection(t *testing.T) {
+	r := newActionRepository()
+	s := New(r, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "database unavailable"})
+	}))
+	result := callAction(t, s, "create_link_check", `{"request_id":"`+testRequestID+`","url":"https://example.test"}`)
+	data := result["structuredContent"].(map[string]any)
+	if result["isError"] != true || data["retry_with_new_request_id"] != nil || data["retry_after_seconds"] != nil {
+		t.Fatal("unrelated 503 was marked safe for a new request ID", result)
+	}
+	replay := callAction(t, s, "create_link_check", `{"request_id":"`+testRequestID+`","url":"https://example.test"}`)
+	data = replay["structuredContent"].(map[string]any)
+	if replay["isError"] != true || data["replayed"] != true || data["retry_with_new_request_id"] != nil || data["retry_after_seconds"] != nil {
+		t.Fatal("unrelated saved 503 gained a queue-full retry hint", replay)
+	}
+}
+
+func TestExistingScanCapacityActionsDoNotUseNewJobRequestID(t *testing.T) {
+	for _, name := range []string{"resume_scan", "retry_failed_pages"} {
+		t.Run(name, func(t *testing.T) {
+			r := newActionRepository()
+			calls := 0
+			s := New(r, http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				calls++
+				if calls == 1 {
+					writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "The scan or link check queue is full; retry later"})
+					return
+				}
+				writeJSON(w, http.StatusOK, map[string]any{"id": testScanID})
+			}))
+			args := `{"scan_id":"` + testScanID + `"}`
+			first := callAction(t, s, name, args)
+			data := first["structuredContent"].(map[string]any)
+			if first["isError"] != true || data["retry_with_new_request_id"] != nil || len(r.entries) != 0 {
+				t.Fatal("existing-scan capacity response incorrectly used a new-job ledger", first)
+			}
+			second := callAction(t, s, name, args)
+			if second["isError"] == true || calls != 2 {
+				t.Fatal("eligible existing scan could not retry after capacity freed", second, calls)
+			}
+		})
+	}
+}
+
+func TestActionFreshAndLegacyReplayRedactURLSecrets(t *testing.T) {
+	const raw = "https://alice:s%40cret@example.test/page?owner=a@b"
+	const public = "https://example.test/page"
+	r := newActionRepository()
+	calls := 0
+	s := New(r, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		writeJSON(w, http.StatusOK, map[string]any{
+			"scan":        map[string]any{"id": testScanID, "sitemap_url": raw},
+			"occurrences": []any{map[string]any{"page_url": raw}},
+			"check":       map[string]any{"url": raw, "results": []any{map[string]any{"target_url": raw, "final_url": raw, "error": "GET " + raw + ": timeout"}}},
+		})
+	}))
+	args := `{"request_id":"` + testRequestID + `","scan_id":"` + testScanID + `"}`
+	assertPublic := func(result map[string]any) {
+		t.Helper()
+		encoded, err := json.Marshal(result["structuredContent"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, value := range []string{string(encoded), resultText(result)} {
+			if strings.Contains(value, "alice") || strings.Contains(value, "s%40cret") || strings.Contains(value, "owner=a@b") || strings.Count(value, public) < 2 {
+				t.Fatalf("unsafe action response: %s", value)
+			}
+		}
+	}
+	first := callAction(t, s, "rescan_scan", args)
+	assertPublic(first)
+	if calls != 1 || strings.Contains(string(r.entries[testRequestID].Response), "alice") || strings.Contains(string(r.entries[testRequestID].Response), "owner=a@b") || strings.Count(string(r.entries[testRequestID].Response), public) < 2 {
+		t.Fatal("new ledger response retained URL secrets")
+	}
+	r.entries[testRequestID].Response = []byte(`{"http_status":200,"data":{"scan":{"id":"` + testScanID + `","sitemap_url":"` + raw + `"},"occurrences":[{"page_url":"` + raw + `"}],"check":{"url":"` + raw + `","results":[{"target_url":"` + raw + `","final_url":"` + raw + `","error":"GET ` + raw + `: timeout"}]}},"action":"rescan_scan","request_id":"` + testRequestID + `","replayed":false}`)
+	replay := callAction(t, s, "rescan_scan", args)
+	assertPublic(replay)
+	if calls != 1 || replay["structuredContent"].(map[string]any)["replayed"] != true {
+		t.Fatal("legacy replay executed action or lost replay marker")
 	}
 }
 

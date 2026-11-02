@@ -3,6 +3,7 @@ import {
   type ScanScoreSummary,
 } from "@/lib/scan-scoring";
 import type { IssueReportData, ReportIssueGroup } from "@/lib/issues-report-data";
+import { redactUrlUserinfo } from "@/lib/url-presentation";
 
 const LLM_SNIPPET_CHAR_LIMIT = 240;
 const LLM_SELECTOR_CHAR_LIMIT = 180;
@@ -57,7 +58,7 @@ function formatIssueBlock(group: ReportIssueGroup, index: number): string {
   const occurrenceLines =
     group.occurrences.length > 0
       ? group.occurrences.flatMap((occurrence, occurrenceIndex) => [
-          `sample_${occurrenceIndex + 1}_page_url: ${occurrence.pageUrl}`,
+          `sample_${occurrenceIndex + 1}_page_url: ${redactUrlUserinfo(occurrence.pageUrl)}`,
           `sample_${occurrenceIndex + 1}_css_selector: ${
             truncateText(occurrence.cssSelector, LLM_SELECTOR_CHAR_LIMIT) ?? "n/a"
           }`,
@@ -81,8 +82,8 @@ function formatIssueBlock(group: ReportIssueGroup, index: number): string {
     `weight: ${weight > 0 ? weight : "not_scored"}`,
     `occurrence_count: ${group.occurrenceCount}`,
     `sample_occurrence_count: ${group.occurrences.length}`,
-    `help_url: ${group.issue.helpUrl ?? "n/a"}`,
-    `act_urls: ${formatList(group.issue.actRules.map((rule) => rule.ruleUrl))}`,
+    `help_url: ${group.issue.helpUrl ? redactUrlUserinfo(group.issue.helpUrl) : "n/a"}`,
+    `act_urls: ${formatList(group.issue.actRules.map((rule) => redactUrlUserinfo(rule.ruleUrl)))}`,
     `accessibility_requirements: ${formatList(
       group.complianceReferences.map((reference) => reference.title)
     )}`,
@@ -98,14 +99,14 @@ function formatIssueBlock(group: ReportIssueGroup, index: number): string {
   return lines.join("\n");
 }
 
-export function buildIssueReportLlmText(
+function* issueReportLlmParts(
   data: IssueReportData,
   occurrenceLimit: number
-): string {
+): Generator<string> {
   const header = [
     "# LIME LLM Issue Report",
     `scan_id: ${data.scan.id}`,
-    `sitemap_url: ${data.scan.sitemapUrl}`,
+    `sitemap_url: ${redactUrlUserinfo(data.scan.sitemapUrl)}`,
     `scan_status: ${data.scan.status}`,
     `generated_at: ${new Date().toISOString()}`,
     ...formatScoreSummary(data.scoreSummary),
@@ -116,9 +117,29 @@ export function buildIssueReportLlmText(
     `export_notes: includes every failed and needs-review issue card; occurrences are sampled at ${occurrenceLimit} per issue; screenshots are omitted; text is whitespace-normalized and truncated for size.`,
   ];
 
-  const body = data.issuesWithOccurrences.map((group, index) =>
-    formatIssueBlock(group, index + 1)
-  );
+  yield* header;
+  for (const [index, group] of data.issuesWithOccurrences.entries()) yield formatIssueBlock(group, index + 1);
+}
 
-  return [...header, ...body].join("\n\n");
+export function buildIssueReportLlmText(data: IssueReportData, occurrenceLimit: number): string {
+  return Array.from(issueReportLlmParts(data, occurrenceLimit)).join("\n\n");
+}
+
+export function buildIssueReportLlmStream(data: IssueReportData, occurrenceLimit: number): ReadableStream {
+  const parts = issueReportLlmParts(data, occurrenceLimit);
+  const encoder = new TextEncoder();
+  let wrotePart = false;
+  return new ReadableStream({
+    pull(controller) {
+      try {
+        const { value, done } = parts.next();
+        if (done) return controller.close();
+        controller.enqueue(encoder.encode(`${wrotePart ? "\n\n" : ""}${value}`));
+        wrotePart = true;
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel() { parts.return(undefined); },
+  });
 }

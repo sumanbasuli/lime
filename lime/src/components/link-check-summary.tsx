@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { LinkCheck, LinkCheckStats, LinkCheckStatus, LinkTargetStatus } from "@/lib/api";
 import { BootstrapIcon, type BootstrapIconName } from "@/components/bootstrap-icon";
+import { redactUrlUserinfo } from "@/lib/url-presentation";
 
 export const linkCheckButtonClass = "inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-black/12 bg-white px-4 text-xs font-semibold transition-colors hover:bg-black hover:text-[#FFED00] disabled:cursor-wait disabled:opacity-50";
 
@@ -23,7 +24,8 @@ export function LinkTargetBadge({ status, timeout = false }: { status: LinkTarge
 export function LinkUrl({ url, children, className = "" }: { url: string; children?: ReactNode; className?: string }) {
   let isHttp = false;
   try { isHttp = ["http:", "https:"].includes(new URL(url).protocol); } catch { /* Invalid targets remain readable, not actionable links. */ }
-  return isHttp ? <a href={url} target="_blank" rel="noopener noreferrer" className={`[overflow-wrap:anywhere] underline decoration-black/20 underline-offset-4 hover:decoration-black ${className}`}>{children ?? url}</a> : <span className={`[overflow-wrap:anywhere] ${className}`}>{children ?? url}</span>;
+  const displayUrl = redactUrlUserinfo(url);
+  return isHttp ? <a href={displayUrl} target="_blank" rel="noopener noreferrer" className={`[overflow-wrap:anywhere] underline decoration-black/20 underline-offset-4 hover:decoration-black ${className}`}>{children ?? displayUrl}</a> : <span className={`[overflow-wrap:anywhere] ${className}`}>{children ?? displayUrl}</span>;
 }
 
 export function LinkCheckSummaryCards({ checks = [], stats, scope }: { checks?: LinkCheck[]; stats?: LinkCheckStats; scope?: string }) {

@@ -1,7 +1,8 @@
-import { eq, sql } from "drizzle-orm";
+import { eq, getTableColumns, sql } from "drizzle-orm";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { db } from "@/db";
 import { appSettings } from "@/db/schema";
+import { readReportQuery, type ReportReadContext } from "@/lib/mcp-report-read";
 import {
   DEFAULT_INTEGRATION_SETTINGS,
   DEFAULT_PERFORMANCE_SETTINGS,
@@ -170,34 +171,36 @@ function invalidateSystemSettingsCache() {
   cachedSystemSettings = null;
 }
 
-export async function getSystemSettings(): Promise<SystemSettings> {
+export async function getSystemSettings(context?: ReportReadContext): Promise<SystemSettings> {
   const now = Date.now();
-  if (cachedSystemSettings && cachedSystemSettings.expiresAt > now) {
+  if (!context && cachedSystemSettings && cachedSystemSettings.expiresAt > now) {
     return cachedSystemSettings.value;
   }
 
-  const [settings] = await db
+  const [settings] = await readReportQuery((context?.db ?? db)
     .select()
     .from(appSettings)
     .where(eq(appSettings.key, REPORT_SETTINGS_KEY))
-    .limit(1);
+    .limit(1), context, Object.keys(getTableColumns(appSettings)).length);
 
   const systemSettings = settingsFromRow(settings);
-  cachedSystemSettings = {
-    value: systemSettings,
-    expiresAt: now + SETTINGS_CACHE_TTL_MS,
-  };
+  if (!context) {
+    cachedSystemSettings = {
+      value: systemSettings,
+      expiresAt: now + SETTINGS_CACHE_TTL_MS,
+    };
+  }
 
   return systemSettings;
 }
 
-export async function getReportSettings(): Promise<ReportSettings> {
-  const settings = await getSystemSettings();
+export async function getReportSettings(context?: ReportReadContext): Promise<ReportSettings> {
+  const settings = await getSystemSettings(context);
   return settings.reporting;
 }
 
-export async function getPerformanceSettings(): Promise<PerformanceSettings> {
-  const settings = await getSystemSettings();
+export async function getPerformanceSettings(context?: ReportReadContext): Promise<PerformanceSettings> {
+  const settings = await getSystemSettings(context);
   return settings.performance;
 }
 
@@ -279,9 +282,9 @@ function hasMcpAccess(
 }
 
 // Authorization must never use the five-second display-settings cache.
-export async function requireMcpAccess(authorization: string): Promise<void> {
-  const [row] = await db.select().from(appSettings)
-    .where(eq(appSettings.key, REPORT_SETTINGS_KEY)).limit(1);
+export async function requireMcpAccess(authorization: string, context?: ReportReadContext): Promise<void> {
+  const [row] = await readReportQuery((context?.db ?? db).select().from(appSettings)
+    .where(eq(appSettings.key, REPORT_SETTINGS_KEY)).limit(1), context, Object.keys(getTableColumns(appSettings)).length);
   if (!hasMcpAccess(row, authorization)) throw new McpAccessError();
 }
 

@@ -4,10 +4,10 @@ Thanks for helping improve LIME. This project is a self-hosted accessibility sca
 
 ## Development Setup
 
-Use Git, Make, and Docker with the Compose plugin for the source-built stack. In a new checkout only:
+Use Git, Make, and Docker with Compose for the source-built stack. Start Docker first; in a new checkout and with no existing database volume:
 
 ```bash
-cp .env.example .env
+make init-env
 make start-all
 ```
 

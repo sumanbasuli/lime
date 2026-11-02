@@ -4,23 +4,36 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/draw"
 	"image/png"
 	"math"
+	"net"
+	"net/netip"
+	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
+	cdpdom "github.com/chromedp/cdproto/dom"
 	cdpinput "github.com/chromedp/cdproto/input"
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
+	cdptarget "github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/egressproxy"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/rootdns"
 	log "github.com/sumanbasuli/lime/shopkeeper/internal/safelog"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/screenshots"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/viewport"
+	"golang.org/x/net/idna"
 )
 
 const (
@@ -47,6 +60,7 @@ const (
 	elementScreenshotScale       = 2.0
 	elementHighlightOutline      = "#FFED00"
 	elementHighlightShadow       = "0 0 0 9999px rgba(17, 17, 17, 0.58), 0 18px 48px rgba(17, 17, 17, 0.32)"
+	frameScreenshotWarning       = "<!-- LIME evidence warning: element screenshot omitted because the affected node is inside a frame -->"
 )
 
 // PageInput represents a URL to scan with its DB record ID.
@@ -57,6 +71,13 @@ type PageInput struct {
 
 // ProgressCallback reports the number of scanned pages as workers finish.
 type ProgressCallback func(scannedCount int)
+
+// ResultCallback checkpoints a finished page before progress is reported.
+type ResultCallback func(RawResult) error
+
+// ErrResultCheckpoint distinguishes a persistence failure from the scan slice
+// deadline, even when the callback itself returns context.DeadlineExceeded.
+var ErrResultCheckpoint = errors.New("result checkpoint failed")
 
 // synchronizedProgress prevents concurrent worker callbacks from persisting an
 // older count after a newer one. Each scan run gets its own tracker so deliberate
@@ -76,6 +97,11 @@ func synchronizedProgress(callback ProgressCallback) ProgressCallback {
 		latest = count
 		callback(count)
 	}
+}
+
+func onceBrowserCancel(cancel context.CancelFunc) context.CancelFunc {
+	var once sync.Once
+	return func() { once.Do(cancel) }
 }
 
 type elementBounds struct {
@@ -111,6 +137,53 @@ type captureAssignmentState struct {
 	selectorCursor map[string]int
 }
 
+type frameTopologyTracker struct {
+	revision atomic.Uint64
+	mu       sync.Mutex
+	targets  map[cdptarget.ID]string
+}
+
+func (tracker *frameTopologyTracker) watchTarget(ctx context.Context) {
+	chromedp.ListenTarget(ctx, func(event any) {
+		switch changed := event.(type) {
+		case *cdppage.EventFrameAttached, *cdppage.EventFrameDetached:
+			tracker.revision.Add(1)
+		case *cdppage.EventFrameNavigated:
+			if changed.Frame != nil && changed.Frame.ParentID != "" {
+				tracker.revision.Add(1)
+			}
+		}
+	})
+}
+
+func (tracker *frameTopologyTracker) watchBrowser(ctx context.Context) {
+	tracker.targets = make(map[cdptarget.ID]string)
+	chromedp.ListenBrowser(ctx, func(event any) {
+		tracker.mu.Lock()
+		defer tracker.mu.Unlock()
+		switch changed := event.(type) {
+		case *cdptarget.EventTargetCreated:
+			if changed.TargetInfo != nil && changed.TargetInfo.Type == "iframe" {
+				tracker.targets[changed.TargetInfo.TargetID] = changed.TargetInfo.URL
+				tracker.revision.Add(1)
+			}
+		case *cdptarget.EventTargetInfoChanged:
+			if changed.TargetInfo != nil && changed.TargetInfo.Type == "iframe" {
+				prior, exists := tracker.targets[changed.TargetInfo.TargetID]
+				if !exists || prior != changed.TargetInfo.URL {
+					tracker.targets[changed.TargetInfo.TargetID] = changed.TargetInfo.URL
+					tracker.revision.Add(1)
+				}
+			}
+		case *cdptarget.EventTargetDestroyed:
+			if _, exists := tracker.targets[changed.TargetID]; exists {
+				delete(tracker.targets, changed.TargetID)
+				tracker.revision.Add(1)
+			}
+		}
+	})
+}
+
 type axeRuleOverride struct {
 	Enabled bool `json:"enabled"`
 }
@@ -122,6 +195,7 @@ type axeRunOnly struct {
 
 type axeRunOptions struct {
 	ElementRef  bool                       `json:"elementRef"`
+	Iframes     bool                       `json:"iframes"`
 	RunOnly     axeRunOnly                 `json:"runOnly"`
 	ResultTypes []string                   `json:"resultTypes"`
 	Rules       map[string]axeRuleOverride `json:"rules"`
@@ -173,21 +247,48 @@ var lighthouseAxeRuleOverrides = map[string]axeRuleOverride{
 
 // ScanPages scans multiple pages for accessibility issues using chromedp and axe-core.
 // It uses a worker pool with bounded concurrency (max 5 simultaneous pages).
-func ScanPages(ctx context.Context, allocCtx context.Context, pages []PageInput, scanID string, scanViewport viewport.Settings, onProgress ProgressCallback) ([]RawResult, error) {
+func ScanPages(ctx context.Context, allocCtx context.Context, pages []PageInput, scanID string, scanViewport viewport.Settings, onProgress ProgressCallback, policies ...rootdns.Policy) ([]RawResult, error) {
+	return scanPages(ctx, allocCtx, pages, scanID, scanViewport, onProgress, nil, nil, policies...)
+}
+
+// ScanPagesWithResults checkpoints each finished page before the next progress
+// update. Its callback is serialized across workers and may stop the scan.
+func ScanPagesWithResults(ctx context.Context, allocCtx context.Context, pages []PageInput, scanID string, scanViewport viewport.Settings, onProgress ProgressCallback, onResult ResultCallback, axeBudget *AxeResultBudget, policies ...rootdns.Policy) ([]RawResult, error) {
+	return scanPages(ctx, allocCtx, pages, scanID, scanViewport, onProgress, onResult, axeBudget, policies...)
+}
+
+func scanPages(ctx context.Context, allocCtx context.Context, pages []PageInput, scanID string, scanViewport viewport.Settings, onProgress ProgressCallback, onResult ResultCallback, axeBudget *AxeResultBudget, policies ...rootdns.Policy) ([]RawResult, error) {
 	if len(pages) == 0 {
 		return []RawResult{}, nil
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	onProgress = synchronizedProgress(onProgress)
+	var policy rootdns.Policy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
 
 	// Create screenshot directory for this scan
 	screenshotDir := screenshots.ScanDir(scanID)
 	if err := screenshots.EnsureScanDir(scanID); err != nil {
 		log.Printf("Juicer: warning: could not create screenshot directory %s: %v", screenshotDir, err)
 	}
+	evidenceBudget, err := newScanEvidenceBudget(screenshotDir)
+	if err != nil {
+		log.Printf("Juicer: warning: screenshots unavailable for scan %s: %v", scanID, err)
+		evidenceBudget = &scanEvidenceBudget{
+			screenshotFiles: maxScanScreenshotFiles,
+			screenshotBytes: maxScanScreenshotBytes,
+		}
+	}
+	evidenceBudget.sharedAxe = axeBudget
 
 	// Semaphore channel for limiting concurrency
 	sem := make(chan struct{}, MaxConcurrency)
 	var mu sync.Mutex
+	var checkpointMu sync.Mutex
+	var checkpointErr error
 	var results []RawResult
 	scannedCount := 0
 
@@ -205,13 +306,35 @@ scheduleLoop:
 			defer wg.Done()
 			defer func() { <-sem }() // Release semaphore
 
-			result := scanSinglePage(ctx, allocCtx, p, scanID, screenshotDir, scanViewport)
+			result := scanSinglePage(ctx, allocCtx, p, scanID, screenshotDir, scanViewport, evidenceBudget, policy)
 			if result.Canceled {
+				evidenceBudget.releaseUncheckpointedAxeResult(result.axeBytes)
 				return
+			}
+			if onResult != nil {
+				checkpointMu.Lock()
+				if checkpointErr == nil {
+					checkpointErr = onResult(result)
+					if checkpointErr != nil {
+						cancel()
+					}
+				}
+				failed := checkpointErr != nil
+				checkpointMu.Unlock()
+				if failed {
+					evidenceBudget.releaseUncheckpointedAxeResult(result.axeBytes)
+					return
+				}
 			}
 
 			mu.Lock()
-			results = append(results, result)
+			if onResult != nil {
+				// The caller already saved the full evidence. Keep only the fields
+				// needed to summarize this slice, so a long run stays bounded.
+				results = append(results, RawResult{URLID: result.URLID, URL: result.URL, Error: result.Error})
+			} else {
+				results = append(results, result)
+			}
 			scannedCount++
 			count := scannedCount
 			mu.Unlock()
@@ -231,6 +354,9 @@ scheduleLoop:
 	wg.Wait()
 
 	log.Printf("Juicer: scanned %d pages for scan %s", len(results), scanID)
+	if checkpointErr != nil {
+		return results, fmt.Errorf("%w: %w", ErrResultCheckpoint, checkpointErr)
+	}
 	if err := ctx.Err(); err != nil {
 		return results, err
 	}
@@ -238,31 +364,75 @@ scheduleLoop:
 	return results, nil
 }
 
-func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInput, scanID, screenshotDir string, scanViewport viewport.Settings) RawResult {
-	result := RawResult{
+func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInput, scanID, screenshotDir string, scanViewport viewport.Settings, budget *scanEvidenceBudget, policies ...rootdns.Policy) (result RawResult) {
+	result = RawResult{
 		URLID: page.URLID,
 		URL:   page.URL,
 	}
+	pageCtx, pageCancel := context.WithTimeout(ctx, PageTimeout)
+	defer pageCancel()
+
+	// Chrome's proxy must be ready before the browser starts. All redirects and
+	// subresources then pass through the same dial-time destination policy.
+	var policy rootdns.Policy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
+	proxy, err := egressproxy.StartWithRootPolicy(pageCtx, page.URL, policy.Observe, policy.GuardPrivateDial)
+	if err != nil {
+		if shouldTreatAsCanceled(ctx, err) {
+			result.Canceled = true
+			return result
+		}
+		result.Error = log.Sprintf("failed to set up browser egress for %s: %v", page.URL, err)
+		log.Printf("Juicer: %s", result.Error)
+		return result
+	}
+	defer func() {
+		_ = proxy.Close()
+		if !proxy.BudgetExceeded() {
+			return
+		}
+		// A background request can exceed the budget after navigation or axe.
+		// Discard all page evidence on every return path, including late errors.
+		result = browserBudgetFailure(page, proxy.PayloadBudgetExceeded(), ctx.Err() != nil)
+		if result.Error != "" {
+			log.Printf("Juicer: %s", result.Error)
+		}
+	}()
+	pageAllocCtx, pageAllocCancel := egressproxy.NewChromeAllocator(allocCtx, proxy.Address())
+	defer pageAllocCancel()
 
 	// Create a new browser tab context with timeout
-	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
+	browserCtx, cancelBrowserContext := chromedp.NewContext(pageAllocCtx)
+	browserCancel := onceBrowserCancel(cancelBrowserContext)
 	defer browserCancel()
 
 	go func() {
 		select {
-		case <-ctx.Done():
+		case <-pageCtx.Done():
 			browserCancel()
+		case <-proxy.Done():
+			if proxy.BudgetExceeded() || pageCtx.Err() != nil {
+				browserCancel()
+			}
 		case <-browserCtx.Done():
 		}
 	}()
 
-	tabCtx, timeoutCancel := context.WithTimeout(browserCtx, PageTimeout)
+	pageDeadline, _ := pageCtx.Deadline()
+	tabCtx, timeoutCancel := context.WithDeadline(browserCtx, pageDeadline)
 	defer timeoutCancel()
+	navigation := &pageNavigationGuard{submitted: page.URL}
+	chromedp.ListenTarget(tabCtx, navigation.observe)
+	frameTopology := &frameTopologyTracker{}
+	frameTopology.watchTarget(tabCtx)
+	frameTopology.watchBrowser(tabCtx)
 
 	var screenshot []byte
 
 	// Navigate to the page
-	err := chromedp.Run(tabCtx,
+	err = chromedp.Run(tabCtx,
 		chromedp.EmulateViewport(int64(scanViewport.Width), int64(scanViewport.Height)),
 		chromedp.Navigate(page.URL),
 		chromedp.WaitReady("body"),
@@ -273,7 +443,11 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 			return result
 		}
 
-		result.Error = log.Text(fmt.Sprintf("failed to navigate to %s: %v", page.URL, err))
+		message := log.Sprintf("failed to navigate to %s: %v", page.URL, err)
+		if blocked := proxy.DeniedCount(); blocked > 0 {
+			message += fmt.Sprintf("; browser network safety policy blocked %d request(s)", blocked)
+		}
+		result.Error = log.Text(message)
 		log.Printf("Juicer: %s", result.Error)
 		return result
 	}
@@ -286,34 +460,78 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 
 		log.Printf("Juicer: warning: page settle before axe timed out for %s: %v", page.URL, err)
 	}
-
-	// Inject axe-core
-	err = chromedp.Run(tabCtx,
-		chromedp.Evaluate(axeMinJS, nil),
-	)
+	if err := verifyPageAuthority(tabCtx, navigation); err != nil {
+		if shouldTreatAsCanceled(ctx, err) {
+			result.Canceled = true
+			return result
+		}
+		result.Error = log.Sprintf("failed to verify page destination for %s: %v", page.URL, err)
+		log.Printf("Juicer: %s", result.Error)
+		return result
+	}
+	frameRevision := frameTopology.revision.Load()
+	// The page can define or replace window.axe in its own JavaScript world.
+	// Keep the audit engine and its result serializer in a Chrome-isolated world
+	// that shares the DOM but not page-owned globals.
+	worldEvents := make(chan *runtime.ExecutionContextDescription, 128)
+	chromedp.ListenTarget(tabCtx, func(event any) {
+		created, ok := event.(*runtime.EventExecutionContextCreated)
+		if !ok || created.Context == nil || created.Context.Name != "lime-axe" {
+			return
+		}
+		select {
+		case worldEvents <- created.Context:
+		default:
+		}
+	})
+	var axeContextID runtime.ExecutionContextID
+	err = chromedp.Run(tabCtx, chromedp.ActionFunc(func(actionCtx context.Context) error {
+		frameTree, err := cdppage.GetFrameTree().Do(actionCtx)
+		if err != nil {
+			return err
+		}
+		if frameTree == nil || frameTree.Frame == nil {
+			return errors.New("main frame is unavailable")
+		}
+		axeContextID, err = cdppage.CreateIsolatedWorld(frameTree.Frame.ID).WithWorldName("lime-axe").Do(actionCtx)
+		if err != nil {
+			return err
+		}
+		if axeContextID == 0 {
+			return errors.New("isolated axe execution context is unavailable")
+		}
+		return nil
+	}))
 	if err != nil {
 		if shouldTreatAsCanceled(ctx, err) {
 			result.Canceled = true
 			return result
 		}
-
-		result.Error = log.Text(fmt.Sprintf("failed to inject axe-core on %s: %v", page.URL, err))
+		result.Error = log.Sprintf("failed to isolate accessibility audit on %s: %v", page.URL, err)
 		log.Printf("Juicer: %s", result.Error)
 		return result
 	}
-
-	axeRunScript, err := lighthouseAxeRunScript()
-	if err != nil {
-		result.Error = log.Text(fmt.Sprintf("failed to prepare accessibility script for %s: %v", page.URL, err))
-		log.Printf("Juicer: %s", result.Error)
+	var axeUniqueContextID string
+	select {
+	case world := <-worldEvents:
+		if world.ID != axeContextID || world.UniqueID == "" {
+			result.Error = "isolated accessibility audit context changed during setup"
+			return result
+		}
+		axeUniqueContextID = world.UniqueID
+	case <-tabCtx.Done():
+		if shouldTreatAsCanceled(ctx, tabCtx.Err()) {
+			result.Canceled = true
+			return result
+		}
+		result.Error = "timed out waiting for isolated accessibility audit context"
 		return result
 	}
 
-	// Run axe-core using Lighthouse-style accessibility configuration and get results as a JSON string.
-	var axeResultJSON string
+	// Inject axe-core
 	err = chromedp.Run(tabCtx,
-		chromedp.Evaluate(axeRunScript, &axeResultJSON, func(ep *runtime.EvaluateParams) *runtime.EvaluateParams {
-			return ep.WithAwaitPromise(true)
+		chromedp.Evaluate(axeMinJS, nil, func(ep *runtime.EvaluateParams) *runtime.EvaluateParams {
+			return ep.WithUniqueContextID(axeUniqueContextID)
 		}),
 	)
 	if err != nil {
@@ -322,29 +540,88 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 			return result
 		}
 
-		result.Error = log.Text(fmt.Sprintf("failed to run axe-core on %s: %v", page.URL, err))
+		result.Error = log.Sprintf("failed to inject axe-core on %s: %v", page.URL, err)
 		log.Printf("Juicer: %s", result.Error)
 		return result
 	}
 
-	// Parse axe results
-	var axeRes axeResult
-	if err := json.Unmarshal([]byte(axeResultJSON), &axeRes); err != nil {
-		result.Error = log.Text(fmt.Sprintf("failed to parse axe results for %s: %v", page.URL, err))
+	axeRunScript, err := lighthouseAxeRunScript()
+	if err != nil {
+		result.Error = log.Sprintf("failed to prepare accessibility script for %s: %v", page.URL, err)
 		log.Printf("Juicer: %s", result.Error)
 		return result
 	}
+
+	// Run axe-core using Lighthouse-style accessibility configuration and get results as a JSON string.
+	var axeResultJSON string
+	err = chromedp.Run(tabCtx,
+		chromedp.Evaluate(axeRunScript, &axeResultJSON, func(ep *runtime.EvaluateParams) *runtime.EvaluateParams {
+			return ep.WithUniqueContextID(axeUniqueContextID).WithAwaitPromise(true)
+		}),
+	)
+	if err != nil {
+		if shouldTreatAsCanceled(ctx, err) {
+			result.Canceled = true
+			return result
+		}
+
+		result.Error = log.Sprintf("failed to run axe-core on %s: %v", page.URL, err)
+		log.Printf("Juicer: %s", result.Error)
+		return result
+	}
+	// Parse axe results
+	var axeRes axeResult
+	if err := json.Unmarshal([]byte(axeResultJSON), &axeRes); err != nil {
+		result.Error = log.Sprintf("failed to parse axe results for %s: %v", page.URL, err)
+		log.Printf("Juicer: %s", result.Error)
+		return result
+	}
+	if axeRes.LimitError != "" {
+		result.Error = log.Sprintf("accessibility evidence limit exceeded for %s: %s", page.URL, axeRes.LimitError)
+		log.Printf("Juicer: %s", result.Error)
+		return result
+	}
+	if err := auditChildFrames(tabCtx, axeContextID, worldEvents, axeRunScript, len(axeResultJSON), &axeRes, frameTopology); err != nil {
+		result.Error = log.Sprintf("failed to audit isolated child frames for %s: %v", page.URL, err)
+		return result
+	}
+	if frameTopology.revision.Load() != frameRevision {
+		result.Error = "accessibility frame tree changed during audit"
+		return result
+	}
+	combinedAxeJSON, err := json.Marshal(axeRes)
+	ruleCount := len(axeRes.Violations) + len(axeRes.Incomplete) + len(axeRes.Passes) + len(axeRes.NotApplicable)
+	nodeCount := 0
+	for _, rule := range axeRes.Violations {
+		nodeCount += len(rule.Nodes)
+	}
+	for _, rule := range axeRes.Incomplete {
+		nodeCount += len(rule.Nodes)
+	}
+	if err != nil || ruleCount > maxAxeRules || nodeCount > maxAxeNodes || len(combinedAxeJSON) > maxPageAxeResultBytes || !budget.reserveAxeResult(len(combinedAxeJSON)) {
+		result.Error = "accessibility evidence exceeded the page or scan result budget"
+		return result
+	}
+	result.axeBytes = len(combinedAxeJSON)
 	result.Violations = axeRes.Violations
 	result.Incomplete = axeRes.Incomplete
 	result.NotApplicable = axeRes.NotApplicable
 	result.Passes = axeRes.Passes
 	result.Version = axeRes.Version
+	if proxy.BudgetExceeded() {
+		return result
+	}
 
+	captureNodeScreenshots := true
 	if err := assignCaptureIndices(tabCtx, result.Violations); err != nil {
 		log.Printf("Juicer: warning: failed to assign exact capture indices for %s: %v", page.URL, err)
+		captureNodeScreenshots = !errors.Is(err, errCaptureCandidateBudget)
 	}
-	if err := assignCaptureIndices(tabCtx, result.Incomplete); err != nil {
-		log.Printf("Juicer: warning: failed to assign exact capture indices for incomplete results on %s: %v", page.URL, err)
+	if captureNodeScreenshots {
+		if err := assignCaptureIndices(tabCtx, result.Incomplete); err != nil {
+			log.Printf("Juicer: warning: failed to assign exact capture indices for incomplete results on %s: %v", page.URL, err)
+			captureNodeScreenshots = !errors.Is(err, errCaptureCandidateBudget)
+		}
 	}
 
 	if err := waitForPageSettle(tabCtx); err != nil {
@@ -355,16 +632,62 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 
 		log.Printf("Juicer: warning: page settle before screenshots timed out for %s: %v", page.URL, err)
 	}
+	if err := verifyPageAuthority(tabCtx, navigation); err != nil {
+		if shouldTreatAsCanceled(ctx, err) {
+			result.Canceled = true
+			return result
+		}
+		result.Error = log.Sprintf("failed to verify page destination for %s: %v", page.URL, err)
+		log.Printf("Juicer: %s", result.Error)
+		return result
+	}
+
+	// Keep this page's files out of the screenshot route until the final
+	// browser-frame check. A redirect during capture must not expose another
+	// site's image under the submitted URL ID.
+	captureDir, captureErr := os.MkdirTemp(screenshotDir, ".pending-")
+	if captureErr != nil {
+		log.Printf("Juicer: warning: screenshots unavailable for %s: %v", page.URL, captureErr)
+	}
 
 	// Take element-level screenshots BEFORE the full-page screenshot
 	// (FullScreenshot changes the viewport/device metrics and can break subsequent element screenshots)
 	// Use CDP Page.CaptureScreenshot with clip for reliable element capture
 	nodeIdx := 0
-	nodeIdx = captureViolationNodeScreenshots(tabCtx, result.Violations, scanID, screenshotDir, page, nodeIdx)
-	nodeIdx = captureViolationNodeScreenshots(tabCtx, result.Incomplete, scanID, screenshotDir, page, nodeIdx)
+	pageBudget := &pageScreenshotBudget{}
+	committingScreenshots := false
+	defer func() {
+		if captureErr == nil {
+			_ = os.RemoveAll(captureDir)
+		}
+		if !committingScreenshots {
+			budget.releasePageScreenshots(pageBudget)
+		}
+	}()
+	if captureErr != nil {
+		pageBudget.exhausted = true
+		captureNodeScreenshots = false
+	}
+	fullPageReservation := fullPageScreenshotReservation{}
+	if captureErr == nil {
+		fullPageReservation = budget.reserveFullPageScreenshot(pageBudget)
+	}
+	defer func() {
+		if fullPageReservation.active {
+			budget.settleFullPageScreenshot(pageBudget, &fullPageReservation, 0)
+		}
+	}()
+	nodeIdx = captureViolationNodeScreenshots(tabCtx, result.Violations, scanID, captureDir, page, nodeIdx, budget, pageBudget, captureNodeScreenshots)
+	nodeIdx = captureViolationNodeScreenshots(tabCtx, result.Incomplete, scanID, captureDir, page, nodeIdx, budget, pageBudget, captureNodeScreenshots)
 
 	// Take a full-page screenshot (last, since it alters viewport metrics)
-	screenshot, err = captureFullPage(tabCtx)
+	fullPageBudgetOmitted := false
+	if fullPageReservation.active || budget.canCaptureScreenshot(pageBudget) {
+		screenshot, err = captureFullPage(tabCtx)
+	} else {
+		err = fmt.Errorf("screenshot budget reached")
+		fullPageBudgetOmitted = true
+	}
 	if err != nil {
 		if shouldTreatAsCanceled(ctx, err) {
 			result.Canceled = true
@@ -372,13 +695,65 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 		}
 
 		log.Printf("Juicer: warning: failed to take screenshot of %s: %v", page.URL, err)
+		if fullPageBudgetOmitted || errors.Is(err, errFullPagePixelBudget) {
+			markFullPageScreenshotOmitted(&result, fullPageScreenshotBudgetWarning)
+		} else if errors.Is(err, errFullPageLayoutChanged) {
+			markFullPageScreenshotOmitted(&result, fullPageScreenshotChangedWarning)
+		}
 	} else if len(screenshot) > 0 {
 		filename := page.URLID + ".png"
-		screenshotPath := filepath.Join(screenshotDir, filename)
-		if err := screenshots.WriteFile(screenshotPath, screenshot); err != nil {
+		screenshotPath := filepath.Join(captureDir, filename)
+		admitted := false
+		if fullPageReservation.active {
+			admitted = budget.settleFullPageScreenshot(pageBudget, &fullPageReservation, len(screenshot))
+		} else {
+			admitted = budget.reserveScreenshot(pageBudget, len(screenshot))
+		}
+		if !admitted {
+			log.Printf("Juicer: warning: full-page screenshot exceeded evidence budget for %s", page.URL)
+			markFullPageScreenshotOmitted(&result, fullPageScreenshotBudgetWarning)
+		} else if err := writeReservedScreenshot(screenshotPath, screenshot, budget, pageBudget); err != nil {
 			log.Printf("Juicer: warning: failed to save screenshot for %s: %v", page.URL, err)
 		} else {
 			result.ScreenshotPath = screenshots.StoredPath(scanID, filename)
+		}
+	}
+	if err := verifyPageAuthority(tabCtx, navigation); err != nil {
+		if shouldTreatAsCanceled(ctx, err) {
+			result.Canceled = true
+			return result
+		}
+		result.Error = log.Sprintf("failed to verify page destination for %s: %v", page.URL, err)
+		log.Printf("Juicer: %s", result.Error)
+		return result
+	}
+	// No browser work remains. Closing the proxy waits for every accepted
+	// connection, so no late budget hit can arrive after screenshots publish.
+	if err := proxy.Close(); err != nil {
+		result.Error = log.Sprintf("failed to close browser egress for %s: %v", page.URL, err)
+		log.Printf("Juicer: %s", result.Error)
+		return result
+	}
+	if proxy.BudgetExceeded() {
+		return result
+	}
+	if ctx.Err() != nil {
+		result.Canceled = true
+		return result
+	}
+	if frameTopology.revision.Load() != frameRevision {
+		budget.releaseUncheckpointedAxeResult(result.axeBytes)
+		result = RawResult{URLID: page.URLID, URL: page.URL, Error: "accessibility frame tree changed during audit"}
+		return result
+	}
+	if captureErr == nil {
+		published, err := publishPageScreenshots(captureDir, screenshotDir, pageBudget.staged)
+		budget.reconcilePublishedScreenshots(pageBudget, published)
+		committingScreenshots = true
+		if err != nil {
+			result.Error = log.Sprintf("failed to save screenshots for %s: %v", page.URL, err)
+			log.Printf("Juicer: %s", result.Error)
+			return result
 		}
 	}
 
@@ -393,6 +768,166 @@ func scanSinglePage(ctx context.Context, allocCtx context.Context, page PageInpu
 	return result
 }
 
+func browserBudgetFailure(page PageInput, payloadExceeded, canceled bool) RawResult {
+	result := RawResult{URLID: page.URLID, URL: page.URL, Canceled: canceled}
+	if canceled {
+		return result
+	}
+	if payloadExceeded {
+		result.Error = log.Sprintf("browser network transfer limit exceeded for %s", page.URL)
+	} else {
+		result.Error = log.Sprintf("browser connection budget exceeded for %s", page.URL)
+	}
+	return result
+}
+
+// A page can fetch public cross-origin assets, but evidence belongs only to
+// the submitted host and effective port. Profiler uses the same authority
+// boundary, which permits ordinary same-host HTTP-to-HTTPS redirects.
+func samePageAuthority(submitted, final string) bool {
+	first, err := url.Parse(submitted)
+	if err != nil || (!strings.EqualFold(first.Scheme, "http") && !strings.EqualFold(first.Scheme, "https")) || first.Hostname() == "" {
+		return false
+	}
+	last, err := url.Parse(final)
+	if err != nil || (!strings.EqualFold(last.Scheme, "http") && !strings.EqualFold(last.Scheme, "https")) || last.Hostname() == "" {
+		return false
+	}
+	firstAuthority, firstOK := pageAuthority(first)
+	lastAuthority, lastOK := pageAuthority(last)
+	return firstOK && lastOK && firstAuthority == lastAuthority
+}
+
+func pageAuthority(u *url.URL) (string, bool) {
+	host := u.Hostname()
+	if ip, err := netip.ParseAddr(host); err == nil {
+		host = ip.Unmap().String()
+	} else {
+		ascii, err := idna.Lookup.ToASCII(strings.TrimSuffix(strings.ToLower(host), "."))
+		if err != nil || ascii == "" || strings.ContainsAny(ascii, " /\\:@") {
+			return "", false
+		}
+		host = strings.ToLower(ascii)
+	}
+	defaultPort := uint64(80)
+	if strings.EqualFold(u.Scheme, "https") {
+		defaultPort = 443
+	}
+	port := defaultPort
+	if u.Port() != "" {
+		parsed, err := strconv.ParseUint(u.Port(), 10, 16)
+		if err != nil || parsed == 0 {
+			return "", false
+		}
+		port = parsed
+	}
+	if port == defaultPort {
+		return host, true
+	}
+	return net.JoinHostPort(host, strconv.FormatUint(port, 10)), true
+}
+
+type pageNavigationGuard struct {
+	submitted   string
+	seenAllowed atomic.Bool
+	escaped     atomic.Bool
+}
+
+func (g *pageNavigationGuard) observe(event any) {
+	navigation, ok := event.(*cdppage.EventFrameNavigated)
+	if !ok || navigation.Frame == nil || navigation.Frame.ParentID != "" {
+		return
+	}
+	final := navigation.Frame.URL
+	if final == "about:blank" && !g.seenAllowed.Load() {
+		return
+	}
+	if samePageAuthority(g.submitted, final) {
+		g.seenAllowed.Store(true)
+	} else {
+		g.escaped.Store(true)
+	}
+}
+
+func verifyPageAuthority(ctx context.Context, guard *pageNavigationGuard) error {
+	if guard.escaped.Load() {
+		return errors.New("page navigated outside the submitted host or port")
+	}
+	var final string
+	if err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		frameTree, err := cdppage.GetFrameTree().Do(ctx)
+		if err != nil {
+			return err
+		}
+		if frameTree == nil || frameTree.Frame == nil {
+			return errors.New("missing top-level browser frame")
+		}
+		final = frameTree.Frame.URL
+		return nil
+	})); err != nil {
+		return err
+	}
+	if guard.escaped.Load() || !samePageAuthority(guard.submitted, final) {
+		return errors.New("page navigated outside the submitted host or port")
+	}
+	return nil
+}
+
+type publishedScreenshot struct {
+	name            string
+	replacedRegular bool
+	replacedBytes   int64
+}
+
+func writeReservedScreenshot(path string, data []byte, budget *scanEvidenceBudget, page *pageScreenshotBudget) error {
+	name := filepath.Base(path)
+	if _, exists := page.staged[name]; exists {
+		budget.releaseScreenshot(page, len(data))
+		return fmt.Errorf("duplicate staged screenshot %q", name)
+	}
+	if err := screenshots.WriteFile(path, data); err != nil {
+		budget.releaseScreenshot(page, len(data))
+		_ = os.Remove(path)
+		return err
+	}
+	if page.staged == nil {
+		page.staged = make(map[string]int64)
+	}
+	page.staged[name] = int64(len(data))
+	return nil
+}
+
+func publishPageScreenshots(captureDir, screenshotDir string, staged map[string]int64) ([]publishedScreenshot, error) {
+	files, err := os.ReadDir(captureDir)
+	if err != nil {
+		return nil, err
+	}
+	published := make([]publishedScreenshot, 0, len(files))
+	for _, file := range files {
+		if !file.Type().IsRegular() {
+			return published, fmt.Errorf("unexpected screenshot staging entry %q", file.Name())
+		}
+		if _, admitted := staged[file.Name()]; !admitted {
+			return published, fmt.Errorf("unreserved screenshot staging entry %q", file.Name())
+		}
+		destination := filepath.Join(screenshotDir, file.Name())
+		prior, err := os.Lstat(destination)
+		if err != nil && !os.IsNotExist(err) {
+			return published, err
+		}
+		if err := os.Rename(filepath.Join(captureDir, file.Name()), destination); err != nil {
+			return published, err
+		}
+		replacement := publishedScreenshot{name: file.Name()}
+		if err == nil && prior.Mode().IsRegular() {
+			replacement.replacedRegular = true
+			replacement.replacedBytes = prior.Size()
+		}
+		published = append(published, replacement)
+	}
+	return published, nil
+}
+
 func shouldTreatAsCanceled(ctx context.Context, err error) bool {
 	// ctx is the parent scan run, not the per-page timeout. Chromium startup
 	// errors can lose the cancellation cause when the browser is terminated.
@@ -401,13 +936,32 @@ func shouldTreatAsCanceled(ctx context.Context, err error) bool {
 	return err != nil && ctx.Err() != nil
 }
 
-func captureViolationNodeScreenshots(ctx context.Context, violations []Violation, scanID, screenshotDir string, page PageInput, startIndex int) int {
+func captureViolationNodeScreenshots(ctx context.Context, violations []Violation, scanID, screenshotDir string, page PageInput, startIndex int, budget *scanEvidenceBudget, pageBudget *pageScreenshotBudget, captureAllowed bool) int {
 	nodeIdx := startIndex
 
 	for vi := range violations {
 		for ni := range violations[vi].Nodes {
 			node := &violations[vi].Nodes[ni]
 			if len(node.Target) == 0 {
+				nodeIdx++
+				continue
+			}
+			if node.CaptureSuppressed && len(node.Target) > 1 {
+				// A top-frame screenshot of this selector would mark the iframe,
+				// not the affected element inside it.
+				if !strings.Contains(node.HTML, frameScreenshotWarning) {
+					node.HTML += "\n" + frameScreenshotWarning
+				}
+				nodeIdx++
+				continue
+			}
+			if !captureAllowed || node.CaptureSuppressed {
+				markScreenshotOmitted(node)
+				nodeIdx++
+				continue
+			}
+			if !budget.canCaptureScreenshot(pageBudget) {
+				markScreenshotOmitted(node)
 				nodeIdx++
 				continue
 			}
@@ -434,13 +988,17 @@ func captureViolationNodeScreenshots(ctx context.Context, violations []Violation
 			if len(elemScreenshot) >= elementScreenshotMinByteSize {
 				filename := fmt.Sprintf("%s_focus_%d.png", page.URLID, nodeIdx)
 				elemPath := filepath.Join(screenshotDir, filename)
-				if err := screenshots.WriteFile(elemPath, elemScreenshot); err != nil {
+				if !budget.reserveScreenshot(pageBudget, len(elemScreenshot)) {
+					markScreenshotOmitted(node)
+				} else if err := writeReservedScreenshot(elemPath, elemScreenshot, budget, pageBudget); err != nil {
 					log.Printf("Juicer: warning: failed to save element screenshot: %v", err)
 				} else {
 					node.ElementScreenshotPath = screenshots.StoredPath(scanID, filename)
 
 					if len(previewScreenshot) >= elementScreenshotMinByteSize {
-						if err := screenshots.WriteFile(focusedPreviewPath(elemPath), previewScreenshot); err != nil {
+						if !budget.reserveScreenshot(pageBudget, len(previewScreenshot)) {
+							markScreenshotOmitted(node)
+						} else if err := writeReservedScreenshot(focusedPreviewPath(elemPath), previewScreenshot, budget, pageBudget); err != nil {
 							log.Printf("Juicer: warning: failed to save preview screenshot: %v", err)
 						}
 					}
@@ -454,9 +1012,496 @@ func captureViolationNodeScreenshots(ctx context.Context, violations []Violation
 	return nodeIdx
 }
 
+func markScreenshotOmitted(node *Node) {
+	if strings.Contains(node.HTML, screenshotBudgetWarning) {
+		return
+	}
+	node.HTML += "\n" + screenshotBudgetWarning
+}
+
+func markFullPageScreenshotOmitted(result *RawResult, warning string) {
+	for _, group := range [][]Violation{result.Violations, result.Incomplete} {
+		for vi := range group {
+			if len(group[vi].Nodes) == 0 {
+				continue
+			}
+			node := &group[vi].Nodes[0]
+			if !strings.Contains(node.HTML, warning) {
+				node.HTML += "\n" + warning
+			}
+			return
+		}
+	}
+}
+
+// auditChildFrames avoids axe's postMessage frame transport: page-owned axe in a
+// child can otherwise answer the isolated top world's audit request.
+func auditChildFrames(ctx context.Context, topContextID runtime.ExecutionContextID, worldEvents <-chan *runtime.ExecutionContextDescription, runScript string, initialRawBytes int, combined *axeResult, tracker *frameTopologyTracker) error {
+	usedRawBytes := initialRawBytes
+	if usedRawBytes > maxPageAxeResultBytes {
+		return errors.New("accessibility result exceeds the page budget")
+	}
+	if err := auditSameProcessFrames(ctx, topContextID, worldEvents, runScript, &usedRawBytes, nil, combined); err != nil {
+		return err
+	}
+	return auditOOPIFFrames(ctx, topContextID, runScript, &usedRawBytes, combined, tracker)
+}
+
+func auditSameProcessFrames(ctx context.Context, topContextID runtime.ExecutionContextID, worldEvents <-chan *runtime.ExecutionContextDescription, runScript string, usedRawBytes *int, rootPrefix []string, combined *axeResult) error {
+	var tree *cdppage.FrameTree
+	if err := chromedp.Run(ctx, chromedp.ActionFunc(func(actionCtx context.Context) error {
+		var err error
+		tree, err = cdppage.GetFrameTree().Do(actionCtx)
+		return err
+	})); err != nil {
+		return err
+	}
+	if tree == nil || tree.Frame == nil {
+		return errors.New("main frame is unavailable")
+	}
+	type pendingFrame struct {
+		frame  *cdppage.FrameTree
+		prefix []string
+	}
+	contexts := map[cdp.FrameID]runtime.ExecutionContextID{tree.Frame.ID: topContextID}
+	queue := make([]pendingFrame, 0, len(tree.ChildFrames))
+	for _, child := range tree.ChildFrames {
+		queue = append(queue, pendingFrame{frame: child, prefix: rootPrefix})
+	}
+	if len(queue) > 64 {
+		return errors.New("too many accessibility frames")
+	}
+	processed := 0
+	for len(queue) > 0 {
+		processed++
+		if processed > 64 {
+			return errors.New("too many accessibility frames")
+		}
+		item := queue[0]
+		queue = queue[1:]
+		if item.frame == nil || item.frame.Frame == nil {
+			return errors.New("child frame is unavailable")
+		}
+		frame := item.frame.Frame
+		parentContextID, ok := contexts[frame.ParentID]
+		if !ok {
+			return errors.New("child frame parent is unavailable")
+		}
+		var selector string
+		var contextID runtime.ExecutionContextID
+		if err := chromedp.Run(ctx, chromedp.ActionFunc(func(actionCtx context.Context) error {
+			backendID, _, err := cdpdom.GetFrameOwner(frame.ID).Do(actionCtx)
+			if err != nil {
+				return err
+			}
+			owner, err := cdpdom.ResolveNode().WithBackendNodeID(backendID).WithExecutionContextID(parentContextID).Do(actionCtx)
+			if err != nil || owner == nil || owner.ObjectID == "" {
+				return fmt.Errorf("resolve child frame owner: %v", err)
+			}
+			value, exception, err := runtime.CallFunctionOn(`function () {
+				const doc = this.ownerDocument;
+				const parts = [];
+				for (let element = this; element && element.nodeType === 1; element = element.parentElement) {
+					if (element.id) {
+						const byId = '#' + CSS.escape(element.id);
+						if (doc.querySelectorAll(byId).length === 1) {
+							parts.unshift(byId);
+							return parts.join(' > ');
+						}
+					}
+					const tag = element.localName;
+					const siblings = element.parentElement ? Array.from(element.parentElement.children).filter(child => child.localName === tag) : [];
+					parts.unshift(siblings.length > 1 ? tag + ':nth-of-type(' + (siblings.indexOf(element) + 1) + ')' : tag);
+					const candidate = parts.join(' > ');
+					if (doc.querySelectorAll(candidate).length === 1) return candidate;
+				}
+				return parts.join(' > ');
+			}`).WithObjectID(owner.ObjectID).WithReturnByValue(true).Do(actionCtx)
+			if err != nil || exception != nil || value == nil {
+				return fmt.Errorf("select child frame owner: %v, exception: %+v", err, exception)
+			}
+			if err := json.Unmarshal(value.Value, &selector); err != nil || selector == "" {
+				return fmt.Errorf("decode child frame selector: %v", err)
+			}
+			if len(selector) > maxAxeSelectorChars {
+				return errors.New("child frame selector exceeds accessibility evidence limit")
+			}
+			contextID, err = cdppage.CreateIsolatedWorld(frame.ID).WithWorldName("lime-axe").Do(actionCtx)
+			return err
+		})); err != nil {
+			return err
+		}
+		if contextID == 0 {
+			return errors.New("isolated child axe context is unavailable")
+		}
+		var uniqueID string
+		for uniqueID == "" {
+			select {
+			case world := <-worldEvents:
+				if world != nil && world.ID == contextID {
+					uniqueID = world.UniqueID
+				}
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		contexts[frame.ID] = contextID
+		if err := chromedp.Run(ctx,
+			chromedp.Evaluate(axeMinJS, nil, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithUniqueContextID(uniqueID) }),
+		); err != nil {
+			return err
+		}
+		var raw string
+		if err := chromedp.Run(ctx,
+			chromedp.Evaluate(runScript, &raw, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+				return p.WithUniqueContextID(uniqueID).WithAwaitPromise(true)
+			}),
+		); err != nil {
+			return err
+		}
+		if len(raw) > maxPageAxeResultBytes-*usedRawBytes {
+			return errors.New("child accessibility result exceeds the page budget")
+		}
+		*usedRawBytes += len(raw)
+		var childResult axeResult
+		if err := json.Unmarshal([]byte(raw), &childResult); err != nil {
+			return err
+		}
+		if childResult.LimitError != "" {
+			return fmt.Errorf("child accessibility evidence limit exceeded: %s", childResult.LimitError)
+		}
+		_, combinedNodes := axeEvidenceCounts(*combined)
+		_, childNodes := axeEvidenceCounts(childResult)
+		if mergedAxeRuleCount(*combined, childResult) > maxAxeRules || combinedNodes+childNodes > maxAxeNodes {
+			return errors.New("child accessibility rules or nodes exceed the page budget")
+		}
+		prefix := append(append([]string(nil), item.prefix...), selector)
+		if len(prefix) >= maxAxeTargetParts {
+			return errors.New("child frame depth exceeds accessibility target limit")
+		}
+		prefixAxeTargets(&childResult, prefix)
+		if !validAxeTargets(childResult) {
+			return errors.New("child accessibility target exceeds the evidence limit")
+		}
+		mergeAxeResults(combined, childResult)
+		if len(queue)+len(item.frame.ChildFrames) > 64 {
+			return errors.New("too many accessibility frames")
+		}
+		for _, child := range item.frame.ChildFrames {
+			queue = append(queue, pendingFrame{frame: child, prefix: prefix})
+		}
+	}
+	return nil
+}
+
+func auditOOPIFFrames(ctx context.Context, topContextID runtime.ExecutionContextID, runScript string, usedRawBytes *int, combined *axeResult, tracker *frameTopologyTracker) error {
+	var infos []*cdptarget.Info
+	if err := chromedp.Run(ctx, chromedp.ActionFunc(func(actionCtx context.Context) error {
+		var err error
+		infos, err = cdptarget.GetTargets().Do(cdp.WithExecutor(actionCtx, chromedp.FromContext(actionCtx).Browser))
+		return err
+	})); err != nil {
+		return err
+	}
+	return auditOOPIFTargets(ctx, topContextID, runScript, usedRawBytes, combined, infos, tracker)
+}
+
+func auditOOPIFTargets(ctx context.Context, topContextID runtime.ExecutionContextID, runScript string, usedRawBytes *int, combined *axeResult, infos []*cdptarget.Info, tracker *frameTopologyTracker) error {
+	type frameAuditParent struct {
+		ctx       context.Context
+		contextID runtime.ExecutionContextID
+		prefix    []string
+	}
+	parents := []frameAuditParent{{ctx: ctx, contextID: topContextID}}
+	pending := make([]*cdptarget.Info, 0, len(infos))
+	for _, info := range infos {
+		if info != nil && info.Type == "iframe" {
+			pending = append(pending, info)
+		}
+	}
+	if len(pending) > 64 {
+		return errors.New("too many out-of-process accessibility frames")
+	}
+	for len(pending) > 0 {
+		unresolved := make([]*cdptarget.Info, 0)
+		progress := false
+		for _, info := range pending {
+			var selector string
+			var parentPrefix []string
+			var ownerErr error
+			for i := len(parents) - 1; i >= 0; i-- {
+				parent := parents[i]
+				lookupCtx, cancelLookup := context.WithTimeout(parent.ctx, 2*time.Second)
+				ownerErr = chromedp.Run(lookupCtx, chromedp.ActionFunc(func(actionCtx context.Context) error {
+					backendID, _, err := cdpdom.GetFrameOwner(cdp.FrameID(info.TargetID)).Do(actionCtx)
+					if err != nil {
+						return err
+					}
+					owner, err := cdpdom.ResolveNode().WithBackendNodeID(backendID).WithExecutionContextID(parent.contextID).Do(actionCtx)
+					if err != nil || owner == nil || owner.ObjectID == "" {
+						return fmt.Errorf("resolve out-of-process frame owner: %v", err)
+					}
+					value, exception, err := runtime.CallFunctionOn(`function () {
+				const doc = this.ownerDocument;
+				const parts = [];
+				for (let element = this; element && element.nodeType === 1; element = element.parentElement) {
+					if (element.id) {
+						const byId = '#' + CSS.escape(element.id);
+						if (doc.querySelectorAll(byId).length === 1) { parts.unshift(byId); return parts.join(' > '); }
+					}
+					const tag = element.localName;
+					const siblings = element.parentElement ? Array.from(element.parentElement.children).filter(child => child.localName === tag) : [];
+					parts.unshift(siblings.length > 1 ? tag + ':nth-of-type(' + (siblings.indexOf(element) + 1) + ')' : tag);
+					const candidate = parts.join(' > ');
+					if (doc.querySelectorAll(candidate).length === 1) return candidate;
+				}
+				return parts.join(' > ');
+			}`).WithObjectID(owner.ObjectID).WithReturnByValue(true).Do(actionCtx)
+					if err != nil || exception != nil || value == nil {
+						return fmt.Errorf("select out-of-process frame owner: %v, exception: %+v", err, exception)
+					}
+					if err := json.Unmarshal(value.Value, &selector); err != nil || selector == "" {
+						return fmt.Errorf("decode out-of-process frame selector: %v", err)
+					}
+					if len(selector) > maxAxeSelectorChars {
+						return errors.New("out-of-process frame selector exceeds accessibility evidence limit")
+					}
+					return nil
+				}))
+				cancelLookup()
+				if ownerErr == nil {
+					parentPrefix = parent.prefix
+					break
+				}
+			}
+			if ownerErr != nil {
+				unresolved = append(unresolved, info)
+				continue
+			}
+			prefix := append(append([]string(nil), parentPrefix...), selector)
+			if len(prefix) >= maxAxeTargetParts {
+				return errors.New("out-of-process frame depth exceeds accessibility target limit")
+			}
+			frameCtx, cancel := chromedp.NewContext(ctx, chromedp.WithTargetID(info.TargetID))
+			// Keep this target attached until the page context closes. Detaching
+			// it mid-scan can emit frame removal events unrelated to page DOM.
+			if tracker != nil {
+				tracker.watchTarget(frameCtx)
+			}
+			frameEvents := make(chan *runtime.ExecutionContextDescription, 8)
+			chromedp.ListenTarget(frameCtx, func(event any) {
+				created, ok := event.(*runtime.EventExecutionContextCreated)
+				if ok && created.Context != nil && created.Context.Name == "lime-axe" {
+					select {
+					case frameEvents <- created.Context:
+					default:
+					}
+				}
+			})
+			var contextID runtime.ExecutionContextID
+			err := chromedp.Run(frameCtx, chromedp.ActionFunc(func(actionCtx context.Context) error {
+				tree, err := cdppage.GetFrameTree().Do(actionCtx)
+				if err != nil || tree == nil || tree.Frame == nil {
+					return fmt.Errorf("out-of-process frame tree: %v", err)
+				}
+				contextID, err = cdppage.CreateIsolatedWorld(tree.Frame.ID).WithWorldName("lime-axe").Do(actionCtx)
+				return err
+			}))
+			if err != nil {
+				cancel()
+				return err
+			}
+			var uniqueID string
+			for uniqueID == "" {
+				select {
+				case world := <-frameEvents:
+					if world != nil && world.ID == contextID {
+						uniqueID = world.UniqueID
+					}
+				case <-ctx.Done():
+					cancel()
+					return ctx.Err()
+				}
+			}
+			var raw string
+			err = chromedp.Run(frameCtx,
+				chromedp.Evaluate(axeMinJS, nil, func(p *runtime.EvaluateParams) *runtime.EvaluateParams { return p.WithUniqueContextID(uniqueID) }),
+				chromedp.Evaluate(runScript, &raw, func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
+					return p.WithUniqueContextID(uniqueID).WithAwaitPromise(true)
+				}),
+			)
+			if err != nil {
+				return err
+			}
+			if len(raw) > maxPageAxeResultBytes-*usedRawBytes {
+				return errors.New("out-of-process accessibility result exceeds the page budget")
+			}
+			*usedRawBytes += len(raw)
+			var childResult axeResult
+			if err := json.Unmarshal([]byte(raw), &childResult); err != nil {
+				return err
+			}
+			if childResult.LimitError != "" {
+				return fmt.Errorf("out-of-process accessibility evidence limit exceeded: %s", childResult.LimitError)
+			}
+			_, combinedNodes := axeEvidenceCounts(*combined)
+			_, childNodes := axeEvidenceCounts(childResult)
+			if mergedAxeRuleCount(*combined, childResult) > maxAxeRules || combinedNodes+childNodes > maxAxeNodes {
+				return errors.New("out-of-process accessibility rules or nodes exceed the page budget")
+			}
+			prefixAxeTargets(&childResult, prefix)
+			if !validAxeTargets(childResult) {
+				return errors.New("out-of-process accessibility target exceeds the evidence limit")
+			}
+			mergeAxeResults(combined, childResult)
+			if err := auditSameProcessFrames(frameCtx, contextID, frameEvents, runScript, usedRawBytes, prefix, combined); err != nil {
+				return err
+			}
+			parents = append(parents, frameAuditParent{ctx: frameCtx, contextID: contextID, prefix: prefix})
+			progress = true
+		}
+		if !progress {
+			return errors.New("out-of-process frame parent could not be resolved")
+		}
+		pending = unresolved
+	}
+	return nil
+}
+
+func prefixAxeTargets(result *axeResult, prefix []string) {
+	for _, rules := range [][]Violation{result.Violations, result.Incomplete} {
+		for ri := range rules {
+			for ni := range rules[ri].Nodes {
+				node := &rules[ri].Nodes[ni]
+				node.Target = append(append([]string(nil), prefix...), node.Target...)
+				node.CaptureSuppressed = true
+				for related := range node.RelatedNodes {
+					node.RelatedNodes[related].Target = append(append([]string(nil), prefix...), node.RelatedNodes[related].Target...)
+				}
+			}
+		}
+	}
+}
+
+func validAxeTargets(result axeResult) bool {
+	for _, rules := range [][]Violation{result.Violations, result.Incomplete} {
+		for _, rule := range rules {
+			for _, node := range rule.Nodes {
+				if len(node.Target) > maxAxeTargetParts {
+					return false
+				}
+				for _, related := range node.RelatedNodes {
+					if len(related.Target) > maxAxeTargetParts {
+						return false
+					}
+				}
+			}
+		}
+	}
+	return true
+}
+
+func axeEvidenceCounts(result axeResult) (rules, nodes int) {
+	rules = len(result.Violations) + len(result.Incomplete) + len(result.Passes) + len(result.NotApplicable)
+	for _, rule := range result.Violations {
+		nodes += len(rule.Nodes)
+	}
+	for _, rule := range result.Incomplete {
+		nodes += len(rule.Nodes)
+	}
+	return rules, nodes
+}
+
+func mergedAxeRuleCount(a, b axeResult) int {
+	seen := make(map[string]struct{})
+	for _, result := range []axeResult{a, b} {
+		for _, rule := range result.Violations {
+			seen["violations:"+rule.ID] = struct{}{}
+		}
+		for _, rule := range result.Incomplete {
+			seen["incomplete:"+rule.ID] = struct{}{}
+		}
+		for _, rule := range result.Passes {
+			seen["passes:"+rule.ID] = struct{}{}
+		}
+		for _, rule := range result.NotApplicable {
+			seen["notApplicable:"+rule.ID] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
+func mergeAxeResults(dst *axeResult, src axeResult) {
+	mergeRules := func(dstRules *[]Violation, srcRules []Violation) {
+		for _, rule := range srcRules {
+			found := false
+			for i := range *dstRules {
+				if (*dstRules)[i].ID == rule.ID {
+					(*dstRules)[i].Nodes = append((*dstRules)[i].Nodes, rule.Nodes...)
+					found = true
+					break
+				}
+			}
+			if !found {
+				*dstRules = append(*dstRules, rule)
+			}
+		}
+	}
+	mergeRules(&dst.Violations, src.Violations)
+	mergeRules(&dst.Incomplete, src.Incomplete)
+	addIDs := func(dstIDs *[]RuleID, srcIDs []RuleID) {
+		for _, id := range srcIDs {
+			found := false
+			for _, existing := range *dstIDs {
+				if existing.ID == id.ID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				*dstIDs = append(*dstIDs, id)
+			}
+		}
+	}
+	addIDs(&dst.Passes, src.Passes)
+	addIDs(&dst.NotApplicable, src.NotApplicable)
+	active := make(map[string]bool)
+	for _, rule := range dst.Violations {
+		active[rule.ID] = true
+	}
+	for _, rule := range dst.Incomplete {
+		active[rule.ID] = true
+	}
+	for _, id := range dst.Passes {
+		active[id.ID] = true
+	}
+	passes := dst.Passes[:0]
+	for _, id := range dst.Passes {
+		violated := false
+		for _, rule := range dst.Violations {
+			violated = violated || rule.ID == id.ID
+		}
+		for _, rule := range dst.Incomplete {
+			violated = violated || rule.ID == id.ID
+		}
+		if !violated {
+			passes = append(passes, id)
+		}
+	}
+	dst.Passes = passes
+	remaining := dst.NotApplicable[:0]
+	for _, id := range dst.NotApplicable {
+		if !active[id.ID] {
+			remaining = append(remaining, id)
+		}
+	}
+	dst.NotApplicable = remaining
+}
+
 func lighthouseAxeRunOptions() axeRunOptions {
 	return axeRunOptions{
 		ElementRef: true,
+		Iframes:    false,
 		RunOnly: axeRunOnly{
 			Type:   "tag",
 			Values: []string{"wcag2a", "wcag2aa"},
@@ -483,16 +1528,46 @@ func lighthouseAxeRunScript() (string, error) {
 
 	return fmt.Sprintf(`(async () => {
 		const axe = window.axe;
+		const maxNodes = %d;
+		const maxRules = %d;
+		const maxHTMLChars = %d;
+		const maxSummaryChars = %d;
+		const maxSelectorChars = %d;
+		const maxTargetParts = %d;
+		const maxResultBytes = %d;
+		const truncatedMarker = "\n<!-- LIME evidence warning: HTML snippet truncated -->";
+		const outerHTMLBudgetWarning = %q;
+		%s
+		const encoder = new TextEncoder();
+		let targetLimitExceeded = false;
+		let resultTooLarge = false;
+		let serializedNodeBytes = 0;
+		const boundedText = (value, limit, marker = "... [truncated]") => {
+			const text = typeof value === "string" ? value : "";
+			return text.length > limit ? text.slice(0, limit) + marker : text;
+		};
+		const boundedTarget = (target) => {
+			if (!Array.isArray(target)) return [];
+			if (target.length > maxTargetParts || target.some((part) => typeof part !== "string" || part.length > maxSelectorChars)) {
+				targetLimitExceeded = true;
+				return [];
+			}
+			return target;
+		};
 		const impactToNumber = (impact) => [null, "minor", "moderate", "serious", "critical"].indexOf(impact);
 		const describeElement = (element, fallbackTarget) => {
 			let html = "";
 			try {
-				html = element && element.outerHTML ? element.outerHTML : "";
+				if (element && !canSerializeOuterHTML(element)) {
+					html = outerHTMLBudgetWarning;
+				} else {
+					html = element ? element.outerHTML || "" : "";
+				}
 			} catch (_) {}
 
 			return {
-				html,
-				target: Array.isArray(fallbackTarget) ? fallbackTarget : [],
+				html: boundedText(html, maxHTMLChars, truncatedMarker),
+				target: boundedTarget(fallbackTarget),
 			};
 		};
 
@@ -530,16 +1605,23 @@ func lighthouseAxeRunScript() (string, error) {
 			helpUrl: result.helpUrl,
 			impact: result.impact,
 			tags: result.tags || [],
-			nodes: (result.nodes || []).map((node) => {
-				const element = node.element || null;
-				const details = describeElement(element, node.target);
-				return {
-					html: details.html,
-					target: details.target,
-					failureSummary: node.failureSummary || "",
-					relatedNodes: collectRelatedNodes(node, element),
-				};
-			}),
+				nodes: (result.nodes || []).map((node) => {
+					if (resultTooLarge) return null;
+					const element = node.element || null;
+					const details = describeElement(element, node.target);
+					const serializedNode = {
+						html: details.html,
+						target: details.target,
+						failureSummary: boundedText(node.failureSummary, maxSummaryChars),
+						relatedNodes: collectRelatedNodes(node, element),
+					};
+					serializedNodeBytes += encoder.encode(JSON.stringify(serializedNode)).length;
+					if (serializedNodeBytes > maxResultBytes) {
+						resultTooLarge = true;
+						return null;
+					}
+					return serializedNode;
+				}),
 		});
 
 		axe.configure({
@@ -557,18 +1639,35 @@ func lighthouseAxeRunScript() (string, error) {
 		try {
 			const axeResults = await axe.run(document, %s);
 			document.documentElement.scrollTop = 0;
+			const violations = axeResults.violations || [];
+			const incomplete = axeResults.incomplete || [];
+			const notApplicable = axeResults.inapplicable || [];
+			const passes = axeResults.passes || [];
+			const ruleCount = violations.length + incomplete.length + notApplicable.length + passes.length;
+			const nodeCount = [...violations, ...incomplete].reduce((count, rule) => count + (rule.nodes || []).length, 0);
+			if (ruleCount > maxRules || nodeCount > maxNodes) {
+				return JSON.stringify({limitError: "too many accessibility rules or affected nodes"});
+			}
 
-			return JSON.stringify({
-				violations: (axeResults.violations || []).map(serializeRuleResult),
-				incomplete: (axeResults.incomplete || []).map(serializeRuleResult),
-				notApplicable: (axeResults.inapplicable || []).map((result) => ({id: result.id})),
-				passes: (axeResults.passes || []).map((result) => ({id: result.id})),
+			const resultObject = {
+				violations: violations.map(serializeRuleResult),
+				incomplete: incomplete.map(serializeRuleResult),
+				notApplicable: notApplicable.map((result) => ({id: result.id})),
+				passes: passes.map((result) => ({id: result.id})),
 				version: axeResults.testEngine && axeResults.testEngine.version ? axeResults.testEngine.version : "",
-			});
+			};
+			if (targetLimitExceeded || resultTooLarge) {
+				return JSON.stringify({limitError: "serialized accessibility evidence is too large"});
+			}
+			const serialized = JSON.stringify(resultObject);
+			if (encoder.encode(serialized).length > maxResultBytes) {
+				return JSON.stringify({limitError: "serialized accessibility evidence is too large"});
+			}
+			return serialized;
 		} finally {
 			window.scrollTo(originalScrollPosition.x, originalScrollPosition.y);
 		}
-	})()`, configJSON), nil
+	})()`, maxAxeNodes, maxAxeRules, maxAxeHTMLChars, maxAxeSummaryChars, maxAxeSelectorChars, maxAxeTargetParts, maxPageAxeResultBytes, outerHTMLBudgetWarning, outerHTMLPreflightScript(), configJSON), nil
 }
 
 func waitForPageSettle(ctx context.Context) error {
@@ -647,7 +1746,11 @@ func assignCaptureIndices(ctx context.Context, violations []Violation) error {
 	if err != nil {
 		return err
 	}
+	assignCaptureIndicesFromCandidates(violations, candidates)
+	return nil
+}
 
+func assignCaptureIndicesFromCandidates(violations []Violation, candidates map[string][]captureCandidate) {
 	state := captureAssignmentState{
 		exactCursor:    make(map[string]int),
 		selectorCursor: make(map[string]int),
@@ -659,8 +1762,17 @@ func assignCaptureIndices(ctx context.Context, violations []Violation) error {
 			if len(node.Target) == 0 {
 				continue
 			}
+			if node.CaptureSuppressed {
+				continue
+			}
 
-			index, ok := selectCaptureIndex(node.Target[0], node.HTML, candidates[node.Target[0]], &state)
+			selector := strings.TrimSpace(node.Target[0])
+			matches, exists := candidates[selector]
+			if exists && matches == nil {
+				node.CaptureSuppressed = true
+				continue
+			}
+			index, ok := selectCaptureIndex(selector, node.HTML, matches, &state)
 			if !ok {
 				continue
 			}
@@ -669,8 +1781,6 @@ func assignCaptureIndices(ctx context.Context, violations []Violation) error {
 			node.HasCaptureIndex = true
 		}
 	}
-
-	return nil
 }
 
 func uniqueCaptureSelectors(violations []Violation) []string {
@@ -680,6 +1790,9 @@ func uniqueCaptureSelectors(violations []Violation) []string {
 	for _, violation := range violations {
 		for _, node := range violation.Nodes {
 			if len(node.Target) == 0 {
+				continue
+			}
+			if node.CaptureSuppressed {
 				continue
 			}
 
@@ -705,28 +1818,89 @@ func collectCaptureCandidates(ctx context.Context, selectors []string) (map[stri
 		return nil, err
 	}
 
-	var candidates map[string][]captureCandidate
-	script := fmt.Sprintf(`(() => {
-		const selectors = %s;
-		const describe = (selector) => {
-			try {
-				return Array.from(document.querySelectorAll(selector)).map((el, index) => ({
-					index,
-					html: el.outerHTML || ""
-				}));
-			} catch (_) {
-				return [];
-			}
-		};
-
-		return Object.fromEntries(selectors.map((selector) => [selector, describe(selector)]));
-	})()`, payload)
-
-	if err := chromedp.Run(ctx, chromedp.Evaluate(script, &candidates)); err != nil {
+	var resultJSON string
+	if err := chromedp.Run(ctx, chromedp.Evaluate(captureCandidateScript(payload), &resultJSON)); err != nil {
 		return nil, err
 	}
+	return decodeCaptureCandidates(resultJSON)
+}
 
-	return candidates, nil
+func captureCandidateScript(payload []byte) string {
+	return fmt.Sprintf(`(() => {
+		const selectors = %s;
+		const maxCandidates = %d;
+		const maxHTMLChars = %d;
+		const maxResultBytes = %d;
+		%s
+		const encoder = new TextEncoder();
+		const candidates = Object.create(null);
+		let estimatedBytes = 0;
+		let exhausted = false;
+		const limitError = () => JSON.stringify({limitError: "element screenshot matching exceeds the evidence budget"});
+		for (const selector of selectors) {
+			if (exhausted) {
+				candidates[selector] = null;
+				continue;
+			}
+			let nodes;
+			try {
+				nodes = document.querySelectorAll(selector);
+			} catch (_) {
+				candidates[selector] = [];
+				continue;
+			}
+			if (nodes.length > maxCandidates) {
+				candidates[selector] = null;
+				continue;
+			}
+			const matches = [];
+			let selectorBytes = 0;
+			let suppressed = false;
+			for (let index = 0; index < nodes.length; index++) {
+				if (!canSerializeOuterHTML(nodes[index])) {
+					suppressed = true;
+					break;
+				}
+				const html = nodes[index].outerHTML || "";
+				if (html.length > maxHTMLChars) {
+					suppressed = true;
+					break;
+				}
+				selectorBytes += encoder.encode(JSON.stringify({selector, index, html})).length;
+				if (estimatedBytes + selectorBytes > maxResultBytes) {
+					exhausted = true;
+					suppressed = true;
+					break;
+				}
+				matches.push({index, html});
+			}
+			if (suppressed) {
+				candidates[selector] = null;
+				continue;
+			}
+			estimatedBytes += selectorBytes;
+			candidates[selector] = matches;
+		}
+		const result = JSON.stringify({candidates});
+		return encoder.encode(result).length > maxResultBytes ? limitError() : result;
+	})()`, payload, maxCaptureCandidates, maxCaptureCandidateSize, maxCaptureResultBytes, outerHTMLPreflightScript())
+}
+
+func decodeCaptureCandidates(resultJSON string) (map[string][]captureCandidate, error) {
+	if len(resultJSON) > maxCaptureResultBytes {
+		return nil, errCaptureCandidateBudget
+	}
+	var result struct {
+		Candidates map[string][]captureCandidate `json:"candidates"`
+		LimitError string                        `json:"limitError"`
+	}
+	if err := json.Unmarshal([]byte(resultJSON), &result); err != nil {
+		return nil, err
+	}
+	if result.LimitError != "" {
+		return nil, errCaptureCandidateBudget
+	}
+	return result.Candidates, nil
 }
 
 func selectCaptureIndex(selector, html string, candidates []captureCandidate, state *captureAssignmentState) (int, bool) {
@@ -1287,13 +2461,41 @@ func captureViewport(ctx context.Context) ([]byte, error) {
 	return screenshot, nil
 }
 
+type fullPageDimensions struct {
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+}
+
+func measureFullPage(ctx context.Context) (fullPageDimensions, error) {
+	var dimensions fullPageDimensions
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`(() => {
+		const root = document.documentElement;
+		const body = document.body;
+		return {
+			width: Math.max(window.innerWidth, root.scrollWidth, body ? body.scrollWidth : 0),
+			height: Math.max(window.innerHeight, root.scrollHeight, body ? body.scrollHeight : 0)
+		};
+	})()`, &dimensions)); err != nil {
+		return fullPageDimensions{}, err
+	}
+	return dimensions, nil
+}
+
 func captureFullPage(ctx context.Context) ([]byte, error) {
+	dimensions, err := measureFullPage(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !withinFullPagePixelBudget(dimensions.Width, dimensions.Height) {
+		return nil, errFullPagePixelBudget
+	}
 	var screenshot []byte
-	err := chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+	err = chromedp.Run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		data, err := cdppage.CaptureScreenshot().
 			WithCaptureBeyondViewport(true).
 			WithFromSurface(true).
 			WithFormat(cdppage.CaptureScreenshotFormatPng).
+			WithClip(&cdppage.Viewport{X: 0, Y: 0, Width: dimensions.Width, Height: dimensions.Height, Scale: 1}).
 			Do(ctx)
 		if err != nil {
 			return err
@@ -1303,6 +2505,13 @@ func captureFullPage(ctx context.Context) ([]byte, error) {
 	}))
 	if err != nil {
 		return nil, err
+	}
+	current, err := measureFullPage(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if current.Width > dimensions.Width || current.Height > dimensions.Height {
+		return nil, errFullPageLayoutChanged
 	}
 	return screenshot, nil
 }

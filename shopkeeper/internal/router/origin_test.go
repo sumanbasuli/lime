@@ -63,6 +63,7 @@ func TestMountedAPIRoutesRejectCrossOriginBeforeHandlers(t *testing.T) {
 	// scan creation reaches its database dependency.
 	router := Setup(nil, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/scans", strings.NewReader(`{"sitemap_url":"https://example.test/"}`))
+	req.Host = "localhost"
 	req.Header.Set("Origin", "https://foreign.test")
 	req.Header.Set("Content-Type", "text/plain")
 	w := httptest.NewRecorder()

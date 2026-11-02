@@ -2,17 +2,20 @@ package linkchecker
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	log "github.com/sumanbasuli/lime/shopkeeper/internal/safelog"
 )
 
 type Store interface {
 	RecoverLinkChecks(context.Context) error
 	ReadyLinkCheckIDs(context.Context) ([]string, error)
 	ClaimLinkCheck(context.Context, string) (*models.LinkCheck, error)
+	ObserveLinkCheckRootDNS(context.Context, string, bool, bool) error
+	GuardLinkCheckPrivateRootDial(context.Context, string) (func(), error)
+	// SaveLinkCheck atomically merges changed result rows with job progress.
 	SaveLinkCheck(context.Context, models.LinkCheck, []models.LinkResult) error
 }
 
@@ -92,10 +95,14 @@ func (r *Runner) poll(ctx context.Context) {
 			if job == nil {
 				return
 			}
-			final, results, err := r.checker.Run(runCtx, *job, func(j models.LinkCheck, results []models.LinkResult) error {
+			final, results, err := r.checker.RunObservedDelta(runCtx, *job, func(j models.LinkCheck, results []models.LinkResult) error {
 				persistCtx, persistCancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer persistCancel()
 				return r.store.SaveLinkCheck(persistCtx, j, results)
+			}, func(ctx context.Context, public, nonPublic bool) error {
+				return r.store.ObserveLinkCheckRootDNS(ctx, job.ID, public, nonPublic)
+			}, func(ctx context.Context) (func(), error) {
+				return r.store.GuardLinkCheckPrivateRootDial(ctx, job.ID)
 			})
 			if err != nil && runCtx.Err() == nil {
 				log.Printf("Link check %s: %v", id, err)

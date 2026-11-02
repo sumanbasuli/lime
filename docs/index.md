@@ -9,7 +9,7 @@ LIME is a self-hosted accessibility scanner built with axe-core, Chromium, Postg
 | I want to… | Start here | Continue with |
 | --- | --- | --- |
 | Try LIME on my computer | [Local setup](setup.md) | [Create your first scan](https://lime.heysuman.com/docs/user/first-scan/) |
-| Host an instance for a team | [Docker deployment](deployment/docker.md), [Debian](deployment/debian.md), or [Fly.io](deployment/fly.md) | [Backups and restore](deployment/backup-restore.md), then [updates](deployment/updates.md) |
+| Host an instance for a team | [Docker deployment](deployment/docker.md) or [Debian](deployment/debian.md) | [Backups and restore](deployment/backup-restore.md), then [updates](deployment/updates.md) |
 | Fix an installation or scan problem | [Operator troubleshooting](deployment/troubleshooting.md) | [Setup diagnostics](setup.md) |
 | Connect an AI tool | [User MCP guide](https://lime.heysuman.com/docs/user/mcp/) | [MCP protocol and integration reference](mcp.md) |
 | Use the LIME agent | [User agent guide](https://lime.heysuman.com/docs/user/agent/) | [Agent and OpenClaw reference](agent.md) |
@@ -22,7 +22,6 @@ LIME is a self-hosted accessibility scanner built with axe-core, Chromium, Postg
 - [Local setup](setup.md): prerequisites, ports, environment variables, and Docker or native development.
 - [Docker deployment](deployment/docker.md): release bundles, pinned images, persistence, and reverse proxies.
 - [Debian deployment](deployment/debian.md): native Linux services and installation paths.
-- [Fly.io deployment](deployment/fly.md): separate backend and UI apps, private networking, and persistent screenshots.
 - [Backups and restore](deployment/backup-restore.md): protect both PostgreSQL data and screenshot evidence before changes.
 - [Updating LIME](deployment/updates.md): upgrade choices, migration and rollback limits, and the update notice.
 - [Operator troubleshooting](deployment/troubleshooting.md): work from symptoms to service, database, Chromium, and report checks.

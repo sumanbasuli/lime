@@ -13,6 +13,10 @@ export function handleLinkFixture(request, response, { origin, requests }) {
   if (!pathname.startsWith("/links/")) return false;
   const methodKey = `${request.method} ${pathname}`;
   requests.set(methodKey, (requests.get(methodKey) || 0) + 1);
+  if (url.search) {
+    const queryKey = `${methodKey} ${url.search}`;
+    requests.set(queryKey, (requests.get(queryKey) || 0) + 1);
+  }
   const port = new URL(origin).port;
   const send = (status, body = "", type = "text/html") => {
     if (response.destroyed) return;
@@ -137,7 +141,8 @@ export async function verifyLinkCheckPresentation({ page, navigate, outputDir })
   probe.setDefaultTimeout(20_000);
   const checkId = "00000000-0000-4000-8000-000000000099";
   const apiPath = `/api/link-checks/${checkId}`;
-  const destination = `https://www.linkedin.com/in/verification?tracking=${"long-query-value-".repeat(150)}`;
+  const destination = `https://www.linkedin.com/in/verification-${"long-path-value-".repeat(40)}?tracking=QUERY_TOKEN_CANARY`;
+  const publicDestination = destination.split("?")[0];
   const sources = Array.from({ length: 45 }, (_, index) => ({
     page_url: `https://source.example.test/reference-page?reference=${index + 1}`,
     element: index === 2 ? "page" : "a",
@@ -235,7 +240,8 @@ export async function verifyLinkCheckPresentation({ page, navigate, outputDir })
     assert.equal(await targetSection.locator("article").count(), targets.length);
     for (const [id, icon] of [["target-linkedin", "linkedin"], ["target-github", "github"], ["target-wordpress", "wordpress"], ["target-x", "twitter-x"], ["target-lookalike", "globe2"]]) {
       const savedTarget = targets.find((entry) => entry.id === id);
-      const row = targetSection.locator("article").filter({ has: probe.locator(`p[title=${JSON.stringify(savedTarget.target_url)}]`) });
+      const publicTarget = savedTarget.target_url.split("?")[0];
+      const row = targetSection.locator("article").filter({ has: probe.locator(`p[title=${JSON.stringify(publicTarget)}]`) });
       assert.equal(await row.locator("[data-destination-icon]").getAttribute("data-destination-icon"), icon, `${id} uses the expected Bootstrap destination icon`);
       assert.equal(await row.locator("[data-destination-icon] svg").count(), 1);
     }
@@ -258,16 +264,17 @@ export async function verifyLinkCheckPresentation({ page, navigate, outputDir })
     assert.doesNotMatch(await row.innerText(), /profile (?:is )?(?:missing|not found|does not exist)/i, "HTTP 999 does not establish that a LinkedIn profile is missing");
     await probe.setViewportSize({ width: 320, height: 1000 });
     const truncated = await row.locator("p[title]").evaluate((element) => ({ title: element.title, text: element.textContent, ellipsis: getComputedStyle(element).textOverflow, clipped: element.scrollWidth > element.clientWidth }));
-    assert.equal(truncated.title, destination);
-    assert.equal(truncated.text, destination);
+    assert.equal(truncated.title, publicDestination);
+    assert.equal(truncated.text, publicDestination);
     assert.equal(truncated.ellipsis, "ellipsis");
-    assert.ok(truncated.clipped, "Long destination queries are truncated in the collapsed row");
+    assert.ok(truncated.clipped, "Long destination paths are truncated in the collapsed row");
     await measure("collapsed long destination", 320);
     await row.getByRole("button", { name: "Show sources (45)", exact: true }).click();
     await row.getByText("captured-1", { exact: true }).waitFor();
     assert.equal(await row.getByRole("button", { name: "Hide sources (45)", exact: true }).getAttribute("aria-expanded"), "true");
     await row.getByRole("heading", { name: "Referenced from", exact: true }).waitFor();
-    assert.equal(await row.locator("code").filter({ hasText: destination }).textContent(), destination, "The expanded panel retains the full destination URL");
+    assert.equal(await row.locator("code").filter({ hasText: publicDestination }).textContent(), publicDestination, "The expanded panel keeps the public destination path without its query");
+    assert.ok(!(await row.innerText()).includes("QUERY_TOKEN_CANARY"), "Expanded evidence does not show the saved query token");
     const firstSource = row.locator("li").first();
     for (const field of ["Found on", "Element", "Attribute", "Captured text"]) await firstSource.getByText(field, { exact: true }).waitFor();
     await firstSource.getByText("Occurrence 1", { exact: true }).waitFor();
@@ -278,7 +285,7 @@ export async function verifyLinkCheckPresentation({ page, navigate, outputDir })
     await row.getByText("Source page request", { exact: true }).waitFor();
     await row.getByText("This is the source-page inventory entry, not an extracted HTML link.", { exact: true }).waitFor();
     assert.equal(await row.locator("li").count(), 20);
-    const sourcePages = row.getByRole("group", { name: `Source reference pages for ${destination}`, exact: true });
+    const sourcePages = row.getByRole("group", { name: `Source reference pages for ${publicDestination}`, exact: true });
     const controlsFit = await sourcePages.evaluate((group) => {
       const bounds = group.getBoundingClientRect();
       return [...group.querySelectorAll("button")].every((button) => {
@@ -444,7 +451,12 @@ export async function verifyLinkChecks(context) {
     assert.equal(target("/links/unsafe-redirect").status, "blocked");
     assert.equal(results.find((item) => item.target_url.startsWith("http://localhost:")).status, "blocked");
     assert.equal(requests.get("/links/private") || 0, 0);
-    assert.ok(target("/links/good?a=1&b=2"), "Query strings are retained and fragments normalized");
+    const goodTargets = results.filter((item) => item.target_url === fixtureOrigin + "/links/good");
+    assert.equal(goodTargets.length, 2, "Plain and query targets keep distinct result records while their public URLs hide queries");
+    assert.ok(goodTargets.every((item) => item.status === "healthy"));
+    assert.ok((requests.get("HEAD /links/good ?a=1&b=2") || 0) > 0, "The HTTP check retains the submitted query");
+    assert.equal(await verificationSql(`SELECT count(*) FROM link_check_results WHERE link_check_id='${single.id}' AND target_url='${fixtureOrigin}/links/good?a=1&b=2'`), "1", "The private saved target retains its query and normalizes the fragment");
+    assert.ok(results.every((item) => !new URL(item.target_url).search && !new URL(item.target_url).hash), "Public result URLs omit query strings and fragments");
     assert.ok(results.every((item) => /^https?:/.test(item.target_url)), "Non-HTTP protocols are not fetched");
     const broken = target("/links/missing");
     const firstSources = await json(`${endpoint}/${single.id}/results/${broken.id}/sources?limit=2&offset=0`);
@@ -458,6 +470,7 @@ export async function verifyLinkChecks(context) {
     const csv = await (await request(`${endpoint}/${single.id}/export.csv`)).text();
     assert.ok(csv.includes(fixtureOrigin + "/links/missing"));
     assert.ok(csv.includes(fixtureOrigin + "/links/site"));
+    assert.ok(!csv.includes("?a=1&b=2"), "CSV target URLs do not publish the saved query");
     assert.ok(!/(^|[,\r\n])"?=1\+1(?:"|,|\r|\n)/.test(csv), "Spreadsheet formulas must not be executable CSV cells");
     await writeFile(path.join(outputDir, "link-check-results.csv"), csv);
     await navigate(`/links/${single.id}`);
@@ -481,7 +494,7 @@ export async function verifyLinkChecks(context) {
     const sources = await json(`${endpoint}/${crawl.id}/results/${broken.id}/sources?limit=100&offset=0`);
     const sourcePages = new Set(sources.items.map((source) => source.page_url));
     for (const route of ["/links/site", "/links/crawl-a", "/links/crawl-b"]) assert.ok(sourcePages.has(fixtureOrigin + route));
-    assert.ok(results.some((item) => item.target_url === fixtureOrigin + "/links/assets/document.pdf?keep=1"), "HTML base URLs resolve relative document targets");
+    assert.ok(results.some((item) => item.target_url === fixtureOrigin + "/links/assets/document.pdf"), "HTML base URLs resolve relative document targets without publishing their query");
     capped = await create(fixtureOrigin + "/links/crawl-a", "crawl", 1);
     const limited = await wait(capped.id);
     assert.equal(limited.pages_checked, 1);

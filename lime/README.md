@@ -7,7 +7,7 @@ This directory contains LIME's Next.js App Router dashboard. The Go backend in `
 From the repository root:
 
 ```bash
-cp .env.example .env       # only for a new checkout; keep existing configuration
+make init-env             # start Docker first; new checkout/database only
 make start-all            # production Docker stack at http://localhost:3000
 make start-dev            # Docker stack with dashboard hot reload
 ```

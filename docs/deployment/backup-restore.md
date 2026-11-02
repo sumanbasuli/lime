@@ -11,7 +11,7 @@ Keep these together, with the capture time and running application version/tag:
 | Item | Source | Why it matters |
 |------|--------|----------------|
 | PostgreSQL dump/provider snapshot | Database used by **both** services | Scans, URLs, findings, audit evidence, link jobs/destinations/source references, settings, schema version, caches |
-| Screenshot tree | Docker/Fly `/app/screenshots`; native `SHOPKEEPER_SCREENSHOT_DIR` | Full-page, spotlight, and preview PNG evidence under each scan ID |
+| Screenshot tree | Docker `/app/screenshots`; native `SHOPKEEPER_SCREENSHOT_DIR` | Full-page, spotlight, and preview PNG evidence under each scan ID |
 | Protected configuration | Compose/env overrides, systemd env files, or provider secret inventory | Database/backend/UI targets, runtime ports, physical storage paths |
 | Application/catalog version | Release tag/image identifiers and `data/` JSON catalogs | Reproduce the schema, engine, scoring, and read-time guidance |
 
@@ -58,7 +58,7 @@ Also copy any deployment-specific override files and record the actual running i
 
 `make backup-db` creates a SQL gzip under `dist/backups` with restrictive permissions and now fails if `pg_dump` or compression fails. It rejects backup directories with a different owner, group/other write bits, or detected ACLs. Keep the entire path protected from other users' changes, including parent directories; choose a private location if a shared path fails. The command still backs up only the database, not screenshots. Use the complete procedure above and a restore rehearsal instead of trusting only a filename or success message. `gzip -t` checks compression integrity, not completeness of the SQL data. Older backups may retain their original permissions; check and restrict access to them separately.
 
-## External Database And Native/Fly Storage
+## External Database And Native Storage
 
 Use the provider's completed snapshot/backup mechanism, or a compatible host `pg_dump`, with a role that can read all application objects. PostgreSQL's client cannot dump a newer-major server with an older-major `pg_dump`; select the matching client and inspect stderr. [The `pg_dump` reference](https://www.postgresql.org/docs/17/app-pgdump.html) covers version/privilege and format constraints.
 
@@ -73,7 +73,7 @@ gzip -t /absolute/private/backup/database.sql.gz
 
 Replace the service/path with your actual configured backup target; this example does not set up credentials or create the parent directory. Avoid pasting password-bearing connection strings into shared terminal output. A dump includes one database, not cluster-wide roles/tablespaces: preserve/recreate the required roles or provider grants separately.
 
-For native systemd, stop `lime-ui` and `lime-shopkeeper` after pausing, then copy the configured screenshot root and `/etc/lime` to protected storage along with the DB backup. For Fly, preserve the screenshot volume using the provider's volume backup/export mechanism as well as a database backup. A DB snapshot does not back up the Fly screenshot disk or secrets. None of the bundled update helpers automates this complete recovery set.
+For native systemd, stop `lime-ui` and `lime-shopkeeper` after pausing, then copy the configured screenshot root and `/etc/lime` to protected storage along with the DB backup. None of the bundled update helpers automates this complete recovery set.
 
 ## Restore Rehearsal: Separate Empty Database First
 

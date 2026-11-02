@@ -7,7 +7,7 @@ PostgreSQL stores LIME's scans, progress, findings, audit outcomes, link checks,
 - **Engine**: PostgreSQL 17.
 - **Backend access**: Shopkeeper uses `pgxpool` and owns scan lifecycle writes, scan results, screenshots metadata, migrations, and cleanup.
 - **UI access**: the NextJS app uses Drizzle ORM for server-rendered reads and UI-owned settings routes.
-- **Migrations**: SQL migrations live in `shopkeeper/migrations/`; matching Drizzle table definitions live in `lime/src/db/schema.ts`.
+- **Migrations**: SQL migrations in `shopkeeper/migrations/` are authoritative. Drizzle definitions in `lime/src/db/schema.ts` cover the tables the UI reads directly; backend-only Link Checker storage is owned by Shopkeeper.
 
 Both services must connect to the same database. Shopkeeper's pool uses a maximum of 10 connections and minimum of 2; the UI creates a separate `pg.Pool`. Account for both services and maintenance clients in the database's connection budget. There is no distributed scan queue or backend ownership lease: run only one Shopkeeper against a database.
 
@@ -17,9 +17,10 @@ Both services must connect to the same database. Shopkeeper's pool uses a maximu
 scans ── urls ── url_audits / url_audit_occurrences
   │         └── issue_occurrences ── issues
   ├── issues
-  ├── link_checks ── link_check_results
+  ├── scan_discoveries ── scan_discovery_sitemaps / scan_discovery_candidates
+  ├── link_checks ── link_check_results ── link_check_sources
   └── scan_score_summary_cache / scan_issue_summary_cache / scan_report_data_cache
-standalone link_checks (scan_id = null) ── link_check_results
+standalone link_checks (scan_id = null) ── link_check_results ── link_check_sources
 app_settings (one server-wide row, key = 'global')
 mcp_action_requests (durable request UUID reservations and replay responses)
 ```
@@ -44,7 +45,7 @@ Statuses are `pending`, `profiling`, `scanning`, `processing`, `paused`, `comple
 
 ### `urls`
 
-Discovered or provided URLs for a scan.
+The complete, scan-ready discovered list or the provided single-page URL. Checkpointed sitemap discovery does not write partial candidate lists here.
 
 Key fields:
 
@@ -52,6 +53,14 @@ Key fields:
 - URL
 - URL status: `pending`, `scanning`, `completed`, or `failed`
 - created timestamp
+
+### `scan_discoveries`, `scan_discovery_sitemaps`, and `scan_discovery_candidates`
+
+Migration `000020_add_discovery_checkpoints` adds backend-owned state for long sitemap discovery. `scan_discoveries` records the `fetch`, `probe`, or `complete` phase, admission epoch, cumulative HTTP request and XML-byte counters, candidate ordinal, and active-time accounting. `scan_discovery_sitemaps` stores the ordered nested-sitemap frontier and task outcomes. `scan_discovery_candidates` stores distinct raw page candidates in discovery order and their eligible, external, or unresolved probe outcomes. These rows cascade when the parent scan is deleted.
+
+Each profiling admission has an approximately ten-minute fairness slice. Committed tasks, outcomes, and counters survive pending requeues, pause, and restart; unfinished requests may repeat and still consume cumulative budgets. A bounded XML checkpoint or network drain can extend the occupied slot. The former cumulative 30-minute discovery stop does not apply after `000020`. The 20,000-request, 128 MiB aggregate XML, 50 MiB per-document, 10,000-candidate, and depth limits remain. Reaching one fails discovery without making partial results scan-ready.
+
+After all required sitemaps and probes finish, one transaction inserts the deduplicated eligible URLs into `urls`, updates `scans.total_urls`, and changes the discovery phase to `complete`. Until then, `urls` remains empty and a companion link check cannot use partial candidates. Historical scans that already have `urls` but no discovery row remain valid and continue the existing page workflow.
 
 ### `issues`
 
@@ -107,7 +116,9 @@ Key fields:
 Migration `000013_add_link_checks` adds the default-false `scans.include_link_check` selection and two backend-owned tables:
 
 - `link_checks` stores the root URL, mode (`single`, `crawl`, or companion `scan`), nullable unique parent `scan_id`, configured page cap, lifecycle status, progress counters, truncation/error, JSONB summary and internal seed URLs, and timestamps.
-- `link_check_results` stores a deduplicated target URL per check, response category/code/final URL/redirect count, link type, occurrence count, JSONB source references, and optional error/error-kind.
+- `link_check_results` stores a deduplicated target URL per check, response category/code/final URL/redirect count, link type, occurrence count, source-storage version, historical JSONB source references, and optional error/error-kind.
+
+Migration `000019_add_link_source_rows` adds `link_check_sources`, keyed by `(result_id, ordinal)`. New results append each source occurrence once as a JSONB object in its own row, preserving order and duplicates without rewriting a growing parent array. Historical results keep their original arrays and remain readable. A later publication converts only the affected legacy result inside the same transaction; a count mismatch is rejected. Deleting or replacing a result cascades to its source rows. The migration's down file restores complete ordered arrays before dropping the table and refuses a count mismatch, but a production downgrade still requires a deliberate stopped-service recovery plan.
 
 Statuses are `queued`, `running`, `completed`, `failed`, and `cancelled`. Result categories are `healthy`, `redirected`, `broken`, `error`, `blocked`, and `unchecked`; summary `timeout` is a subset of errors, not another result category. Source-preview reads are bounded independently of full source-reference paging.
 
@@ -176,7 +187,7 @@ Current read-path indexes include:
 ## Schema Sync Rules
 
 - Add schema changes through Shopkeeper SQL migrations first.
-- Add matching Drizzle schema changes in the UI.
+- Update matching Drizzle models when a changed table is read directly by the UI. Use Shopkeeper migrations for the full schema; do not use a UI-only schema push to replace backend-owned tables.
 - Keep migrations forward-only in release history.
 - Do not let NextJS become the writer for scan lifecycle or scan result tables.
 - Document materialized read models or cache tables when they are added.

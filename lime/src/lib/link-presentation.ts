@@ -1,4 +1,5 @@
 import type { BootstrapIconName } from "@/components/bootstrap-icon";
+import { redactUrlUserinfo } from "@/lib/url-presentation";
 
 export type LinkPresentation = {
   hostname: string;
@@ -20,7 +21,7 @@ const brands: { hosts: readonly string[]; label: string; icon: BootstrapIconName
 
 /** Presentation only: no network requests, favicon lookups, or destination health inference. */
 export function getLinkPresentation(rawUrl: string, linkType?: string): LinkPresentation {
-  const fallback: LinkPresentation = { hostname: "", label: "Link", path: rawUrl, icon: "link-45deg", brand: false };
+  const fallback: LinkPresentation = { hostname: "", label: "Link", path: redactUrlUserinfo(rawUrl), icon: "link-45deg", brand: false };
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -30,7 +31,7 @@ export function getLinkPresentation(rawUrl: string, linkType?: string): LinkPres
   if (url.protocol !== "http:" && url.protocol !== "https:") return fallback;
 
   const hostname = url.hostname.toLowerCase().replace(/\.$/, "");
-  const path = `${url.pathname}${url.search}${url.hash}`;
+  const path = url.pathname;
   const brand = brands.find(({ hosts }) => hosts.some((host) => hostname === host || hostname.endsWith(`.${host}`)));
   if (brand) return { hostname, path, label: brand.label, icon: brand.icon, brand: true };
 

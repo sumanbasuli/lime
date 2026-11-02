@@ -2,6 +2,7 @@ package profiler
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -63,8 +64,8 @@ func TestDiscoverKeepsAuthenticatedSitemapFetchButRedactsDiagnostics(t *testing.
 	if strings.Contains(output.String(), "alice") || strings.Contains(output.String(), "s%40cret") || strings.Contains(output.String(), "eve") {
 		t.Fatalf("credentials leaked in profiler logs: %q", output.String())
 	}
-	if !strings.Contains(output.String(), server.URL+"/protected.xml") {
-		t.Fatalf("redacted target missing from profiler logs: %q", output.String())
+	if !strings.Contains(output.String(), "[URL details omitted]") || strings.Contains(output.String(), server.URL+"/protected.xml") {
+		t.Fatalf("target URL was not omitted from profiler logs: %q", output.String())
 	}
 }
 
@@ -155,7 +156,7 @@ func TestDiscoverFailsWhenNestedSitemapRemainsUnavailable(t *testing.T) {
 		if err == nil {
 			t.Fatal("Discover succeeded unexpectedly")
 		}
-		if got := err.Error(); got == "" || !containsAll(got, "failed to fully process sitemapindex", "/b.xml", "HTTP 599") {
+		if got := err.Error(); got == "" || !containsAll(got, "failed to fully process sitemapindex", "HTTP 599") || strings.Contains(got, "/b.xml") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -331,6 +332,212 @@ func TestDiscoverStopsAtAggregateByteAndPageBudgets(t *testing.T) {
 					t.Fatalf("expected both pages at exact limits, got URLs=%v error=%v", urls, err)
 				}
 			})
+		}
+	})
+}
+
+func TestDiscoverStopsParsingAtFirstPageOverBudget(t *testing.T) {
+	const root = "https://example.invalid/sitemap.xml"
+	const prefix = `<urlset><url><loc>https://example.invalid/one</loc></url><url><loc>https://example.invalid/two</loc></url>`
+	tail := &failOnReadReader{}
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		response := testResponse(r, "")
+		response.Body = io.NopCloser(io.MultiReader(strings.NewReader(prefix), tail))
+		return response, nil
+	})}
+	withTestHTTPClient(t, client, func() {
+		d, err := newDiscovery(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.pageLimit = 1
+		seen := make(map[string]bool)
+		var urls []string
+		err = d.discoverRecursive(context.Background(), root, seen, &urls, 0)
+		if !errors.Is(err, errDiscoveryBudget) {
+			t.Fatalf("expected page budget error, got %v", err)
+		}
+		if len(urls) != 0 || len(seen) != 0 {
+			t.Fatalf("failed sitemap contributed partial URLs: URLs=%v seen=%v", urls, seen)
+		}
+	})
+	if tail.reads != 0 {
+		t.Fatalf("read %d times beyond the over-budget page", tail.reads)
+	}
+}
+
+func TestDecodeSitemapStopsAtIndexBudget(t *testing.T) {
+	const prefix = `<sitemapindex><sitemap><loc>https://example.invalid/one.xml</loc></sitemap><sitemap><loc>https://example.invalid/two.xml</loc></sitemap>`
+	tail := &failOnReadReader{}
+	_, err := decodeSitemap(io.MultiReader(strings.NewReader(prefix), tail), map[string]bool{}, map[string]bool{}, 10, 1)
+	if !errors.Is(err, errDiscoveryBudget) {
+		t.Fatalf("expected index budget error, got %v", err)
+	}
+	if tail.reads != 0 {
+		t.Fatalf("read %d times beyond the over-budget index entry", tail.reads)
+	}
+}
+
+func TestDecodeSitemapPreservesNamespacedXMLAndMisc(t *testing.T) {
+	const body = `<?xml version="1.0"?><?before root?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><ignored><url><loc>https://example.invalid/hidden</loc></url></ignored><url><loc>https://example.invalid/keep</loc></url></urlset><!-- trailing --><?after root?>`
+	document, err := decodeSitemap(strings.NewReader(body), map[string]bool{}, map[string]bool{}, 1, maxDiscoveryRequests)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if document.index || document.count != 1 || !slices.Equal(document.entries, []string{"https://example.invalid/keep"}) {
+		t.Fatalf("unexpected parsed document: %+v", document)
+	}
+}
+
+func TestDiscoverAcceptsHTTPGzipSitemap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/page" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		compressed := gzip.NewWriter(w)
+		fmt.Fprintf(compressed, `<urlset><url><loc>%s/page</loc></url></urlset>`, serverURL(t, r))
+		if err := compressed.Close(); err != nil {
+			t.Errorf("close gzip sitemap: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	withTestHTTPClient(t, server.Client(), func() {
+		urls, err := Discover(context.Background(), server.URL+"/sitemap.xml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{server.URL + "/page"}; !slices.Equal(urls, want) {
+			t.Fatalf("unexpected URLs from HTTP gzip sitemap: got %v want %v", urls, want)
+		}
+	})
+}
+
+func TestDiscoverMalformedXMLContributesNoURLs(t *testing.T) {
+	const root = "https://example.invalid/sitemap.xml"
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return testResponse(r, `<urlset><url><loc>https://example.invalid/one</loc></url><url>`), nil
+	})}
+	withTestHTTPClient(t, client, func() {
+		d, err := newDiscovery(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := make(map[string]bool)
+		var urls []string
+		err = d.discoverRecursive(context.Background(), root, seen, &urls, 0)
+		if !errors.Is(err, errInvalidSitemap) {
+			t.Fatalf("expected malformed sitemap error, got %v", err)
+		}
+		if len(seen) != 0 || len(urls) != 0 {
+			t.Fatalf("malformed sitemap contributed partial URLs: URLs=%v seen=%v", urls, seen)
+		}
+	})
+}
+
+func TestDiscoverRetryDiscardsPartiallyParsedURLs(t *testing.T) {
+	const root = "https://example.invalid/sitemap.xml"
+	var attempts int
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts == 1 {
+			response := testResponse(r, "")
+			response.Body = io.NopCloser(&prefixThenErrorReader{data: []byte(`<urlset><url><loc>https://example.invalid/stale</loc></url>`)})
+			return response, nil
+		}
+		return testResponse(r, `<urlset><url><loc>https://example.invalid/fresh</loc></url></urlset>`), nil
+	})}
+	withTestHTTPClient(t, client, func() {
+		d, err := newDiscovery(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := make(map[string]bool)
+		var urls []string
+		if err := d.discoverRecursive(context.Background(), root, seen, &urls, 0); err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"https://example.invalid/fresh"}; !slices.Equal(urls, want) {
+			t.Fatalf("retry retained URLs from failed attempt: got %v want %v", urls, want)
+		}
+	})
+	if attempts != 2 {
+		t.Fatalf("made %d attempts, want two", attempts)
+	}
+}
+
+func TestDiscoverSharesPageLimitAcrossIndexChildren(t *testing.T) {
+	const root = "https://example.invalid/index.xml"
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/index.xml":
+			return testResponse(r, `<sitemapindex><sitemap><loc>https://example.invalid/first.xml</loc></sitemap><sitemap><loc>https://example.invalid/second.xml</loc></sitemap></sitemapindex>`), nil
+		case "/first.xml":
+			return testResponse(r, `<urlset><url><loc>https://example.invalid/one</loc></url></urlset>`), nil
+		case "/second.xml":
+			return testResponse(r, `<urlset><url><loc>https://example.invalid/one</loc></url><url><loc>https://example.invalid/two</loc></url></urlset>`), nil
+		default:
+			return nil, fmt.Errorf("unexpected request for %s", r.URL.Path)
+		}
+	})}
+	withTestHTTPClient(t, client, func() {
+		for _, limit := range []int{1, 2} {
+			d, err := newDiscovery(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.pageLimit = limit
+			seen := make(map[string]bool)
+			var urls []string
+			err = d.discoverRecursive(context.Background(), root, seen, &urls, 0)
+			if limit == 1 {
+				if !errors.Is(err, errDiscoveryBudget) {
+					t.Fatalf("page limit %d: expected budget error, got %v", limit, err)
+				}
+			} else if want := []string{"https://example.invalid/one", "https://example.invalid/two"}; err != nil || !slices.Equal(urls, want) {
+				t.Fatalf("page limit %d: got URLs=%v error=%v, want %v", limit, urls, err, want)
+			}
+		}
+	})
+}
+
+func TestDiscoverRejectsBytesAfterPerSitemapLimit(t *testing.T) {
+	const root = "https://example.invalid/sitemap.xml"
+	const xmlPrefix = `<urlset><url><loc>https://example.invalid/one</loc></url></urlset>`
+	padding := int64(maxSitemapDocumentBytes - len(xmlPrefix))
+	chunk := strings.Repeat(" ", 16*1024) + "<!--x-->"
+	wholeChunks := padding / int64(len(chunk))
+	remainder := padding % int64(len(chunk))
+	var extraByte bool
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		response := testResponse(r, "")
+		response.Body = io.NopCloser(io.MultiReader(
+			strings.NewReader(xmlPrefix),
+			io.LimitReader(&cyclingReader{chunk: []byte(chunk)}, wholeChunks*int64(len(chunk))),
+			strings.NewReader(strings.Repeat(" ", int(remainder))),
+			strings.NewReader(map[bool]string{false: "", true: "x"}[extraByte]),
+		))
+		return response, nil
+	})}
+	withTestHTTPClient(t, client, func() {
+		for _, overLimit := range []bool{false, true} {
+			extraByte = overLimit
+			d, err := newDiscovery(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seen := make(map[string]bool)
+			var urls []string
+			err = d.discoverRecursive(context.Background(), root, seen, &urls, 0)
+			if overLimit {
+				if !errors.Is(err, errDiscoveryBudget) {
+					t.Fatalf("expected over-limit sitemap error, got %v", err)
+				}
+			} else if err != nil || !slices.Equal(urls, []string{"https://example.invalid/one"}) {
+				t.Fatalf("exact-limit sitemap result: URLs=%v error=%v", urls, err)
+			}
 		}
 	})
 }
@@ -773,4 +980,41 @@ type partialErrorReader struct {
 func (r *partialErrorReader) Read(p []byte) (int, error) {
 	n := copy(p, r.data)
 	return n, io.ErrUnexpectedEOF
+}
+
+type failOnReadReader struct {
+	reads int
+}
+
+func (r *failOnReadReader) Read([]byte) (int, error) {
+	r.reads++
+	return 0, errors.New("unexpected read beyond page budget")
+}
+
+type prefixThenErrorReader struct {
+	data []byte
+}
+
+func (r *prefixThenErrorReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, io.ErrUnexpectedEOF
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+type cyclingReader struct {
+	chunk  []byte
+	offset int
+}
+
+func (r *cyclingReader) Read(p []byte) (int, error) {
+	n := 0
+	for n < len(p) {
+		copied := copy(p[n:], r.chunk[r.offset:])
+		n += copied
+		r.offset = (r.offset + copied) % len(r.chunk)
+	}
+	return n, nil
 }

@@ -190,6 +190,62 @@ async function rpc(method, params = {}, key, status = 200, endpoint = `${baseUrl
   return json(endpoint, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) }, status);
 }
 
+async function verifyNewScanHydration() {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const delayedPage = await context.newPage();
+  delayedPage.setDefaultTimeout(20_000);
+  const errors = [];
+  const recordError = (message) => {
+    const detail = `${currentWorkflow} | delayed JavaScript | ${delayedPage.url()} | ${message}`;
+    errors.push(detail);
+    browserErrors.push(detail);
+  };
+  delayedPage.on("pageerror", (error) => recordError(error.message));
+  delayedPage.on("console", (message) => { if (message.type() === "error") recordError(message.text()); });
+  delayedPage.on("response", (response) => { if (response.status() >= 500) recordError(`${response.status()} ${response.url()}`); });
+  let releaseChunks;
+  const chunksReady = new Promise((resolve) => { releaseChunks = resolve; });
+  let delayedChunks = 0;
+  await delayedPage.route("**/_next/static/chunks/**", async (route) => {
+    delayedChunks += 1;
+    await chunksReady;
+    await route.continue();
+  });
+  try {
+    const response = await delayedPage.goto(`${baseUrl}/scans/new`, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    assert.equal(response?.status(), 200);
+    await delayedPage.getByRole("heading", { name: "New scan", exact: true }).waitFor();
+    const form = delayedPage.locator("form").filter({ has: delayedPage.locator("#scan-url") });
+    const controls = await form.locator("button, input").evaluateAll((elements) => elements.map((element) => ({
+      type: element.getAttribute("type"), disabled: element.disabled,
+    })));
+    assert.ok(controls.length >= 10, "The complete scan form is rendered before JavaScript loads");
+    assert.ok(controls.every((control) => control.disabled), "Scan form controls wait until their handlers are ready");
+    await delayedPage.screenshot({ path: path.join(outputDir, "new-scan-before-hydration.png"), fullPage: true });
+    assert.ok(delayedChunks > 0, "The fixture held real application JavaScript chunks");
+    releaseChunks();
+    await delayedPage.getByRole("button", { name: "Single page", exact: true }).click();
+    await delayedPage.getByRole("button", { name: /Mobile/i }).click();
+    assert.equal(await delayedPage.getByRole("button", { name: "Single page", exact: true }).getAttribute("aria-pressed"), "true");
+    assert.equal(await delayedPage.getByRole("button", { name: /Mobile/i }).getAttribute("aria-pressed"), "true");
+    await delayedPage.getByLabel("Page URL", { exact: true }).fill(`${fixtureOrigin}/good`);
+    await delayedPage.getByLabel(/Tag/).fill("hydration-check");
+    await delayedPage.getByLabel("Include link check", { exact: true }).check();
+    assert.equal(await delayedPage.getByLabel("Page URL", { exact: true }).inputValue(), `${fixtureOrigin}/good`);
+    assert.equal(await delayedPage.getByLabel(/Tag/).inputValue(), "hydration-check");
+    assert.equal(await delayedPage.getByLabel("Include link check", { exact: true }).isChecked(), true);
+    await delayedPage.screenshot({ path: path.join(outputDir, "new-scan-after-hydration.png"), fullPage: true });
+    assert.deepEqual(errors, [], "Slow-loading JavaScript must not produce browser errors");
+    await writeFile(path.join(outputDir, "new-scan-hydration-results.json"), JSON.stringify({
+      delayedChunks, disabledControls: controls.length, selectionRetained: true, browserErrors: errors,
+    }, null, 2));
+  } finally {
+    releaseChunks();
+    await delayedPage.unrouteAll({ behavior: "wait" });
+    await context.close();
+  }
+}
+
 await mkdir(outputDir, { recursive: true });
 await Promise.all(["failure.png", "results.json", "docker.log"].map((name) => rm(path.join(outputDir, name), { force: true })));
 await new Promise((resolve, reject) => fixtureServer.once("error", reject).listen(fixturePort, "0.0.0.0", resolve));
@@ -208,6 +264,7 @@ try {
     assert.deepEqual(await json(`${baseUrl}/_lime/update-check`), { enabled: false }, "Disabled release checks remain reachable without contacting GitHub");
     const stats = await json(`${baseUrl}/api/stats`);
     assert.equal(stats.total_scans, 0, "Use only the isolated verification stack");
+    await verifyNewScanHydration();
     await navigate("/", "Overview");
     assert.equal(await page.getByRole("link", { name: "Documentation", exact: true }).getAttribute("href"), "https://lime.heysuman.com/docs/");
     await navigate("/scans/new", "New scan");

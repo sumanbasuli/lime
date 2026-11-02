@@ -3,26 +3,30 @@ package linkchecker
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/rootdns"
 )
 
 type memoryStore struct {
 	mu        sync.Mutex
 	jobs      map[string]models.LinkCheck
+	observed  map[string][][2]bool
 	recovered bool
 	claims    map[string]int
 	completed chan string
 }
 
 func newMemoryStore(jobs ...models.LinkCheck) *memoryStore {
-	s := &memoryStore{jobs: map[string]models.LinkCheck{}, claims: map[string]int{}, completed: make(chan string, 10)}
+	s := &memoryStore{jobs: map[string]models.LinkCheck{}, observed: map[string][][2]bool{}, claims: map[string]int{}, completed: make(chan string, 10)}
 	for _, j := range jobs {
 		s.jobs[j.ID] = j
 	}
@@ -67,12 +71,35 @@ func (s *memoryStore) ClaimLinkCheck(_ context.Context, id string) (*models.Link
 	s.claims[id]++
 	return &j, nil
 }
+func (s *memoryStore) ObserveLinkCheckRootDNS(_ context.Context, id string, public, nonPublic bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.observed[id] = append(s.observed[id], [2]bool{public, nonPublic})
+	j := s.jobs[id]
+	if (public && nonPublic) || (j.RootPublic && nonPublic) {
+		return errBlocked
+	}
+	if public {
+		j.RootPublic = true
+		s.jobs[id] = j
+	}
+	return nil
+}
+func (s *memoryStore) GuardLinkCheckPrivateRootDial(_ context.Context, id string) (func(), error) {
+	s.mu.Lock()
+	if s.jobs[id].RootPublic {
+		s.mu.Unlock()
+		return nil, rootdns.ErrBlocked
+	}
+	return sync.OnceFunc(s.mu.Unlock), nil
+}
 func (s *memoryStore) SaveLinkCheck(_ context.Context, j models.LinkCheck, _ []models.LinkResult) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.jobs[j.ID].Status != "running" {
 		return nil
 	}
+	j.RootPublic = s.jobs[j.ID].RootPublic
 	s.jobs[j.ID] = j
 	if j.Status == "completed" || j.Status == "failed" {
 		s.completed <- j.ID
@@ -104,6 +131,43 @@ func TestRunnerRecoversDurableInterruptedJob(t *testing.T) {
 	defer store.mu.Unlock()
 	if !store.recovered || store.claims["recover"] != 1 || store.jobs["recover"].Status != "completed" {
 		t.Fatalf("recovery=%+v", store)
+	}
+}
+
+func TestRunnerRecoveryRetainsPublicRootRestriction(t *testing.T) {
+	const id = "recovered-public-root"
+	store := newMemoryStore(models.LinkCheck{ID: id, URL: "http://root.example/", CheckType: "single", MaxPages: 1, Status: "running"})
+	// The first process committed this observation before it could finish.
+	if err := store.ObserveLinkCheckRootDNS(context.Background(), id, true, false); err != nil {
+		t.Fatal(err)
+	}
+	var dialed atomic.Bool
+	c := New()
+	c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	})
+	c.DialContext = func(context.Context, string, string) (net.Conn, error) {
+		dialed.Store(true)
+		return nil, fmt.Errorf("private root was dialed")
+	}
+	runner := NewRunner(store)
+	runner.checker = c
+	if err := runner.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer runner.Stop()
+	select {
+	case got := <-store.completed:
+		if got != id {
+			t.Fatalf("completed wrong job %s", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("recovered job did not finish")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if dialed.Load() || !store.recovered || !store.jobs[id].RootPublic || store.jobs[id].Status != "failed" || len(store.observed[id]) != 2 || store.observed[id][1] != [2]bool{false, true} {
+		t.Fatalf("recovered public root restriction failed: dialed=%v job=%+v observed=%v", dialed.Load(), store.jobs[id], store.observed[id])
 	}
 }
 

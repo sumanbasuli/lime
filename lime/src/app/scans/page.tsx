@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/db";
 import { scans } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, isNotNull, or, sql } from "drizzle-orm";
 import { ActiveScansRefresh } from "@/components/active-scans-refresh";
 import {
   StatusBadge,
@@ -12,8 +12,32 @@ import {
 import { measureServerAction } from "@/lib/performance-logging";
 import { getScanScoreSummaries } from "@/lib/scan-score-data";
 import type { ScanScoreSummary } from "@/lib/scan-scoring";
+import { redactUrlUserinfo } from "@/lib/url-presentation";
 
 export const dynamic = "force-dynamic";
+
+const scansPerPage = 50;
+const maxPage = 1_000_000;
+const maxSearchLength = 256;
+const maxTagLength = 256;
+
+function pageNumber(value: string | undefined): number {
+  if (!value || !/^\d{1,7}$/.test(value)) return 1;
+  const parsed = Number(value);
+  return parsed >= 1 && parsed <= maxPage ? parsed : 1;
+}
+
+function firstParam(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function literalSearchPattern(value: string): string {
+  return `%${value.replace(/[\\%_]/g, "\\$&")}%`;
+}
+
+function displayTag(value: string): string {
+  return value.length > 60 ? `${value.slice(0, 60)}…` : value;
+}
 
 function formatDate(value: string | Date | null | undefined): string {
   if (!value) {
@@ -29,9 +53,10 @@ function formatDate(value: string | Date | null | undefined): string {
 function formatTarget(value: string): { domain: string; url: string } {
   try {
     const parsed = new URL(value);
-    return { domain: parsed.hostname.replace(/^www\./, ""), url: value };
+    return { domain: parsed.hostname.replace(/^www\./, ""), url: redactUrlUserinfo(value) };
   } catch {
-    return { domain: value, url: value };
+    const redacted = redactUrlUserinfo(value);
+    return { domain: redacted, url: redacted };
   }
 }
 
@@ -56,33 +81,79 @@ function formatScanCoverage(
 export default async function ScansPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tag?: string; q?: string }>;
+  searchParams: Promise<{ tag?: string | string[]; q?: string | string[]; page?: string | string[] }>;
 }) {
   const params = await searchParams;
-  const tagFilter = params.tag;
-  const queryFilter = params.q?.trim().toLowerCase() ?? "";
-
-  const [scansForTag, allScansForTags] = await measureServerAction(
-    "scans list data",
-    () =>
-      Promise.all([
-        tagFilter
-          ? db
-              .select()
-              .from(scans)
-              .where(eq(scans.tag, tagFilter))
-              .orderBy(desc(scans.createdAt))
-          : db.select().from(scans).orderBy(desc(scans.createdAt)),
-        db.select({ tag: scans.tag }).from(scans).orderBy(scans.tag),
-      ])
-  );
-  const allScans = queryFilter
-    ? scansForTag.filter((scan) =>
-        [scan.sitemapUrl, scan.tag, scan.status, scan.scanType].some((value) =>
-          value?.toLowerCase().includes(queryFilter)
+  const rawTagFilter = firstParam(params.tag) ?? "";
+  const rawQueryFilter = firstParam(params.q)?.trim() ?? "";
+  const queryTooLong = rawQueryFilter.length > maxSearchLength;
+  const queryHasNul = rawQueryFilter.includes("\0");
+  const tagTooLong = rawTagFilter.length > maxTagLength;
+  const tagHasNul = rawTagFilter.includes("\0");
+  const filterError = queryTooLong
+    ? "Search terms must be 256 characters or fewer."
+    : queryHasNul || tagHasNul
+      ? "Search and tag filters contain an unsupported character."
+      : tagTooLong
+        ? "Tag filters must be 256 characters or fewer."
+        : null;
+  const tagFilter = filterError ? undefined : rawTagFilter || undefined;
+  const queryFilter = filterError ? "" : rawQueryFilter;
+  const requestedPage = pageNumber(firstParam(params.page));
+  // Search the displayed URL, not credentials or query/fragment secrets in
+  // the stored target. Normalize HTTP backslash forms before authority cleanup.
+  const authorityNormalized = sql<string>`regexp_replace(${scans.sitemapUrl}, ${"^([a-z][a-z0-9+.-]*:)[/\\\\]*"}, ${"\\1//"}, 'i')`;
+  const protocolRelativeCleaned = sql<string>`regexp_replace(${authorityNormalized}, ${"^//[^/?#]*@"}, ${"//"})`;
+  const authorityCleaned = sql<string>`regexp_replace(${protocolRelativeCleaned}, ${"^([a-z][a-z0-9+.-]*://)[^/?#\\\\]*@"}, ${"\\1"}, 'i')`;
+  const publicTargetWithTail = sql<string>`CASE WHEN ${scans.sitemapUrl} LIKE '//%'
+    THEN ${authorityCleaned} WHEN ${authorityCleaned} <> ${authorityNormalized}
+    THEN replace(${authorityCleaned}, chr(92), '/') ELSE ${scans.sitemapUrl} END`;
+  const publicTarget = sql<string>`split_part(split_part(${publicTargetWithTail}, '?', 1), '#', 1)`;
+  const pattern = literalSearchPattern(queryFilter);
+  const filter = and(
+    tagFilter ? eq(scans.tag, tagFilter) : undefined,
+    queryFilter
+      ? or(
+          ilike(publicTarget, pattern),
+          ilike(scans.tag, pattern),
+          ilike(sql<string>`${scans.status}::text`, pattern),
+          ilike(scans.scanType, pattern)
         )
-      )
-    : scansForTag;
+      : undefined
+  );
+  const [countRows, tagRows] = await measureServerAction(
+    "scans list counts and tags",
+    () => Promise.all([
+      filterError
+        ? Promise.resolve([{ total: 0 }])
+        : db.select({ total: count() }).from(scans).where(filter),
+      filterError
+        ? Promise.resolve([] as Array<{ tag: string | null }>)
+        : db.selectDistinct({ tag: scans.tag }).from(scans)
+            .where(and(isNotNull(scans.tag), sql`char_length(${scans.tag}) <= ${maxTagLength}`))
+            .orderBy(asc(scans.tag)).limit(201),
+    ])
+  );
+  const matchingTotal = Number(countRows[0]?.total ?? 0);
+  const lastPage = Math.max(1, Math.min(maxPage, Math.ceil(matchingTotal / scansPerPage)));
+  const page = Math.min(requestedPage, lastPage);
+  const allScans = filterError ? [] : await measureServerAction(
+    "scans list page",
+    () => db.select({
+      id: scans.id,
+      sitemapUrl: sql<string>`left(${publicTarget}, 8192)`,
+      status: scans.status,
+      scanType: scans.scanType,
+      tag: sql<string | null>`left(${scans.tag}, ${maxTagLength + 1})`,
+      pauseRequested: scans.pauseRequested,
+      scannedUrls: scans.scannedUrls,
+      totalUrls: scans.totalUrls,
+      createdAt: scans.createdAt,
+      updatedAt: scans.updatedAt,
+    }).from(scans).where(filter)
+      .orderBy(desc(scans.createdAt), desc(scans.id))
+      .limit(scansPerPage).offset((page - 1) * scansPerPage)
+  );
   const scoreSummaries = await measureServerAction(
     "scans score summaries",
     () =>
@@ -103,16 +174,16 @@ export default async function ScansPage({
   );
 
   const uniqueTags = [
-    ...new Set(
-      allScansForTags
-        .map((scan) => scan.tag)
-        .filter((tag): tag is string => tag !== null)
-    ),
+    ...new Set([
+      ...tagRows.slice(0, 200).map((row) => row.tag).filter((tag): tag is string => tag !== null),
+      ...(tagFilter ? [tagFilter] : []),
+    ]),
   ];
-  const scansHref = (tag?: string) => {
+  const scansHref = (tag?: string, nextPage?: number) => {
     const nextParams = new URLSearchParams();
     if (tag) nextParams.set("tag", tag);
-    if (queryFilter) nextParams.set("q", params.q?.trim() ?? "");
+    if (queryFilter) nextParams.set("q", queryFilter);
+    if (nextPage && nextPage > 1) nextParams.set("page", String(nextPage));
     const queryString = nextParams.toString();
     return queryString ? `/scans?${queryString}` : "/scans";
   };
@@ -124,15 +195,19 @@ export default async function ScansPage({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="lime-page-title">
-            {queryFilter
-              ? `Results for “${params.q?.trim()}”`
+            {filterError
+              ? "Check your scan filters"
+              : queryFilter
+              ? `Results for “${queryFilter}”`
               : tagFilter
                 ? `Scans tagged “${tagFilter}”`
                 : "All scans"}
           </h1>
         </div>
         <p className="text-xs text-muted-foreground sm:pb-1">
-          {allScans.length} of {scansForTag.length} {scansForTag.length === 1 ? "scan" : "scans"}
+          {matchingTotal === 0
+            ? "0 scans"
+            : `Showing ${(page - 1) * scansPerPage + 1}–${(page - 1) * scansPerPage + allScans.length} of ${matchingTotal} ${matchingTotal === 1 ? "scan" : "scans"}`}
         </p>
       </div>
 
@@ -151,15 +226,21 @@ export default async function ScansPage({
             <Link
               key={tag}
               href={scansHref(tag)}
+              aria-label={`Scans tagged ${tag}`}
               className={`inline-flex items-center rounded-full border px-4 py-2 text-xs font-semibold transition-colors ${
                 tagFilter === tag
                   ? "border-black bg-black text-[#FFED00]"
                   : "border-black/10 bg-white hover:border-black/25"
               }`}
             >
-              {tag}
+              {displayTag(tag)}
             </Link>
           ))}
+          {tagRows.length > 200 ? (
+            <span className="text-xs text-muted-foreground">
+              Showing a selection of tags. Search to find others.
+            </span>
+          ) : null}
       </div>
 
       <section className="lime-card min-w-0 max-w-full overflow-hidden">
@@ -183,9 +264,14 @@ export default async function ScansPage({
                     colSpan={7}
                     className="py-14 text-center text-muted-foreground"
                   >
-                    {queryFilter ? (
+                    {filterError ? (
                       <>
-                        No scans match &quot;{params.q?.trim()}&quot;
+                        {filterError}{" "}
+                        <Link href="/scans" className="underline">Clear filters</Link>.
+                      </>
+                    ) : queryFilter ? (
+                      <>
+                        No scans match &quot;{queryFilter}&quot;
                         {tagFilter ? <> with tag &quot;{tagFilter}&quot;</> : null}.{" "}
                         <Link
                           href={tagFilter ? `/scans?tag=${encodeURIComponent(tagFilter)}` : "/scans"}
@@ -235,9 +321,13 @@ export default async function ScansPage({
                     </td>
                     <td>
                       {scan.tag ? (
-                        <Link href={`/scans?tag=${encodeURIComponent(scan.tag)}`}>
-                          <TagBadge tag={scan.tag} />
-                        </Link>
+                        scan.tag.length > maxTagLength ? (
+                          <TagBadge tag={displayTag(scan.tag)} />
+                        ) : (
+                          <Link href={`/scans?tag=${encodeURIComponent(scan.tag)}`} aria-label={`Scans tagged ${scan.tag}`}>
+                            <TagBadge tag={displayTag(scan.tag)} />
+                          </Link>
+                        )
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
@@ -267,6 +357,22 @@ export default async function ScansPage({
           </table>
         </div>
       </section>
+
+      {matchingTotal > scansPerPage ? (
+        <nav aria-label="Scan pages" className="flex items-center justify-between gap-4 text-sm">
+          {page > 1 ? (
+            <Link href={scansHref(tagFilter, page - 1)} className="lime-pill-button px-4 py-2 text-xs">
+              Previous
+            </Link>
+          ) : <span />}
+          <span className="text-xs text-muted-foreground">Page {page} of {lastPage}</span>
+          {page < lastPage ? (
+            <Link href={scansHref(tagFilter, page + 1)} className="lime-pill-button px-4 py-2 text-xs">
+              Next
+            </Link>
+          ) : <span />}
+        </nav>
+      ) : null}
     </div>
   );
 }

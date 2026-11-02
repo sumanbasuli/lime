@@ -1,4 +1,4 @@
-import { buildIssueReportLlmText } from "@/lib/issues-report-llm";
+import { buildIssueReportLlmStream } from "@/lib/issues-report-llm";
 import {
   loadScopedIssueReportData,
   loadIssueReportData,
@@ -6,26 +6,11 @@ import {
 import { resolveIssueReportScope } from "@/lib/issue-report-scope";
 import { measureServerAction } from "@/lib/performance-logging";
 import { getReportSettings } from "@/lib/report-settings";
+import { sanitizeReportHost } from "@/lib/report-filename";
+import type { ReportReadContext } from "@/lib/mcp-report-read";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-function sanitizeReportHost(rawUrl: string): string {
-  let host = rawUrl;
-
-  try {
-    host = new URL(rawUrl).host || rawUrl;
-  } catch {
-    host = rawUrl;
-  }
-
-  const sanitized = host
-    .toLowerCase()
-    .replace(/\./g, "-")
-    .replace(/[^a-z0-9-]/g, "");
-
-  return sanitized || "scan";
-}
 
 function sanitizeFilenameToken(rawValue: string): string {
   const sanitized = rawValue
@@ -49,10 +34,10 @@ function buildLlmFilename(
 
 export async function GET(
   request: Request,
-  context: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }>; reportRead?: ReportReadContext }
 ) {
   const { id } = await context.params;
-  const reportSettings = await getReportSettings();
+  const reportSettings = await getReportSettings(context.reportRead);
   if (!reportSettings.llmReportsEnabled) {
     return Response.json(
       { error: "LLM exports are disabled in settings." },
@@ -76,9 +61,11 @@ export async function GET(
     () =>
       scope
         ? loadScopedIssueReportData(id, scope, {
+            context: context.reportRead,
             occurrenceLimit: reportSettings.llmOccurrenceLimit,
           })
         : loadIssueReportData(id, {
+            context: context.reportRead,
             occurrenceLimit: reportSettings.llmOccurrenceLimit,
           }),
     500
@@ -91,7 +78,9 @@ export async function GET(
     );
   }
 
-  const text = buildIssueReportLlmText(data, reportSettings.llmOccurrenceLimit);
+  context.reportRead?.check();
+
+  const text = buildIssueReportLlmStream(data, reportSettings.llmOccurrenceLimit);
 
   return new Response(text, {
     status: 200,

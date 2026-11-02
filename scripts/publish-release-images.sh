@@ -14,8 +14,10 @@ cd "${ROOT_DIR}"
 TAG_INPUT="$1"
 RELEASE_TAG="${TAG_INPUT#v}"
 RELEASE_TAG="v${RELEASE_TAG}"
-FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
+bash "${ROOT_DIR}/scripts/validate-release-version.sh" --file VERSION
+FILE_VERSION="$(cat VERSION)"
 EXPECTED_TAG="v${FILE_VERSION}"
+bash "${ROOT_DIR}/scripts/validate-release-version.sh" "${FILE_VERSION}"
 
 if [[ "${RELEASE_TAG}" != "${EXPECTED_TAG}" ]]; then
   echo "VERSION (${FILE_VERSION}) does not match requested image tag (${RELEASE_TAG})" >&2
@@ -91,7 +93,9 @@ if [[ "${PUSH_IMAGES}" == "true" ]]; then
     echo "Committed release build context has no VERSION file." >&2
     exit 1
   fi
-  ARCHIVED_VERSION="$(tr -d '[:space:]' < "${RELEASE_BUILD_CONTEXT}/VERSION")"
+  bash "${ROOT_DIR}/scripts/validate-release-version.sh" --file "${RELEASE_BUILD_CONTEXT}/VERSION"
+  ARCHIVED_VERSION="$(cat "${RELEASE_BUILD_CONTEXT}/VERSION")"
+  bash "${ROOT_DIR}/scripts/validate-release-version.sh" "${ARCHIVED_VERSION}"
   if [[ "v${ARCHIVED_VERSION}" != "${RELEASE_TAG}" ]]; then
     echo "Committed VERSION (${ARCHIVED_VERSION}) does not match requested image tag (${RELEASE_TAG})." >&2
     exit 1
@@ -120,7 +124,7 @@ fi
 
 BUILD_MAKE_ARGS=(DOCKER_BUILD_CONTEXT="${BUILD_CONTEXT}")
 if [[ "${PUSH_IMAGES}" == "true" ]]; then
-  BUILD_MAKE_ARGS+=(VERSION="${ARCHIVED_VERSION}" GIT_COMMIT="${HEAD_SHA:0:7}" DOCKER_BUILD_FLAGS=--pull)
+  BUILD_MAKE_ARGS+=(GIT_COMMIT="${HEAD_SHA:0:7}" DOCKER_BUILD_FLAGS=--pull)
 fi
 
 run_image_build() {
@@ -156,10 +160,13 @@ run_image_build \
   SHOPKEEPER_IMAGE="${SHOPKEEPER_IMAGE}" \
   LIME_IMAGE_TAG="${RELEASE_TAG}" \
   build-docker-shopkeeper
-push_with_aliases "${SHOPKEEPER_IMAGE}"
 
 run_image_build \
   UI_IMAGE="${UI_IMAGE}" \
   LIME_IMAGE_TAG="${RELEASE_TAG}" \
   build-docker-ui
+
+# A failed second build must not leave the first image (or its latest alias)
+# published on its own. Registry pushes themselves cannot be atomic.
+push_with_aliases "${SHOPKEEPER_IMAGE}"
 push_with_aliases "${UI_IMAGE}"

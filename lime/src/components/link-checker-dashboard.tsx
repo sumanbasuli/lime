@@ -7,6 +7,7 @@ import { MaterialSymbol } from "@/components/material-symbol";
 import { Input } from "@/components/ui/input";
 import { LinkCheckPagination, LinkCheckStatusBadge, LinkCheckSummaryCards, linkCheckButtonClass } from "@/components/link-check-summary";
 import { createLinkCheck, getLinkChecks, getLinkCheckStats, type LinkCheck, type LinkCheckPage, type LinkCheckStats } from "@/lib/api";
+import { redactUrlUserinfo } from "@/lib/url-presentation";
 
 const PAGE_SIZE = 10;
 
@@ -128,8 +129,8 @@ export function LinkCheckerDashboard() {
       {history && history.items.length > 0 ? <>
         <div className="my-4 divide-y divide-black/8">
           {history.items.map((check) => <article key={check.id} className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0 flex-1"><Link href={`/links/${check.id}`} className="text-sm font-semibold [overflow-wrap:anywhere] hover:underline">{check.url}</Link><p className="mt-1.5 text-xs leading-5 text-muted-foreground">{check.check_type === "crawl" ? "Full crawl" : check.check_type === "single" ? "Single page" : check.scan_id ? "Included in scan" : "Saved scan pages"} · {new Date(check.created_at).toLocaleString()}</p><p className="mt-1 text-xs text-muted-foreground">{check.links_checked}/{check.total_links} targets · {check.summary.broken} broken · {check.summary.redirected} redirected{check.truncated || check.pages_failed > 0 ? " · Limited coverage" : ""}</p></div>
-            <div className="flex shrink-0 items-center gap-3"><LinkCheckStatusBadge status={check.status} /><Link href={`/links/${check.id}`} className={linkCheckButtonClass} aria-label={`View link check for ${check.url}`}>View results<MaterialSymbol name="arrow_forward" size={16} /></Link></div>
+            <div className="min-w-0 flex-1"><Link href={`/links/${check.id}`} className="text-sm font-semibold [overflow-wrap:anywhere] hover:underline">{redactUrlUserinfo(check.url)}</Link><p className="mt-1.5 text-xs leading-5 text-muted-foreground">{check.check_type === "crawl" ? "Full crawl" : check.check_type === "single" ? "Single page" : check.scan_id ? "Included in scan" : "Saved scan pages"} · {new Date(check.created_at).toLocaleString()}</p><p className="mt-1 text-xs text-muted-foreground">{check.links_checked}/{check.total_links} targets · {check.summary.broken} broken · {check.summary.redirected} redirected{check.truncated || check.pages_failed > 0 ? " · Limited coverage" : ""}</p></div>
+            <div className="flex shrink-0 items-center gap-3"><LinkCheckStatusBadge status={check.status} /><Link href={`/links/${check.id}`} className={linkCheckButtonClass} aria-label={`View link check for ${redactUrlUserinfo(check.url)}`}>View results<MaterialSymbol name="arrow_forward" size={16} /></Link></div>
           </article>)}
         </div>
         <LinkCheckPagination offset={offset} limit={PAGE_SIZE} total={history.total} hasMore={history.has_more} loading={loading} onPage={changePage} />

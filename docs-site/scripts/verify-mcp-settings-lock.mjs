@@ -15,8 +15,10 @@ export async function verifyMcpSettingsLock({ baseUrl, key, dbPort = 16432 }) {
   assert.ok(!endpoint.username && !endpoint.password && !endpoint.search && !endpoint.hash && endpoint.pathname === "/");
   assert.equal(dbPort, 16432, "Settings contention verification cannot target the normal PostgreSQL port");
   assert.ok(key, "A disposable MCP key is required");
+  const password = process.env.LIME_DOCS_DB_PASSWORD;
+  assert.match(password ?? "", /^[A-Za-z0-9_-]{16,}$/, "Set the URL-safe password used to start the disposable docs database");
   const connectionOptions = {
-    host: "127.0.0.1", port: dbPort, user: "lime", password: "lime_docs_password", database: "lime_docs_db",
+    host: "127.0.0.1", port: dbPort, user: "lime", password, database: "lime_docs_db",
     connectionTimeoutMillis: 5000, query_timeout: 5000,
   };
   const blocker = new Client({ ...connectionOptions, application_name: "lime-settings-lock-blocker" });

@@ -1,5 +1,5 @@
 import {
-  buildIssueReportCsv,
+  buildIssueReportCsvSampleStream,
   buildIssueReportCsvStream,
 } from "@/lib/issues-report-csv";
 import {
@@ -9,28 +9,13 @@ import {
 import { resolveIssueReportScope } from "@/lib/issue-report-scope";
 import { measureServerAction } from "@/lib/performance-logging";
 import { getReportSettings } from "@/lib/report-settings";
+import { sanitizeReportHost } from "@/lib/report-filename";
+import type { ReportReadContext } from "@/lib/mcp-report-read";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type CsvReportMode = "full" | "small";
-
-function sanitizeReportHost(rawUrl: string): string {
-  let host = rawUrl;
-
-  try {
-    host = new URL(rawUrl).host || rawUrl;
-  } catch {
-    host = rawUrl;
-  }
-
-  const sanitized = host
-    .toLowerCase()
-    .replace(/\./g, "-")
-    .replace(/[^a-z0-9-]/g, "");
-
-  return sanitized || "scan";
-}
 
 function sanitizeFilenameToken(rawValue: string): string {
   const sanitized = rawValue
@@ -69,7 +54,7 @@ function resolveCsvMode(request: Request): CsvReportMode | null {
 
 export async function GET(
   request: Request,
-  context: { params: Promise<{ id: string }> }
+  context: { params: Promise<{ id: string }>; reportRead?: ReportReadContext }
 ) {
   const mode = resolveCsvMode(request);
   if (!mode) {
@@ -80,7 +65,7 @@ export async function GET(
   }
 
   const { id } = await context.params;
-  const reportSettings = await getReportSettings();
+  const reportSettings = await getReportSettings(context.reportRead);
   if (!reportSettings.csvReportsEnabled) {
     return Response.json(
       { error: "CSV exports are disabled in settings." },
@@ -104,10 +89,12 @@ export async function GET(
     () =>
       scope
         ? loadScopedIssueReportData(id, scope, {
+            context: context.reportRead,
             occurrenceLimit:
               mode === "full" ? 0 : reportSettings.smallCsvOccurrenceLimit,
           })
         : loadIssueReportData(id, {
+            context: context.reportRead,
             occurrenceLimit:
               mode === "full" ? 0 : reportSettings.smallCsvOccurrenceLimit,
           }),
@@ -121,10 +108,12 @@ export async function GET(
     );
   }
 
+  context.reportRead?.check();
+
   const csv =
     mode === "full"
-      ? buildIssueReportCsvStream(data)
-      : buildIssueReportCsv(data);
+      ? buildIssueReportCsvStream(data, context.reportRead)
+      : buildIssueReportCsvSampleStream(data);
 
   return new Response(csv, {
     status: 200,

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/rootdns"
 )
 
 func TestNormalizePreservesQueryAndEscapedPaths(t *testing.T) {
@@ -36,6 +37,32 @@ func TestNormalizePreservesQueryAndEscapedPaths(t *testing.T) {
 	}
 }
 
+func TestInvalidRelativeRedirectErrorDoesNotSaveQueryToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/bad-redirect" {
+			w.Header().Set("Location", "/invalid%ZZ?token=QUERY_TOKEN_CANARY")
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = fmt.Fprint(w, `<a href="/bad-redirect">Bad redirect</a>`)
+	}))
+	defer server.Close()
+	job, results, err := New().Run(context.Background(), models.LinkCheck{URL: server.URL, CheckType: "single", MaxPages: 1, Status: "running"}, nil)
+	if err != nil || job.PagesChecked != 1 {
+		t.Fatalf("job=%+v err=%v", job, err)
+	}
+	result := resultMap(results)["/bad-redirect"]
+	if result.Status != "error" || result.ErrorKind == nil || *result.ErrorKind != "network" || result.Error == nil ||
+		*result.Error != errInvalidRedirectURL.Error() || strings.Contains(*result.Error, "QUERY_TOKEN_CANARY") {
+		t.Fatalf("saved redirect result = %+v", result)
+	}
+	public := models.PublicLinkResult(result)
+	if public.Error == nil || *public.Error != errInvalidRedirectURL.Error() || strings.Contains(*public.Error, "QUERY_TOKEN_CANARY") {
+		t.Fatalf("public redirect error = %v", public.Error)
+	}
+}
+
 func TestPublicIPExcludesSpecialAndPrivateNetworks(t *testing.T) {
 	for _, ip := range []string{"127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "192.0.2.1", "198.18.0.1", "240.0.0.1", "::1", "fc00::1", "fe80::1", "::ffff:127.0.0.1", "64:ff9b::a00:1", "2001:db8::1", "2001::a00:1", "2002:0a00:0001::1", "2001:2::1", "3fff::1"} {
 		if publicIP(net.ParseIP(ip)) {
@@ -51,13 +78,16 @@ func TestPublicIPExcludesSpecialAndPrivateNetworks(t *testing.T) {
 
 func TestExtractResolvesBaseAndRetainsDuplicateReferences(t *testing.T) {
 	root, _ := url.Parse("https://example.com/")
-	items, err := extract([]byte(`<html><head><base href="/assets/"></head><body>
+	items, truncated, err := extract(context.Background(), []byte(`<html><head><base href="/assets/"></head><body>
 	<a href="../page?q=one#first">Same</a><a href="../page?q=one#second">Same</a>
 	<a href="mailto:user@example.com">Email</a><a href="#local">Local</a><a href="javascript:void(0)">Script</a>
 	<img src="photo.png" srcset="small.png 1x, large.png 2x"><video poster="poster.jpg" src="movie.mp4"></video>
 	<form action="/submit"></form><a href="//external.example/document.pdf">PDF</a></body></html>`), "https://example.com/start", root)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if truncated {
+		t.Fatal("ordinary base references were truncated")
 	}
 	if len(items) != 8 {
 		t.Fatalf("extracted %d refs: %#v", len(items), items)
@@ -73,14 +103,207 @@ func TestExtractResolvesBaseAndRetainsDuplicateReferences(t *testing.T) {
 	}
 }
 
+func TestExtractSkipsOnlyConnectionHintLinkRelations(t *testing.T) {
+	root, _ := url.Parse("https://example.test/")
+	for _, tc := range []struct {
+		name, element, rel string
+		want               int
+	}{
+		{"preconnect", "link", "preconnect", 0},
+		{"dns hint", "link", "dns-prefetch", 0},
+		{"case and ASCII whitespace", "link", "\t PrEcOnNeCt\r\nDNS-PREFETCH\f", 0},
+		{"duplicate hints", "link", "preconnect preconnect", 0},
+		{"empty relation", "link", "", 1},
+		{"stylesheet with hint", "link", "preconnect stylesheet", 1},
+		{"preload with hint", "link", "dns-prefetch preload", 1},
+		{"canonical with hint", "link", "canonical preconnect", 1},
+		{"unknown relation with hint", "link", "preconnect custom", 1},
+		{"non-ASCII whitespace is not a separator", "link", "preconnect\u00a0dns-prefetch", 1},
+		{"anchor retains href", "a", "preconnect", 1},
+		{"area retains href", "area", "dns-prefetch", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fmt.Sprintf(`<%s rel="%s" href="/target">`, tc.element, tc.rel)
+			items, truncated, err := extract(context.Background(), []byte(body), root.String(), root)
+			if err != nil || truncated || len(items) != tc.want {
+				t.Fatalf("items=%+v truncated=%v err=%v", items, truncated, err)
+			}
+			if len(items) > 0 && items[0].target != "https://example.test/target" {
+				t.Fatalf("functional destination changed: %+v", items[0])
+			}
+		})
+	}
+}
+
+func TestSingleDoesNotRequestConnectionHints(t *testing.T) {
+	var mu sync.Mutex
+	calls := map[string]int{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		calls[r.URL.Path]++
+		mu.Unlock()
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprint(w, `<link rel="preconnect" href="/hint-connect"><link rel="dns-prefetch" href="/hint-dns"><link rel="stylesheet preconnect" href="/style.css"><link rel="preload" href="/script.js">`)
+		case "/style.css", "/script.js":
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	job, items, err := New().Run(context.Background(), models.LinkCheck{URL: server.URL, CheckType: "single", MaxPages: 1, Status: "running"}, nil)
+	if err != nil || job.Status != "completed" || job.Truncated {
+		t.Fatalf("job=%+v err=%v", job, err)
+	}
+	results := resultMap(items)
+	mu.Lock()
+	defer mu.Unlock()
+	for _, hint := range []string{"/hint-connect", "/hint-dns"} {
+		if _, exists := results[hint]; exists || calls[hint] != 0 {
+			t.Fatalf("connection hint was requested or published: %s calls=%d", hint, calls[hint])
+		}
+	}
+	for _, resource := range []string{"/style.css", "/script.js"} {
+		if results[resource].Status != "healthy" || calls[resource] == 0 {
+			t.Fatalf("resource was not checked: %s result=%+v calls=%d", resource, results[resource], calls[resource])
+		}
+	}
+}
+
 func TestSrcsetDataURLsDoNotInventHTTPReferences(t *testing.T) {
 	root, _ := url.Parse("https://example.test/")
-	items, err := extract([]byte(`<img srcset="data:image/png;base64,AAA 1x, /real.png 2x"><img srcset="one.png, two.png 2x">`), root.String(), root)
+	items, truncated, err := extract(context.Background(), []byte(`<img srcset="data:image/png;base64,AAA 1x, /real.png 2x"><img srcset="one.png, two.png 2x">`), root.String(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if truncated {
+		t.Fatal("ordinary srcset references were truncated")
+	}
 	if len(items) != 3 || items[0].target != "https://example.test/real.png" || items[1].target != "https://example.test/one.png" || items[2].target != "https://example.test/two.png" {
 		t.Fatalf("srcset=%+v", items)
+	}
+}
+
+func TestExtractNestedObjectsBoundTextWorkAndRetainEarlierReferences(t *testing.T) {
+	root, _ := url.Parse("https://example.test/")
+	body := `<a href="/normal"><b>Normal label</b></a>` +
+		strings.Repeat(`<object data="/same">`, 450) +
+		strings.Repeat("x", 256<<10) +
+		strings.Repeat(`</object>`, 450)
+	if len(body) > MaxHTMLBytes {
+		t.Fatal("fixture exceeds source body cap")
+	}
+	items, truncated, err := extract(context.Background(), []byte(body), root.String(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || len(items) < 2 || len(items) >= 451 {
+		t.Fatalf("nested text work was not bounded: refs=%d truncated=%v", len(items), truncated)
+	}
+	if items[0].target != "https://example.test/normal" || items[0].source.Text != "Normal label" {
+		t.Fatalf("ordinary reference lost: %+v", items[0])
+	}
+	if len(items[1].source.Text) > 256 {
+		t.Fatalf("source text exceeded preview cap: %d", len(items[1].source.Text))
+	}
+}
+
+func TestExtractOversizedBaseSkipsDependentReferences(t *testing.T) {
+	root, _ := url.Parse("https://example.test/")
+	longPage := root.String() + strings.Repeat("p", maxURLBytes-len(root.String())-1) + "/"
+	for _, tc := range []struct {
+		name    string
+		pageURL string
+		base    string
+	}{
+		{"oversized attribute", root.String(), "https://other.example/" + strings.Repeat("x", maxURLBytes) + "/"},
+		{"oversized resolved base", longPage, "child/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `<base href="` + tc.base + `">` +
+				`<a href="/root-relative">Root relative</a>` +
+				`<a href="child">Path relative</a>` +
+				`<a href="//third.example/protocol-relative">Protocol relative</a>` +
+				`<a href="https://example.test/absolute">Absolute</a>`
+			items, truncated, err := extract(context.Background(), []byte(body), tc.pageURL, root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !truncated || len(items) != 1 || items[0].target != "https://example.test/absolute" || items[0].source.Text != "Absolute" {
+				t.Fatalf("oversized base was reinterpreted: refs=%+v truncated=%v", items, truncated)
+			}
+		})
+	}
+}
+
+func TestExtractCountsOversizedResolvedURLsTowardWorkBudget(t *testing.T) {
+	root, _ := url.Parse("https://example.test/")
+	base := root.String() + strings.Repeat("p", maxURLBytes-len(root.String())-1) + "/"
+	if len(base) != maxURLBytes {
+		t.Fatal("fixture base must reach the URL limit")
+	}
+	body := `<base href="` + base + `">` +
+		`<a href="https://example.test/early">Early</a>` +
+		strings.Repeat(`<a href="x">Rejected</a>`, 5000) +
+		`<a href="https://example.test/late">Late</a>`
+	items, truncated, err := extract(context.Background(), []byte(body), root.String(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || len(items) != 1 || items[0].target != "https://example.test/early" {
+		t.Fatalf("oversized resolved URL work was not bounded: refs=%+v truncated=%v", items, truncated)
+	}
+}
+
+func TestExtractCandidateAndDOMBudgetsRetainEarlierReferences(t *testing.T) {
+	root, _ := url.Parse("https://example.test/")
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"rejected candidates", `<a href="https://example.test/early">Early</a>` + strings.Repeat(`<a href="mailto:x">Bad</a>`, maxExtractCandidates+1) + `<a href="https://example.test/late">Late</a>`},
+		{"DOM nodes", `<a href="/early">Early</a>` + strings.Repeat(`<div></div>`, maxExtractNodes+1) + `<a href="https://example.test/late">Late</a>`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if len(tc.body) > MaxHTMLBytes {
+				t.Fatal("fixture exceeds source body cap")
+			}
+			items, truncated, err := extract(context.Background(), []byte(tc.body), root.String(), root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !truncated || len(items) != 1 || items[0].target != "https://example.test/early" {
+				t.Fatalf("work budget did not retain only the early reference: refs=%+v truncated=%v", items, truncated)
+			}
+		})
+	}
+}
+
+type cancelAfterChecksContext struct {
+	context.Context
+	cancel    context.CancelFunc
+	remaining int
+}
+
+func (c *cancelAfterChecksContext) Err() error {
+	c.remaining--
+	if c.remaining == 0 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
+func TestExtractHonorsCancellationDuringTraversal(t *testing.T) {
+	root, _ := url.Parse("https://example.test/")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	probe := &cancelAfterChecksContext{Context: ctx, cancel: cancel, remaining: 20}
+	body := []byte(strings.Repeat(`<div></div>`, 1000))
+	_, _, err := extract(probe, body, root.String(), root)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("extraction ignored cancellation: %v", err)
 	}
 }
 
@@ -91,6 +314,117 @@ func resultMap(items []models.LinkResult) map[string]models.LinkResult {
 		out[u.RequestURI()] = item
 	}
 	return out
+}
+
+func TestDeltaPublicationWritesOnlyChangedResultsAndRetriesFailedSink(t *testing.T) {
+	const count = 200
+	checker := New()
+	r, err := checker.newRun(models.LinkCheck{URL: "https://example.test/", CheckType: "crawl", MaxPages: MaxPages, Status: "running"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.client.CloseIdleConnections()
+	publications, written, largest := 0, 0, 0
+	failNext := false
+	r.deltaSink = func(_ models.LinkCheck, changed []models.LinkResult) error {
+		if failNext {
+			failNext = false
+			return errors.New("temporary persistence failure")
+		}
+		publications++
+		written += len(changed)
+		if len(changed) > largest {
+			largest = len(changed)
+		}
+		return nil
+	}
+	for i := 0; i < count; i++ {
+		url := fmt.Sprintf("https://example.test/page-%03d", i)
+		if r.add(url, models.LinkSource{PageURL: r.root.String(), Element: "a", Attribute: "href", Text: "Page"}) == nil {
+			t.Fatal("ordinary result rejected")
+		}
+		if err := r.publish(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if publications != count || written != count || largest != 1 {
+		t.Fatalf("progress rewrote accumulated results: publications=%d rows=%d largest=%d", publications, written, largest)
+	}
+	// A counter-only publication must not resubmit old results.
+	if err := r.publish(); err != nil || written != count {
+		t.Fatalf("counter-only publication rewrote results: rows=%d err=%v", written, err)
+	}
+	target := "https://example.test/page-000"
+	result := r.add(target, models.LinkSource{PageURL: "https://example.test/other", Element: "a", Attribute: "href", Text: "Again"})
+	if result == nil {
+		t.Fatal("existing target rejected")
+	}
+	failNext = true
+	if err := r.publish(); err == nil {
+		t.Fatal("failed sink was accepted")
+	}
+	if err := r.publish(); err != nil || written != count+1 || result.OccurrenceCount != 2 {
+		t.Fatalf("changed sources were not retried: rows=%d result=%+v err=%v", written, result, err)
+	}
+	response := &http.Response{StatusCode: http.StatusNotFound, Request: &http.Request{URL: r.root}}
+	r.outcome(result, response, 0, nil)
+	if err := r.publish(); err != nil || written != count+2 || result.Status != "broken" {
+		t.Fatalf("changed outcome was not published: rows=%d result=%+v err=%v", written, result, err)
+	}
+}
+
+func TestLegacyFullSnapshotSinkStillReceivesCompleteResults(t *testing.T) {
+	checker := New()
+	lengths := []int{}
+	r, err := checker.newRun(models.LinkCheck{URL: "https://example.test/", Status: "running"}, func(_ models.LinkCheck, items []models.LinkResult) error {
+		lengths = append(lengths, len(items))
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.client.CloseIdleConnections()
+	r.add("https://example.test/one", models.LinkSource{PageURL: r.root.String(), Element: "a", Attribute: "href"})
+	if err := r.publish(); err != nil {
+		t.Fatal(err)
+	}
+	r.add("https://example.test/two", models.LinkSource{PageURL: r.root.String(), Element: "a", Attribute: "href"})
+	if err := r.publish(); err != nil {
+		t.Fatal(err)
+	}
+	if len(lengths) != 2 || lengths[0] != 1 || lengths[1] != 2 {
+		t.Fatalf("legacy sink lost full snapshots: %v", lengths)
+	}
+}
+
+func TestCrawlDeltaPublicationsBoundRowsPassedToPersistence(t *testing.T) {
+	const pages = 20
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		var index int
+		if _, err := fmt.Sscanf(request.URL.Path, "/page-%d", &index); err != nil || index < 0 || index >= pages {
+			http.NotFound(w, request)
+			return
+		}
+		if index+1 < pages {
+			fmt.Fprintf(w, `<a href="/page-%d">Next</a>`, index+1)
+		}
+	}))
+	defer server.Close()
+	writes, publications := 0, 0
+	job, final, err := New().RunObservedDelta(context.Background(), models.LinkCheck{
+		URL: server.URL + "/page-0", CheckType: "crawl", MaxPages: pages, Status: "running",
+	}, func(_ models.LinkCheck, changed []models.LinkResult) error {
+		publications++
+		writes += len(changed)
+		return nil
+	}, nil)
+	if err != nil || job.Status != "completed" || job.PagesChecked != pages || len(final) != pages {
+		t.Fatalf("crawl result: job=%+v results=%d err=%v", job, len(final), err)
+	}
+	if publications < pages || writes > pages*3 {
+		t.Fatalf("crawl sent accumulated rows instead of changed rows: publications=%d writes=%d", publications, writes)
+	}
 }
 
 func TestSingleChecksStatusesRedirectsFallbackAndSources(t *testing.T) {
@@ -402,6 +736,194 @@ func TestRootInitialMixedAnswersBlockedBeforeDial(t *testing.T) {
 	if !errors.Is(err, errBlocked) || dialed.Load() {
 		t.Fatalf("mixed root answer allowed: err=%v dialed=%v", err, dialed.Load())
 	}
+}
+
+func TestRootDNSObserverRunsBeforeDialAndFailsClosed(t *testing.T) {
+	observerErr := errors.New("observation unavailable")
+	dialErr := errors.New("fixture dial stopped")
+	cases := []struct {
+		name       string
+		ips        []string
+		rootPublic bool
+		observeErr error
+		wantEvents string
+		wantErr    error
+	}{
+		{"public", []string{"8.8.8.8"}, false, nil, "observe,dial", dialErr},
+		{"observer error", []string{"8.8.8.8"}, false, observerErr, "observe", observerErr},
+		{"public parent after claim", []string{"127.0.0.1"}, false, rootdns.ErrBlocked, "observe", errBlocked},
+		{"mixed", []string{"8.8.8.8", "127.0.0.1"}, false, nil, "observe", errBlocked},
+		{"recovered public root", []string{"127.0.0.1"}, true, nil, "observe", errBlocked},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var events []string
+			c := New()
+			c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+				ips := make([]net.IPAddr, 0, len(tc.ips))
+				for _, raw := range tc.ips {
+					ips = append(ips, net.IPAddr{IP: net.ParseIP(raw)})
+				}
+				return ips, nil
+			})
+			c.DialContext = func(context.Context, string, string) (net.Conn, error) {
+				events = append(events, "dial")
+				return nil, dialErr
+			}
+			observed := [2]bool{}
+			observer := func(_ context.Context, public, nonPublic bool) error {
+				events = append(events, "observe")
+				observed = [2]bool{public, nonPublic}
+				return tc.observeErr
+			}
+			r, err := c.newRun(models.LinkCheck{URL: "http://root.example/", RootPublic: tc.rootPublic}, nil, observer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.client.CloseIdleConnections()
+			_, _, err = r.request(context.Background(), "http://root.example/", http.MethodHead)
+			if !errors.Is(err, tc.wantErr) || strings.Join(events, ",") != tc.wantEvents {
+				t.Fatalf("err=%v events=%v", err, events)
+			}
+			if observed != [2]bool{containsIP(tc.ips, "8.8.8.8"), containsIP(tc.ips, "127.0.0.1")} {
+				t.Fatalf("observed wrong DNS classes: %v", observed)
+			}
+		})
+	}
+}
+
+func TestPrivateRootDialGuardBlocksAfterObservation(t *testing.T) {
+	var events []string
+	c := New()
+	c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	})
+	c.DialContext = func(context.Context, string, string) (net.Conn, error) {
+		events = append(events, "dial")
+		return nil, errors.New("private root was dialed")
+	}
+	job, results, err := c.RunObserved(
+		context.Background(),
+		models.LinkCheck{URL: "http://root.example/", CheckType: "single", MaxPages: 1, Status: "running"},
+		nil,
+		func(_ context.Context, public, nonPublic bool) error {
+			if public || !nonPublic {
+				t.Errorf("wrong root DNS classes: public=%v nonPublic=%v", public, nonPublic)
+			}
+			events = append(events, "observe")
+			return nil
+		},
+		func(context.Context) (func(), error) {
+			// A parent scan can commit a public observation after this job's
+			// private answer was recorded but before its TCP dial begins.
+			events = append(events, "guard")
+			return nil, rootdns.ErrBlocked
+		},
+	)
+	if err != nil || job.Status != "failed" || job.Summary.Blocked != 1 || len(results) != 1 || results[0].Status != "blocked" {
+		t.Fatalf("late public observation not blocked: job=%+v results=%+v err=%v", job, results, err)
+	}
+	if got := strings.Join(events, ","); got != "observe,guard" {
+		t.Fatalf("private dial sequence=%s", got)
+	}
+}
+
+func TestPrivateRootDialGuardCoversFallbackAndEndsBeforeHTTP(t *testing.T) {
+	var eventsMu sync.Mutex
+	var events []string
+	record := func(event string) {
+		eventsMu.Lock()
+		events = append(events, event)
+		eventsMu.Unlock()
+	}
+	var guarded atomic.Bool
+	var served atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if guarded.Load() {
+			t.Error("private dial guard was held during HTTP I/O")
+		}
+		record("http")
+		served.Store(true)
+		w.Header().Set("Content-Type", "text/html")
+		fmt.Fprint(w, "<html></html>")
+	}))
+	defer server.Close()
+	c := New()
+	c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}, {IP: net.ParseIP("127.0.0.2")}}, nil
+	})
+	c.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		if !guarded.Load() {
+			t.Error("private dial ran without guard")
+		}
+		switch address {
+		case "127.0.0.1:80":
+			record("dial1")
+			return nil, errors.New("first address unavailable")
+		case "127.0.0.2:80":
+			record("dial2")
+			return (&net.Dialer{}).DialContext(ctx, network, server.Listener.Addr().String())
+		default:
+			return nil, fmt.Errorf("unexpected address %s", address)
+		}
+	}
+	job, _, err := c.RunObserved(
+		context.Background(),
+		models.LinkCheck{URL: "http://root.example/", CheckType: "single", MaxPages: 1, Status: "running"},
+		nil,
+		func(context.Context, bool, bool) error { record("observe"); return nil },
+		func(context.Context) (func(), error) {
+			record("guard")
+			guarded.Store(true)
+			return func() {
+				guarded.Store(false)
+				record("release")
+			}, nil
+		},
+	)
+	if err != nil || job.Status != "completed" || !served.Load() || guarded.Load() {
+		t.Fatalf("private dial guard lifecycle: job=%+v err=%v served=%v guarded=%v", job, err, served.Load(), guarded.Load())
+	}
+	eventsMu.Lock()
+	got := strings.Join(events, ",")
+	eventsMu.Unlock()
+	if got != "observe,guard,dial1,dial2,release,http" {
+		t.Fatalf("private dial sequence=%s", got)
+	}
+}
+
+func TestPublicRootDoesNotAcquirePrivateDialGuard(t *testing.T) {
+	var events []string
+	c := New()
+	c.Resolver = resolverFunc(func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("8.8.8.8")}}, nil
+	})
+	c.DialContext = func(context.Context, string, string) (net.Conn, error) {
+		events = append(events, "dial")
+		return nil, errors.New("fixture dial stopped")
+	}
+	_, _, err := c.RunObserved(
+		context.Background(),
+		models.LinkCheck{URL: "http://root.example/", CheckType: "single", MaxPages: 1, Status: "running"},
+		nil,
+		func(context.Context, bool, bool) error { events = append(events, "observe"); return nil },
+		func(context.Context) (func(), error) {
+			events = append(events, "guard")
+			return nil, errors.New("unexpected private dial guard")
+		},
+	)
+	if err != nil || strings.Join(events, ",") != "observe,dial" {
+		t.Fatalf("public root sequence=%v err=%v", events, err)
+	}
+}
+
+func containsIP(ips []string, want string) bool {
+	for _, ip := range ips {
+		if ip == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRootCannotReturnToPrivateAfterPublicAnswer(t *testing.T) {

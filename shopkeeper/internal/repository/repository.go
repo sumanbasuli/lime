@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"path"
@@ -20,13 +21,16 @@ type Repository struct {
 	pool *pgxpool.Pool
 }
 
+// ErrRescanNotReady means the source scan has not reached a terminal status.
+var ErrRescanNotReady = errors.New("source scan is not terminal")
+
 // New creates a new Repository wrapping the given connection pool.
 func New(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
 // scanColumns is the SELECT column list for scans (used in all scan queries).
-const scanColumns = `id, sitemap_url, status, pause_requested, scan_type, tag, viewport_preset, viewport_width, viewport_height, total_urls, scanned_urls, created_at, updated_at, include_link_check`
+const scanColumns = `id, sitemap_url, status, pause_requested, scan_type, tag, viewport_preset, viewport_width, viewport_height, total_urls, scanned_urls, created_at, updated_at, include_link_check, root_public`
 
 // issueColumns is the SELECT column list for issues (used in single-issue queries).
 const issueColumns = `id, scan_id, violation_type, description, help_url, severity, is_false_positive, created_at`
@@ -37,7 +41,7 @@ func scanRow(row interface{ Scan(dest ...any) error }) (*models.Scan, error) {
 	err := row.Scan(
 		&scan.ID, &scan.SitemapURL, &scan.Status, &scan.PauseRequested, &scan.ScanType, &scan.Tag,
 		&scan.ViewportPreset, &scan.ViewportWidth, &scan.ViewportHeight,
-		&scan.TotalURLs, &scan.ScannedURLs, &scan.CreatedAt, &scan.UpdatedAt, &scan.IncludeLinkCheck,
+		&scan.TotalURLs, &scan.ScannedURLs, &scan.CreatedAt, &scan.UpdatedAt, &scan.IncludeLinkCheck, &scan.RootPublic,
 	)
 	if err != nil {
 		return nil, err
@@ -60,23 +64,91 @@ func issueRow(row interface{ Scan(dest ...any) error }) (*models.Issue, error) {
 
 // CreateScan inserts a new scan record and returns it.
 func (r *Repository) CreateScan(ctx context.Context, sitemapURL, scanType string, tag *string, scanViewport viewport.Settings) (*models.Scan, error) {
-	scan := &models.Scan{}
-	err := r.pool.QueryRow(ctx,
-		`INSERT INTO scans (sitemap_url, status, scan_type, tag, viewport_preset, viewport_width, viewport_height)
-		 VALUES ($1, 'pending', $2, $3, $4, $5, $6)
+	tx, err := r.beginAdmissionTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin scan transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := admitActiveWork(ctx, tx, 1, 0); err != nil {
+		return nil, err
+	}
+	scan, err := scanRow(tx.QueryRow(ctx,
+		`INSERT INTO scans (sitemap_url, status, scan_type, tag, viewport_preset, viewport_width, viewport_height, root_public)
+		 VALUES ($1, 'pending', $2, $3, $4, $5, $6, FALSE)
 		 RETURNING `+scanColumns,
 		sitemapURL, scanType, tag, scanViewport.Preset, scanViewport.Width, scanViewport.Height,
-	).Scan(&scan.ID, &scan.SitemapURL, &scan.Status, &scan.PauseRequested, &scan.ScanType, &scan.Tag,
-		&scan.ViewportPreset, &scan.ViewportWidth, &scan.ViewportHeight,
-		&scan.TotalURLs, &scan.ScannedURLs, &scan.CreatedAt, &scan.UpdatedAt, &scan.IncludeLinkCheck)
+	))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scan: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit scan transaction: %w", err)
+	}
+	return scan, nil
+}
+
+// CreateRescanFrom copies a scan's target and durable root DNS policy together.
+// Locking the source prevents a concurrent public observation from falling
+// between the policy read and insertion of the new scan.
+func (r *Repository) CreateRescanFrom(ctx context.Context, sourceScanID string) (*models.Scan, error) {
+	tx, err := r.beginAdmissionTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin rescan transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var source *models.Scan
+	if r.mcpAction(ctx) != nil {
+		source, err = r.actionLockedScan(ctx, tx, sourceScanID)
+	} else {
+		source, err = scanRow(tx.QueryRow(ctx, `SELECT `+scanColumns+` FROM scans WHERE id=$1 FOR UPDATE`, sourceScanID))
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to lock source scan: %w", err)
+	}
+	if source.Status != "completed" && source.Status != "paused" && source.Status != "failed" {
+		return nil, ErrRescanNotReady
+	}
+	if r.mcpAction(ctx) != nil {
+		if err := r.actionReserveScanReturn(ctx, source); err != nil {
+			return nil, err
+		}
+	}
+	linkChecks := 0
+	if source.IncludeLinkCheck {
+		linkChecks = 1
+	}
+	if err := admitActiveWork(ctx, tx, 1, linkChecks); err != nil {
+		return nil, err
+	}
+	scan, err := scanRow(tx.QueryRow(ctx, `INSERT INTO scans
+		(sitemap_url,status,scan_type,tag,viewport_preset,viewport_width,viewport_height,include_link_check,root_public)
+		VALUES ($1,'pending',$2,$3,$4,$5,$6,$7,$8) RETURNING `+scanColumns,
+		source.SitemapURL, source.ScanType, source.Tag, source.ViewportPreset,
+		source.ViewportWidth, source.ViewportHeight, source.IncludeLinkCheck, source.RootPublic))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create rescan: %w", err)
+	}
+	if source.IncludeLinkCheck {
+		if _, err := tx.Exec(ctx, `INSERT INTO link_checks(scan_id,url,check_type,max_pages,root_public)
+			VALUES ($1,$2,'scan',500,$3)`, scan.ID, source.SitemapURL, source.RootPublic); err != nil {
+			return nil, fmt.Errorf("failed to create rescan companion: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit rescan transaction: %w", err)
 	}
 	return scan, nil
 }
 
 // GetScan retrieves a single scan by its ID.
 func (r *Repository) GetScan(ctx context.Context, id string) (*models.Scan, error) {
+	if r.mcpAction(ctx) != nil {
+		return r.actionGetScan(ctx, id)
+	}
+	if read := r.mcpRead(ctx); read != nil {
+		return read.getScan(ctx, id)
+	}
 	row := r.pool.QueryRow(ctx,
 		`SELECT `+scanColumns+` FROM scans WHERE id = $1`, id,
 	)
@@ -90,22 +162,30 @@ func (r *Repository) GetScan(ctx context.Context, id string) (*models.Scan, erro
 	return scan, nil
 }
 
-// DeleteScan removes a scan and all related rows via ON DELETE CASCADE.
-// It returns true when a scan record was deleted.
+// DeleteScan removes a terminal scan and its related rows via ON DELETE CASCADE.
+// The status predicate must be in this statement: resume/retry can reactivate a
+// scan after a handler's earlier status read.
 func (r *Repository) DeleteScan(ctx context.Context, id string) (bool, error) {
-	result, err := r.pool.Exec(ctx, `DELETE FROM scans WHERE id = $1`, id)
+	if r.mcpAction(ctx) != nil {
+		count, err := r.actionExec(ctx, `DELETE FROM scans WHERE id=$1 AND status IN ('completed','paused','failed')`, id)
+		return count > 0, err
+	}
+	result, err := r.pool.Exec(ctx,
+		`DELETE FROM scans WHERE id = $1 AND status IN ('completed', 'paused', 'failed')`, id)
 	if err != nil {
 		return false, fmt.Errorf("failed to delete scan: %w", err)
 	}
 	return result.RowsAffected() > 0, nil
 }
 
-// ListRecoverableScans returns all scans that were left in a non-terminal state.
+// ListRecoverableScans returns scans that need a recovery transition. Ordinary
+// pending scans are already durable queued work and need no reset or startup load.
 func (r *Repository) ListRecoverableScans(ctx context.Context) ([]models.Scan, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT `+scanColumns+`
 		 FROM scans
-		 WHERE status IN ('pending', 'profiling', 'scanning', 'processing')
+		 WHERE status IN ('profiling', 'scanning', 'processing')
+		    OR (status = 'pending' AND pause_requested = true)
 		 ORDER BY created_at ASC`,
 	)
 	if err != nil {
@@ -118,13 +198,43 @@ func (r *Repository) ListRecoverableScans(ctx context.Context) ([]models.Scan, e
 		var s models.Scan
 		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.PauseRequested, &s.ScanType, &s.Tag,
 			&s.ViewportPreset, &s.ViewportWidth, &s.ViewportHeight,
-			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt, &s.IncludeLinkCheck); err != nil {
+			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt, &s.IncludeLinkCheck, &s.RootPublic); err != nil {
 			return nil, fmt.Errorf("failed to scan recoverable scan row: %w", err)
 		}
 		scans = append(scans, s)
 	}
 	if scans == nil {
 		scans = []models.Scan{}
+	}
+	return scans, nil
+}
+
+// ListPendingScans reads queued scans in their most recent queue order. A scan
+// requeued after a time slice moves behind scans that have already waited.
+func (r *Repository) ListPendingScans(ctx context.Context, limit int) ([]models.Scan, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT `+scanColumns+`
+		 FROM scans
+		 WHERE status = 'pending'
+		 ORDER BY updated_at ASC, id ASC
+		 LIMIT $1`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pending scans: %w", err)
+	}
+	defer rows.Close()
+
+	scans := make([]models.Scan, 0, limit)
+	for rows.Next() {
+		scan, err := scanRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan pending row: %w", err)
+		}
+		scans = append(scans, *scan)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to iterate pending scans: %w", err)
 	}
 	return scans, nil
 }
@@ -162,6 +272,71 @@ func (r *Repository) ResetScan(ctx context.Context, id string) error {
 	return nil
 }
 
+// RecoverScanPages retains terminal pages and removes evidence written for
+// unfinished pages before requeueing an interrupted scanning/processing run.
+// The cleanup and state transition are atomic, so a second restart is safe.
+func (r *Repository) RecoverScanPages(ctx context.Context, id string) error {
+	return r.finishScanPages(ctx, id, false)
+}
+
+// FailScanWithPageCleanup removes partial evidence for unfinished URLs before
+// making a checkpoint write failure terminal. If cleanup fails, the scan stays
+// non-terminal so startup recovery can retry it.
+func (r *Repository) FailScanWithPageCleanup(ctx context.Context, id string) error {
+	return r.finishScanPages(ctx, id, true)
+}
+
+func (r *Repository) finishScanPages(ctx context.Context, id string, fail bool) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin scan page recovery: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM scans WHERE id=$1 FOR UPDATE`, id).Scan(&status); err != nil {
+		return fmt.Errorf("failed to lock scan for page recovery: %w", err)
+	}
+	if status != "scanning" && status != "processing" {
+		return nil
+	}
+	unfinished := `SELECT id FROM urls WHERE scan_id=$1 AND status NOT IN ('completed', 'failed')`
+	for _, table := range []string{"issue_occurrences", "url_audit_occurrences", "url_audits"} {
+		if _, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE url_id IN (`+unfinished+`)`, id); err != nil {
+			return fmt.Errorf("failed to clean unfinished %s: %w", table, err)
+		}
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM issues WHERE scan_id=$1 AND NOT EXISTS (
+		SELECT 1 FROM issue_occurrences WHERE issue_id=issues.id)`, id); err != nil {
+		return fmt.Errorf("failed to clean empty scan issues: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE urls SET status='pending' WHERE scan_id=$1 AND status='scanning'`, id); err != nil {
+		return fmt.Errorf("failed to requeue interrupted URLs: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE scans SET
+		status=CASE WHEN $2::boolean THEN 'failed'::scan_status
+			WHEN pause_requested THEN 'paused'::scan_status ELSE 'pending'::scan_status END,
+		pause_requested=false,
+		total_urls=(SELECT COUNT(*) FROM urls WHERE scan_id=$1),
+		scanned_urls=(SELECT COUNT(*) FROM urls WHERE scan_id=$1 AND status IN ('completed', 'failed')),
+		updated_at=NOW()
+		WHERE id=$1`, id, fail); err != nil {
+		return fmt.Errorf("failed to finalize interrupted scan pages: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+// RequeueScanSlice yields a scan slot after its saved page results have been
+// checkpointed. A concurrent pause request stays set for the queue to finalize.
+func (r *Repository) RequeueScanSlice(ctx context.Context, id string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE scans SET status='pending', updated_at=NOW()
+		WHERE id=$1 AND status IN ('scanning', 'processing')`, id)
+	if err != nil {
+		return fmt.Errorf("failed to requeue scan slice: %w", err)
+	}
+	return nil
+}
+
 // ListScans returns all scans ordered by creation date descending.
 func (r *Repository) ListScans(ctx context.Context) ([]models.Scan, error) {
 	rows, err := r.pool.Query(ctx,
@@ -177,7 +352,7 @@ func (r *Repository) ListScans(ctx context.Context) ([]models.Scan, error) {
 		var s models.Scan
 		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.PauseRequested, &s.ScanType, &s.Tag,
 			&s.ViewportPreset, &s.ViewportWidth, &s.ViewportHeight,
-			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt, &s.IncludeLinkCheck); err != nil {
+			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt, &s.IncludeLinkCheck, &s.RootPublic); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 		scans = append(scans, s)
@@ -204,13 +379,45 @@ func (r *Repository) ListScansByTag(ctx context.Context, tag string) ([]models.S
 		var s models.Scan
 		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.PauseRequested, &s.ScanType, &s.Tag,
 			&s.ViewportPreset, &s.ViewportWidth, &s.ViewportHeight,
-			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt, &s.IncludeLinkCheck); err != nil {
+			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt, &s.IncludeLinkCheck, &s.RootPublic); err != nil {
 			return nil, fmt.Errorf("failed to scan row: %w", err)
 		}
 		scans = append(scans, s)
 	}
 	if scans == nil {
 		scans = []models.Scan{}
+	}
+	return scans, nil
+}
+
+// ListScansPage is the bounded read used by the ordinary scan-list API. The
+// extra row in an unpaginated request lets the handler reject large histories
+// explicitly instead of silently truncating the legacy array response.
+func (r *Repository) ListScansPage(ctx context.Context, tag string, limit, offset int) ([]models.Scan, error) {
+	if limit < 1 || limit > 1001 || offset < 0 || offset > 1_000_000 {
+		return nil, fmt.Errorf("invalid scan list page limit or offset")
+	}
+	query := `SELECT ` + scanColumns + ` FROM scans ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2`
+	args := []any{limit, offset}
+	if tag != "" {
+		query = `SELECT ` + scanColumns + ` FROM scans WHERE tag=$1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3`
+		args = []any{tag, limit, offset}
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list scan page: %w", err)
+	}
+	defer rows.Close()
+	scans := make([]models.Scan, 0, limit)
+	for rows.Next() {
+		scan, err := scanRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan page row: %w", err)
+		}
+		scans = append(scans, *scan)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read scan page: %w", err)
 	}
 	return scans, nil
 }
@@ -236,6 +443,32 @@ func (r *Repository) UpdateScanStatus(ctx context.Context, id string, status str
 
 // RequestPause marks an active scan so the running scanner can stop at the next safe point.
 func (r *Repository) RequestPause(ctx context.Context, id string) (*models.Scan, error) {
+	if call := r.mcpAction(ctx); call != nil {
+		tx, err := r.actionTx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback(ctx)
+		var encoded []byte
+		err = tx.QueryRow(ctx, `WITH updated AS (UPDATE scans SET pause_requested=true,updated_at=NOW()
+			WHERE id=$1 AND status IN ('pending','profiling','scanning','processing')
+			AND pause_requested=false RETURNING *)
+			SELECT CASE WHEN `+mcpScanTextBytesSQL+` <= $2 THEN `+actionScanJSON+` ELSE NULL END FROM updated s`, id, call.allowance()).Scan(&encoded)
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		scan, err := decodeActionScan(call, encoded)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return scan, nil
+	}
 	row := r.pool.QueryRow(ctx,
 		`UPDATE scans
 		 SET pause_requested = true, updated_at = NOW()
@@ -257,7 +490,34 @@ func (r *Repository) RequestPause(ctx context.Context, id string) (*models.Scan,
 
 // ResumeScan reactivates a paused scan so it can continue from persisted state.
 func (r *Repository) ResumeScan(ctx context.Context, id string) (*models.Scan, error) {
-	row := r.pool.QueryRow(ctx,
+	tx, err := r.beginAdmissionTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin resume transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	var status string
+	if err := tx.QueryRow(ctx, `SELECT status FROM scans WHERE id=$1 FOR UPDATE`, id).Scan(&status); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to lock scan for resume: %w", err)
+	}
+	if status != "paused" {
+		return nil, nil
+	}
+	if r.mcpAction(ctx) != nil {
+		locked, err := r.actionLockedScan(ctx, tx, id)
+		if err != nil {
+			return nil, err
+		}
+		if err := r.actionReserveScanReturn(ctx, locked); err != nil {
+			return nil, err
+		}
+	}
+	if err := admitActiveWork(ctx, tx, 1, 0); err != nil {
+		return nil, err
+	}
+	row := tx.QueryRow(ctx,
 		`UPDATE scans
 		 SET status = 'pending', pause_requested = false, updated_at = NOW()
 		 WHERE id = $1
@@ -272,26 +532,27 @@ func (r *Repository) ResumeScan(ctx context.Context, id string) (*models.Scan, e
 		}
 		return nil, fmt.Errorf("failed to resume scan: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to commit resume transaction: %w", err)
+	}
 	return scan, nil
 }
 
 // RetryFailedURLs requeues failed URLs on a completed partial scan and reopens the
 // existing scan record so the scanner can resume only those pages.
 func (r *Repository) RetryFailedURLs(ctx context.Context, id string) (*models.Scan, int, error) {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.beginAdmissionTx(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to begin retry-failed transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	row := tx.QueryRow(ctx,
-		`SELECT `+scanColumns+`
-		 FROM scans
-		 WHERE id = $1
-		 FOR UPDATE`,
-		id,
-	)
-	scan, err := scanRow(row)
+	var scan *models.Scan
+	if r.mcpAction(ctx) != nil {
+		scan, err = r.actionLockedScan(ctx, tx, id)
+	} else {
+		scan, err = scanRow(tx.QueryRow(ctx, `SELECT `+scanColumns+` FROM scans WHERE id=$1 FOR UPDATE`, id))
+	}
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, 0, nil
@@ -319,6 +580,25 @@ func (r *Repository) RetryFailedURLs(ctx context.Context, id string) (*models.Sc
 	if completedURLs == 0 || failedURLs == 0 {
 		return scan, 0, nil
 	}
+	if r.mcpAction(ctx) != nil {
+		if err := r.actionReserveScanReturn(ctx, scan); err != nil {
+			return nil, 0, err
+		}
+	}
+	// Lock the companion before counting capacity: its status can change from
+	// running to failed while a retry waits on this scan row.
+	var companionStatus string
+	err = tx.QueryRow(ctx, `SELECT status FROM link_checks WHERE scan_id=$1 FOR UPDATE`, id).Scan(&companionStatus)
+	if err != nil && err != pgx.ErrNoRows {
+		return nil, 0, fmt.Errorf("failed to lock companion link check: %w", err)
+	}
+	linkChecks := 0
+	if err == nil && companionStatus == "failed" {
+		linkChecks = 1
+	}
+	if err := admitActiveWork(ctx, tx, 1, linkChecks); err != nil {
+		return nil, 0, err
+	}
 
 	result, err := tx.Exec(ctx,
 		`UPDATE urls
@@ -331,7 +611,7 @@ func (r *Repository) RetryFailedURLs(ctx context.Context, id string) (*models.Sc
 		return nil, 0, fmt.Errorf("failed to requeue failed URLs: %w", err)
 	}
 
-	row = tx.QueryRow(ctx,
+	row := tx.QueryRow(ctx,
 		`UPDATE scans
 		 SET status = 'pending',
 		     pause_requested = false,
@@ -359,16 +639,34 @@ func (r *Repository) RetryFailedURLs(ctx context.Context, id string) (*models.Sc
 	return updatedScan, int(result.RowsAffected()), nil
 }
 
-// FinalizePausedScan marks a scan as paused and clears any pending pause request.
+// FinalizePausedScan marks a scan as paused only while its pause request is
+// still current. A stale worker must not undo a subsequent resume.
 func (r *Repository) FinalizePausedScan(ctx context.Context, id string) error {
 	_, err := r.pool.Exec(ctx,
 		`UPDATE scans
 		 SET status = 'paused', pause_requested = false, updated_at = NOW()
-		 WHERE id = $1`,
+		 WHERE id = $1
+		   AND pause_requested = true
+		   AND status IN ('pending', 'profiling', 'scanning', 'processing')`,
 		id,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to finalize paused scan: %w", err)
+	}
+	return nil
+}
+
+// FinalizeQueuedScanPause cannot change a scan that finished between the
+// handler's pause request and the scheduler callback.
+func (r *Repository) FinalizeQueuedScanPause(ctx context.Context, id string) error {
+	_, err := r.pool.Exec(ctx,
+		`UPDATE scans
+		 SET status = 'paused', pause_requested = false, updated_at = NOW()
+		 WHERE id = $1 AND status = 'pending' AND pause_requested = true`,
+		id,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to finalize queued scan pause: %w", err)
 	}
 	return nil
 }
@@ -519,11 +817,22 @@ func (r *Repository) CreateIssue(ctx context.Context, scanID, violationType, des
 
 // SetIssueFalsePositive updates the false-positive flag for an issue in the given scan.
 func (r *Repository) SetIssueFalsePositive(ctx context.Context, scanID, issueID string, isFalsePositive bool) (*models.Issue, error) {
-	tx, err := r.pool.Begin(ctx)
+	var tx pgx.Tx
+	var err error
+	if r.mcpAction(ctx) != nil {
+		tx, err = r.actionTx(ctx)
+	} else {
+		tx, err = r.pool.Begin(ctx)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin false-positive transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if r.mcpAction(ctx) != nil {
+		if err := r.actionLockedIssue(ctx, tx, scanID, issueID); err != nil {
+			return nil, err
+		}
+	}
 
 	row := tx.QueryRow(ctx,
 		`UPDATE issues
@@ -552,12 +861,22 @@ func (r *Repository) SetIssueFalsePositive(ctx context.Context, scanID, issueID 
 	return issue, nil
 }
 
+// PostgreSQL text cannot store a zero byte. Keep the node's evidence position
+// visible instead of dropping an otherwise valid occurrence on insert.
+func occurrenceText(value *string) *string {
+	if value == nil || !strings.ContainsRune(*value, '\x00') {
+		return value
+	}
+	clean := strings.ReplaceAll(*value, "\x00", "\uFFFD")
+	return &clean
+}
+
 // CreateIssueOccurrence inserts a new issue occurrence record.
 func (r *Repository) CreateIssueOccurrence(ctx context.Context, issueID, urlID string, htmlSnippet, screenshotPath, elementScreenshotPath, cssSelector *string) error {
 	_, err := r.pool.Exec(ctx,
 		`INSERT INTO issue_occurrences (issue_id, url_id, html_snippet, screenshot_path, element_screenshot_path, css_selector)
 		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		issueID, urlID, htmlSnippet, screenshotPath, elementScreenshotPath, cssSelector,
+		issueID, urlID, occurrenceText(htmlSnippet), screenshotPath, elementScreenshotPath, occurrenceText(cssSelector),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create issue occurrence: %w", err)
@@ -615,10 +934,10 @@ func (r *Repository) CreateURLAuditOccurrences(ctx context.Context, occurrences 
 			occurrence.URLID,
 			occurrence.RuleID,
 			occurrence.Outcome,
-			occurrence.HTMLSnippet,
+			occurrenceText(occurrence.HTMLSnippet),
 			occurrence.ScreenshotPath,
 			occurrence.ElementScreenshotPath,
-			occurrence.CSSSelector,
+			occurrenceText(occurrence.CSSSelector),
 		); err != nil {
 			return fmt.Errorf(
 				"failed to insert URL audit occurrence %s for URL %s: %w",
@@ -638,8 +957,16 @@ func (r *Repository) CreateURLAuditOccurrences(ctx context.Context, occurrences 
 
 // GetScanIssues retrieves all issues for a scan, each with its occurrences.
 func (r *Repository) GetScanIssues(ctx context.Context, scanID string) ([]models.IssueWithOccurrences, error) {
+	tx, err := r.beginIssueRead(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin scan issue read: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	if err := admitLegacyScanIssues(ctx, tx, scanID); err != nil {
+		return nil, err
+	}
 	// First, get all issues for this scan
-	issueRows, err := r.pool.Query(ctx,
+	issueRows, err := tx.Query(ctx,
 		`SELECT i.id, i.scan_id, i.violation_type, i.description, i.help_url, i.severity, i.is_false_positive, i.created_at,
 		        COUNT(io.id) as occurrence_count
 		 FROM issues i
@@ -658,21 +985,15 @@ func (r *Repository) GetScanIssues(ctx context.Context, scanID string) ([]models
 	if err != nil {
 		return nil, fmt.Errorf("failed to get scan issues: %w", err)
 	}
-	defer issueRows.Close()
-
-	var issues []models.Issue
-	for issueRows.Next() {
-		var i models.Issue
-		if err := issueRows.Scan(&i.ID, &i.ScanID, &i.ViolationType, &i.Description, &i.HelpURL, &i.Severity, &i.IsFalsePositive, &i.CreatedAt, &i.OccurrenceCount); err != nil {
-			return nil, fmt.Errorf("failed to scan issue row: %w", err)
-		}
-		issues = append(issues, i)
+	issues, err := readScanIssueRows(issueRows)
+	if err != nil {
+		return nil, err
 	}
 
 	// For each issue, get its occurrences
 	var result []models.IssueWithOccurrences
 	for _, issue := range issues {
-		occRows, err := r.pool.Query(ctx,
+		occRows, err := tx.Query(ctx,
 			`SELECT io.id, io.issue_id, io.url_id, io.html_snippet, io.screenshot_path,
 			        io.element_screenshot_path, io.css_selector, io.created_at, u.url
 			 FROM issue_occurrences io
@@ -685,17 +1006,10 @@ func (r *Repository) GetScanIssues(ctx context.Context, scanID string) ([]models
 			return nil, fmt.Errorf("failed to get occurrences for issue %s: %w", issue.ID, err)
 		}
 
-		var occurrences []models.IssueOccurrence
-		for occRows.Next() {
-			var o models.IssueOccurrence
-			if err := occRows.Scan(&o.ID, &o.IssueID, &o.URLID, &o.HTMLSnippet, &o.ScreenshotPath,
-				&o.ElementScreenshotPath, &o.CSSSelector, &o.CreatedAt, &o.PageURL); err != nil {
-				occRows.Close()
-				return nil, fmt.Errorf("failed to scan occurrence row: %w", err)
-			}
-			occurrences = append(occurrences, o)
+		occurrences, err := readIssueOccurrenceRows(occRows)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read occurrences for issue %s: %w", issue.ID, err)
 		}
-		occRows.Close()
 
 		if occurrences == nil {
 			occurrences = []models.IssueOccurrence{}
@@ -710,14 +1024,57 @@ func (r *Repository) GetScanIssues(ctx context.Context, scanID string) ([]models
 	if result == nil {
 		result = []models.IssueWithOccurrences{}
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("failed to finish scan issue read: %w", err)
+	}
 	return result, nil
+}
+
+type issueQueryRows interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+	Close()
+}
+
+func readScanIssueRows(rows issueQueryRows) ([]models.Issue, error) {
+	defer rows.Close()
+	var issues []models.Issue
+	for rows.Next() {
+		var issue models.Issue
+		if err := rows.Scan(&issue.ID, &issue.ScanID, &issue.ViolationType, &issue.Description, &issue.HelpURL, &issue.Severity, &issue.IsFalsePositive, &issue.CreatedAt, &issue.OccurrenceCount); err != nil {
+			return nil, fmt.Errorf("failed to scan issue row: %w", err)
+		}
+		issues = append(issues, issue)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read scan issue rows: %w", err)
+	}
+	return issues, nil
+}
+
+func readIssueOccurrenceRows(rows issueQueryRows) ([]models.IssueOccurrence, error) {
+	defer rows.Close()
+	var occurrences []models.IssueOccurrence
+	for rows.Next() {
+		var occurrence models.IssueOccurrence
+		if err := rows.Scan(&occurrence.ID, &occurrence.IssueID, &occurrence.URLID, &occurrence.HTMLSnippet, &occurrence.ScreenshotPath,
+			&occurrence.ElementScreenshotPath, &occurrence.CSSSelector, &occurrence.CreatedAt, &occurrence.PageURL); err != nil {
+			return nil, fmt.Errorf("failed to scan occurrence row: %w", err)
+		}
+		occurrences = append(occurrences, occurrence)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read issue occurrence rows: %w", err)
+	}
+	return occurrences, nil
 }
 
 // GetStats returns aggregate statistics for the dashboard.
 func (r *Repository) GetStats(ctx context.Context) (*models.Stats, error) {
 	stats := &models.Stats{}
 
-	err := r.pool.QueryRow(ctx,
+	err := r.mcpQueryer(ctx).QueryRow(ctx,
 		`SELECT
 		   (SELECT COUNT(*) FROM scans) AS total_scans,
 		   (SELECT COUNT(*) FROM issues) AS total_issues,
@@ -731,9 +1088,28 @@ func (r *Repository) GetStats(ctx context.Context) (*models.Stats, error) {
 
 // GetMCPAuthSettings returns the current MCP enablement and key hash.
 func (r *Repository) GetMCPAuthSettings(ctx context.Context) (*models.MCPAuthSettings, error) {
+	select {
+	case mcpAuthSlots <- struct{}{}:
+	default:
+		return nil, ErrMCPAuthBusy
+	}
+	// Authorization must use live state, never a saved-data call's older snapshot.
+	ctx, finish, err := r.beginMCPRead(ctx, pgx.ReadCommitted)
+	defer func() {
+		release := func() { <-mcpAuthSlots }
+		if remaining := time.Until(finish()); remaining > 0 {
+			time.AfterFunc(remaining, release)
+		} else {
+			release()
+		}
+	}()
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare MCP authorization read: %w", err)
+	}
 	settings := &models.MCPAuthSettings{}
-	err := r.pool.QueryRow(ctx,
-		`SELECT mcp_enabled, mcp_allow_writes, mcp_key_hash, mcp_sessions_revoked_at
+	err = r.mcpQueryer(ctx).QueryRow(ctx,
+		`SELECT mcp_enabled, mcp_allow_writes,
+		 CASE WHEN octet_length(mcp_key_hash)=64 THEN mcp_key_hash ELSE NULL END, mcp_sessions_revoked_at
 		 FROM app_settings
 		 WHERE key = 'global'`,
 	).Scan(&settings.Enabled, &settings.AllowWrites, &settings.KeyHash, &settings.RevokedAt)
@@ -755,7 +1131,7 @@ func (r *Repository) GetMCPScanScoreSummary(ctx context.Context, scanID string) 
 	var scorePresent bool
 	var updatedAt time.Time
 
-	err := r.pool.QueryRow(ctx,
+	err := r.mcpQueryer(ctx).QueryRow(ctx,
 		`SELECT
 		   COALESCE(score, 0),
 		   score IS NOT NULL,
@@ -843,6 +1219,15 @@ func (r *Repository) GetPDFReportPolicy(ctx context.Context) (*models.PDFReportP
 
 // GetMCPVisibleSettings returns non-sensitive reporting, performance, and MCP settings.
 func (r *Repository) GetMCPVisibleSettings(ctx context.Context) (*models.MCPVisibleSettings, error) {
+	ctx, finish, err := r.BeginMCPRead(ctx)
+	defer finish()
+	if err != nil {
+		return nil, err
+	}
+	if err := r.mcpRead(ctx).measure(ctx, `SELECT COUNT(*),COALESCE(SUM(COALESCE(octet_length(mcp_key_hint),0)::bigint),0)
+		FROM app_settings WHERE key='global'`); err != nil {
+		return nil, err
+	}
 	var fullPDFOccurrenceLimit int
 	var singleIssuePDFOccurrenceLimit int
 	var smallCSVOccurrenceLimit int
@@ -859,7 +1244,7 @@ func (r *Repository) GetMCPVisibleSettings(ctx context.Context) (*models.MCPVisi
 	var mcpKeyHint sql.NullString
 	var mcpKeyGeneratedAt sql.NullTime
 
-	err := r.pool.QueryRow(ctx,
+	err = r.mcpQueryer(ctx).QueryRow(ctx,
 		`SELECT
 		   full_pdf_occurrence_limit,
 		   single_issue_pdf_occurrence_limit,
@@ -979,7 +1364,20 @@ func mcpAccessMode(allowWrites bool) string {
 
 // ListMCPScans returns a bounded list of scans for MCP clients.
 func (r *Repository) ListMCPScans(ctx context.Context, limit, offset int) ([]models.Scan, error) {
-	rows, err := r.pool.Query(ctx,
+	if limit < 1 || limit > 100 || offset < 0 || offset > 100000 {
+		return nil, fmt.Errorf("invalid MCP scan page")
+	}
+	ctx, finish, err := r.BeginMCPRead(ctx)
+	defer finish()
+	if err != nil {
+		return nil, err
+	}
+	if err := r.mcpRead(ctx).measure(ctx, `WITH page_ids AS MATERIALIZED (
+		SELECT id FROM scans ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2)
+		SELECT COUNT(*),COALESCE(SUM(`+mcpScanTextBytesSQL+`),0) FROM page_ids p JOIN scans s ON s.id=p.id`, limit, offset); err != nil {
+		return nil, err
+	}
+	rows, err := r.mcpQueryer(ctx).Query(ctx,
 		`SELECT `+scanColumns+`
 		 FROM scans
 		 ORDER BY created_at DESC, id DESC
@@ -997,7 +1395,7 @@ func (r *Repository) ListMCPScans(ctx context.Context, limit, offset int) ([]mod
 		var s models.Scan
 		if err := rows.Scan(&s.ID, &s.SitemapURL, &s.Status, &s.PauseRequested, &s.ScanType, &s.Tag,
 			&s.ViewportPreset, &s.ViewportWidth, &s.ViewportHeight,
-			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt, &s.IncludeLinkCheck); err != nil {
+			&s.TotalURLs, &s.ScannedURLs, &s.CreatedAt, &s.UpdatedAt, &s.IncludeLinkCheck, &s.RootPublic); err != nil {
 			return nil, fmt.Errorf("failed to scan MCP scan row: %w", err)
 		}
 		scans = append(scans, s)
@@ -1073,7 +1471,18 @@ const mcpIssueSummariesCTE = `WITH failed AS (
 
 // GetMCPIssueSummaries returns failed and needs-review issue groups without loading occurrences.
 func (r *Repository) GetMCPIssueSummaries(ctx context.Context, scanID string, limit, offset int) ([]models.MCPIssueSummary, int, error) {
-	rows, err := r.pool.Query(ctx,
+	if limit < 1 || limit > 100 || offset < 0 || offset > 100000 {
+		return nil, 0, fmt.Errorf("invalid MCP issue page")
+	}
+	ctx, finish, err := r.BeginMCPRead(ctx)
+	defer finish()
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := r.mcpRead(ctx).measureIssueSummaries(ctx, scanID, limit, offset); err != nil {
+		return nil, 0, err
+	}
+	rows, err := r.mcpQueryer(ctx).Query(ctx,
 		mcpIssueSummariesCTE+` SELECT *, COUNT(*) OVER()::int AS total_count
 		 FROM combined
 		 ORDER BY
@@ -1124,7 +1533,7 @@ func (r *Repository) GetMCPIssueSummaries(ctx context.Context, scanID string, li
 	rows.Close()
 	// The window count is absent when OFFSET lies beyond the final group.
 	if len(summaries) == 0 && offset > 0 {
-		if err := r.pool.QueryRow(ctx, mcpIssueSummariesCTE+` SELECT COUNT(*)::int FROM combined`, scanID).Scan(&total); err != nil {
+		if err := r.mcpQueryer(ctx).QueryRow(ctx, mcpIssueSummariesCTE+` SELECT COUNT(*)::int FROM combined`, scanID).Scan(&total); err != nil {
 			return nil, 0, fmt.Errorf("failed to count MCP issue summaries: %w", err)
 		}
 	}
@@ -1136,11 +1545,22 @@ func (r *Repository) GetMCPIssueSummaries(ctx context.Context, scanID string, li
 
 // GetMCPIssueDetail returns a paginated issue detail for MCP clients.
 func (r *Repository) GetMCPIssueDetail(ctx context.Context, scanID, kind, key string, limit, offset int) (*models.MCPIssueDetail, error) {
+	if limit < 1 || limit > 100 || offset < 0 || offset > 100000 || (kind != "failed" && kind != "needs_review") {
+		return nil, fmt.Errorf("invalid MCP occurrence page")
+	}
 	if kind == "failed" {
 		key = strings.ToLower(key)
 	}
+	ctx, finish, err := r.BeginMCPRead(ctx)
+	defer finish()
+	if err != nil {
+		return nil, err
+	}
+	if err := r.mcpRead(ctx).measureIssueDetail(ctx, scanID, kind, key, limit, offset); err != nil {
+		return nil, err
+	}
 	var summary models.MCPIssueSummary
-	err := r.pool.QueryRow(ctx,
+	err = r.mcpQueryer(ctx).QueryRow(ctx,
 		mcpIssueSummariesCTE+` SELECT * FROM combined WHERE kind = $2 AND key = $3`,
 		scanID, kind, key,
 	).Scan(&summary.Kind, &summary.Key, &summary.IssueID, &summary.RuleID,
@@ -1151,10 +1571,13 @@ func (r *Repository) GetMCPIssueDetail(ctx context.Context, scanID, kind, key st
 		}
 		return nil, fmt.Errorf("failed to get MCP issue detail summary: %w", err)
 	}
+	if err := r.mcpRead(ctx).measureIssueOccurrences(ctx, scanID, kind, key, limit, offset); err != nil {
+		return nil, err
+	}
 
 	var occurrences []models.IssueOccurrence
 	if kind == "failed" {
-		rows, err := r.pool.Query(ctx,
+		rows, err := r.mcpQueryer(ctx).Query(ctx,
 			`SELECT io.id, io.issue_id, io.url_id, io.html_snippet, io.screenshot_path,
 			        io.element_screenshot_path, io.css_selector, io.created_at, u.url
 			 FROM issue_occurrences io
@@ -1183,7 +1606,7 @@ func (r *Repository) GetMCPIssueDetail(ctx context.Context, scanID, kind, key st
 			return nil, fmt.Errorf("failed to read MCP failed occurrence rows: %w", err)
 		}
 	} else {
-		rows, err := r.pool.Query(ctx,
+		rows, err := r.mcpQueryer(ctx).Query(ctx,
 			`SELECT uao.id, uao.url_id, uao.html_snippet, uao.screenshot_path,
 			        uao.element_screenshot_path, uao.css_selector, uao.created_at, u.url
 			 FROM url_audit_occurrences uao

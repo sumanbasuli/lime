@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { MaterialSymbol } from "@/components/material-symbol";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,12 @@ const viewportFrameClass = {
   mobile: "h-11 w-6",
 } satisfies Record<ViewportPreset, string>;
 
+const subscribeToHydration = () => () => {};
+const clientSnapshot = () => true;
+const serverSnapshot = () => false;
+
 export function NewScanForm() {
+  const hydrated = useSyncExternalStore(subscribeToHydration, clientSnapshot, serverSnapshot);
   const [url, setUrl] = useState("");
   const [scanType, setScanType] = useState<ScanType>("sitemap");
   const [viewportPreset, setViewportPreset] = useState<ViewportPreset>("desktop");
@@ -35,6 +40,7 @@ export function NewScanForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const controlsDisabled = !hydrated || loading;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -76,7 +82,7 @@ export function NewScanForm() {
           <button
             type="button"
             onClick={() => setScanType("sitemap")}
-            disabled={loading}
+            disabled={controlsDisabled}
             aria-pressed={scanType === "sitemap"}
             className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
               scanType === "sitemap"
@@ -90,7 +96,7 @@ export function NewScanForm() {
           <button
             type="button"
             onClick={() => setScanType("single")}
-            disabled={loading}
+            disabled={controlsDisabled}
             aria-pressed={scanType === "single"}
             className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
               scanType === "single"
@@ -114,7 +120,7 @@ export function NewScanForm() {
                 key={option.key}
                 type="button"
                 onClick={() => setViewportPreset(option.key)}
-                disabled={loading}
+                disabled={controlsDisabled}
                 aria-pressed={isActive}
                 className={`relative flex min-h-[150px] flex-col rounded-2xl border p-4 text-left transition ${
                   isActive
@@ -160,7 +166,7 @@ export function NewScanForm() {
           }
           value={url}
           onChange={(event) => setUrl(event.target.value)}
-          disabled={loading}
+          disabled={controlsDisabled}
           className="h-11 rounded-xl bg-[#FBFAF6] px-4 font-mono text-sm shadow-none focus:bg-white"
         />
       </div>
@@ -175,7 +181,7 @@ export function NewScanForm() {
           placeholder="e.g. production"
           value={tag}
           onChange={(event) => setTag(event.target.value)}
-          disabled={loading}
+          disabled={controlsDisabled}
           className="h-11 rounded-xl bg-[#FBFAF6] px-4 shadow-none focus:bg-white"
         />
       </div>
@@ -188,7 +194,7 @@ export function NewScanForm() {
             aria-labelledby="include-link-check-label"
             checked={includeLinkCheck}
             onChange={(event) => setIncludeLinkCheck(event.target.checked)}
-            disabled={loading}
+            disabled={controlsDisabled}
             aria-describedby="include-link-check-help"
             className="mt-0.5 size-4 shrink-0 accent-black"
           />
@@ -206,7 +212,7 @@ export function NewScanForm() {
 
       <button
         type="submit"
-        disabled={loading}
+        disabled={controlsDisabled}
         className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-full bg-black px-5 text-sm font-semibold text-white transition-colors hover:bg-[#FFED00] hover:text-black disabled:cursor-wait disabled:opacity-60"
       >
         <MaterialSymbol

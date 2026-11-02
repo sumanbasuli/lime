@@ -34,14 +34,23 @@ export default function GetStartedPage() {
           </CardHeader>
           <CardContent>
             <p className="mb-4 text-sm leading-6 text-black/70">
-              Install Git, Make, and Docker with Compose, then run:
+              Install Git, Make, and Docker with Compose, start Docker, then run:
             </p>
             <pre className="overflow-x-auto rounded-2xl border border-black/10 bg-white/70 p-4 text-xs leading-6 sm:text-sm sm:leading-7">
 {`git clone https://github.com/sumanbasuli/lime.git
 cd lime
-cp .env.example .env
+make init-env
 make start-all`}
             </pre>
+            <p className="mt-4 text-sm leading-6 text-black/70">
+              This manual setup publishes the dashboard and backend ports on
+              the host. If other people can reach it, restrict both ports at
+              the firewall. For remote use, expose the dashboard through an
+              authenticated proxy or trusted private network, and keep direct
+              backend access private. The dashboard and ordinary API have no
+              built-in login; an MCP key
+              protects only the MCP endpoint.
+            </p>
             <p className="mt-4 text-sm leading-6 text-black/70">
               Open the dashboard at <code>http://localhost:3000</code> once
               the services are ready. The backend defaults to port 8080;
@@ -84,9 +93,6 @@ make start-all`}
             </Button>
             <Button variant="outline" className="justify-start text-left" asChild>
               <a href={withBasePath("/docs/reference/deployment/debian/")}>Debian guide</a>
-            </Button>
-            <Button variant="outline" className="justify-start text-left" asChild>
-              <a href={withBasePath("/docs/reference/deployment/fly/")}>Fly.io guide</a>
             </Button>
             <Button variant="outline" className="justify-start text-left" asChild>
               <a href={withBasePath("/docs/reference/deployment/backup-restore/")}>Backup and restore</a>

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"math"
 	"math/big"
 	"net/http"
@@ -16,14 +15,18 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sumanbasuli/lime/shopkeeper/internal/buildinfo"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/models"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/repository"
+	log "github.com/sumanbasuli/lime/shopkeeper/internal/safelog"
 )
 
 const protocolVersion = "2025-11-25"
 
 const maxRequestBodyBytes = 1 << 20
+const dashboardTransformHeader = "X-Lime-MCP-Transform"
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
@@ -35,9 +38,13 @@ func supportedProtocolVersion(version string) bool {
 }
 
 type Repository interface {
+	BeginMCPRead(context.Context) (context.Context, func() time.Time, error)
+	BeginMCPActionCall(context.Context) (context.Context, func() time.Time, error)
 	GetMCPAuthSettings(ctx context.Context) (*models.MCPAuthSettings, error)
 	ListMCPScans(ctx context.Context, limit, offset int) ([]models.Scan, error)
 	GetScan(ctx context.Context, id string) (*models.Scan, error)
+	GetMCPScanReference(ctx context.Context, id string) (*models.Scan, error)
+	GetMCPReportSettings(ctx context.Context) (*models.MCPVisibleSettings, error)
 	GetMCPScanScoreSummary(ctx context.Context, scanID string) (*models.MCPScanScoreSummary, error)
 	GetMCPIssueSummaries(ctx context.Context, scanID string, limit, offset int) ([]models.MCPIssueSummary, int, error)
 	GetMCPIssueDetail(ctx context.Context, scanID, kind, key string, limit, offset int) (*models.MCPIssueDetail, error)
@@ -74,6 +81,33 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
+type toolCallParams struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+func decodeToolCallParams(raw json.RawMessage) (toolCallParams, error) {
+	var params toolCallParams
+	err := json.Unmarshal(raw, &params)
+	return params, err
+}
+
+func dashboardTransformNeeded(request rpcRequest) bool {
+	if request.Method != "tools/call" {
+		return false
+	}
+	params, err := decodeToolCallParams(request.Params)
+	if err != nil {
+		return false
+	}
+	switch params.Name {
+	case "get_scan", "get_report", "get_screenshot", "get_link_check_export", "update_settings":
+		return true
+	default:
+		return false
+	}
+}
+
 func New(repo Repository, actions ...http.Handler) *Server {
 	s := &Server{repo: repo}
 	if len(actions) > 0 {
@@ -105,9 +139,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
-	if !s.authorized(r.Context(), r.Header.Get("Authorization")) {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="LIME MCP"`)
-		writeRPCError(w, http.StatusUnauthorized, nil, -32001, "unauthorized")
+	if !s.authorizeRequest(w, r, nil) {
 		return
 	}
 
@@ -120,6 +152,11 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		writeRPCError(w, status, request.ID, rpcErr.Code, rpcErr.Message)
 		return
 	}
+	// Body decoding can wait on a slow client while the key is rotated or MCP is
+	// disabled. Check the live setting again before dispatching any work.
+	if !s.authorizeRequest(w, r, request.ID) {
+		return
+	}
 
 	if !hasID {
 		if !strings.HasPrefix(request.Method, "notifications/") {
@@ -129,8 +166,36 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 		return
 	}
+	// The dashboard only materializes responses for its own tool enrichments.
+	// Classify with the same decoder used by dispatch, including JSON key aliases
+	// and duplicate-key ordering, so it cannot disagree about the executed tool.
+	w.Header().Set(dashboardTransformHeader, "none")
+	if dashboardTransformNeeded(request) {
+		w.Header().Set(dashboardTransformHeader, "dashboard")
+	}
 
-	result, rpcErr := s.dispatch(r.Context(), request)
+	state := &readLifecycle{}
+	defer state.finish()
+	actionState := &actionLifecycle{}
+	defer actionState.finish()
+	ctx := context.WithValue(r.Context(), readLifecycleKey{}, state)
+	ctx = context.WithValue(ctx, actionLifecycleKey{}, actionState)
+	result, rpcErr := s.dispatch(ctx, request)
+	state.finishRead()
+	actionState.finishRead()
+	if state.release != nil || actionState.release != nil {
+		defer finishReadDelivery(w)()
+	}
+	if state.busy || actionState.busy {
+		w.Header().Set("Retry-After", "1")
+		// No slot is available to buffer another potentially 1 MiB RPC ID.
+		message := "MCP saved-data read capacity is busy. Retry this read after 1 second."
+		if actionState.busy {
+			message = "MCP action capacity is busy. No action was started; retry after 1 second using the same request_id."
+		}
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": message})
+		return
+	}
 	if rpcErr != nil {
 		writeJSON(w, http.StatusOK, rpcResponse{
 			JSONRPC: "2.0",
@@ -220,21 +285,38 @@ func isJSONInteger(value json.Number) bool {
 	return ok && number.IsInt()
 }
 
-func (s *Server) authorized(ctx context.Context, authHeader string) bool {
-	settings, err := s.repo.GetMCPAuthSettings(ctx)
-	if err != nil || settings == nil || !settings.Enabled || settings.KeyHash == nil {
+func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request, id any) bool {
+	allowed, err := s.authorized(r.Context(), r.Header.Get("Authorization"))
+	if err != nil {
+		w.Header().Set("Retry-After", "1")
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "MCP authorization is temporarily unavailable. Retry after 1 second."})
 		return false
+	}
+	if !allowed {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="LIME MCP"`)
+		writeRPCError(w, http.StatusUnauthorized, id, -32001, "unauthorized")
+	}
+	return allowed
+}
+
+func (s *Server) authorized(ctx context.Context, authHeader string) (bool, error) {
+	settings, err := s.repo.GetMCPAuthSettings(ctx)
+	if err != nil {
+		return false, err
+	}
+	if settings == nil || !settings.Enabled || settings.KeyHash == nil {
+		return false, nil
 	}
 
 	parts := strings.Fields(authHeader)
 	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-		return false
+		return false, nil
 	}
 	token := parts[1]
 
 	sum := sha256.Sum256([]byte(token))
 	actual := hex.EncodeToString(sum[:])
-	return subtle.ConstantTimeCompare([]byte(actual), []byte(*settings.KeyHash)) == 1
+	return subtle.ConstantTimeCompare([]byte(actual), []byte(*settings.KeyHash)) == 1, nil
 }
 
 func (s *Server) dispatch(ctx context.Context, request rpcRequest) (any, *rpcError) {
@@ -281,11 +363,8 @@ func (s *Server) dispatch(ctx context.Context, request rpcRequest) (any, *rpcErr
 }
 
 func (s *Server) handleToolCall(ctx context.Context, raw json.RawMessage) (any, *rpcError) {
-	var params struct {
-		Name      string          `json:"name"`
-		Arguments json.RawMessage `json:"arguments"`
-	}
-	if err := json.Unmarshal(raw, &params); err != nil {
+	params, decodeErr := decodeToolCallParams(raw)
+	if decodeErr != nil {
 		return nil, &rpcError{Code: -32602, Message: "invalid tool call parameters"}
 	}
 	if params.Name == "" {
@@ -320,7 +399,39 @@ func (s *Server) handleToolCall(ctx context.Context, raw json.RawMessage) (any, 
 		if s.actions == nil {
 			return toolError("MCP actions are unavailable on this endpoint. Use the dashboard MCP endpoint."), nil
 		}
+		if params.Name != "update_settings" {
+			state, _ := ctx.Value(actionLifecycleKey{}).(*actionLifecycle)
+			if state == nil {
+				state = &actionLifecycle{}
+				defer state.finish()
+			}
+			actionCtx, admitted, err := state.begin(ctx, s.repo)
+			if !admitted {
+				return readToolError("MCP action capacity is busy. No action was started; retry after 1 second using the same request_id.", 503, true), nil
+			}
+			if err != nil {
+				return toolError("Unable to prepare the LIME action. No action was started; retry using the same request_id."), nil
+			}
+			ctx = actionCtx
+		}
 		return s.handleAction(ctx, params.Name, arguments), nil
+	}
+	// Dashboard dispatch markers contain only already-validated arguments; they
+	// do not read saved evidence or occupy native read capacity.
+	if params.Name != "get_report" && params.Name != "get_screenshot" && params.Name != "get_link_check_export" {
+		state, _ := ctx.Value(readLifecycleKey{}).(*readLifecycle)
+		if state == nil {
+			state = &readLifecycle{}
+			defer state.finish()
+		}
+		readCtx, admitted, err := state.begin(ctx, s.repo)
+		if !admitted {
+			return readToolError("MCP saved-data read capacity is busy. Retry this read after 1 second.", 503, true), nil
+		}
+		if err != nil {
+			return toolError("Unable to prepare the LIME data read. Retry this read."), nil
+		}
+		ctx = readCtx
 	}
 
 	var result any
@@ -360,6 +471,9 @@ func (s *Server) handleToolCall(ctx context.Context, raw json.RawMessage) (any, 
 		return nil, &rpcError{Code: -32602, Message: "unknown tool"}
 	}
 	if err != nil {
+		if errors.Is(err, repository.ErrMCPReadTooLarge) {
+			return readToolError("Selected LIME data is too large for one MCP response. Reduce limit or use the dashboard; no data was truncated.", 413, false), nil
+		}
 		if errors.Is(err, errScanNotFound) || errors.Is(err, errIssueNotFound) || errors.Is(err, errLinkCheckNotFound) || errors.Is(err, errLinkResultNotFound) {
 			return toolError(err.Error()), nil
 		}
@@ -378,7 +492,7 @@ func (s *Server) listScans(ctx context.Context, args map[string]any) (any, error
 		return nil, err
 	}
 	return map[string]any{
-		"scans":  scans,
+		"scans":  models.PublicScans(scans),
 		"limit":  limit,
 		"offset": offset,
 	}, nil
@@ -406,8 +520,9 @@ func (s *Server) getScan(ctx context.Context, args map[string]any) (any, error) 
 		percent = float64(scanned) / float64(total) * 100
 	}
 
+	publicScan := models.PublicScan(*scan)
 	return models.MCPScanDetail{
-		Scan: scan,
+		Scan: &publicScan,
 		Progress: map[string]any{
 			"scanned_urls": scanned,
 			"total_urls":   total,
@@ -427,7 +542,7 @@ func (s *Server) listScanIssues(ctx context.Context, args map[string]any) (any, 
 		return nil, err
 	}
 	return map[string]any{
-		"issues": issues,
+		"issues": models.PublicMCPIssueSummaries(issues),
 		"total":  total,
 		"limit":  limit,
 		"offset": offset,
@@ -447,19 +562,22 @@ func (s *Server) getIssueDetail(ctx context.Context, args map[string]any) (any, 
 	if detail == nil {
 		return nil, errIssueNotFound
 	}
-	return map[string]any{"detail": detail}, nil
+	publicDetail := *detail
+	publicDetail.Summary = models.PublicMCPIssueSummary(detail.Summary)
+	publicDetail.Occurrences = models.PublicIssueOccurrences(detail.Occurrences)
+	return map[string]any{"detail": &publicDetail}, nil
 }
 
 func (s *Server) getReportMetadata(ctx context.Context, args map[string]any) (any, error) {
 	scanID := stringArg(args, "scan_id")
-	scan, err := s.repo.GetScan(ctx, scanID)
+	scan, err := s.repo.GetMCPScanReference(ctx, scanID)
 	if err != nil {
 		return nil, err
 	}
 	if scan == nil {
 		return nil, errScanNotFound
 	}
-	settings, err := s.repo.GetMCPVisibleSettings(ctx)
+	settings, err := s.repo.GetMCPReportSettings(ctx)
 	if err != nil {
 		return nil, err
 	}

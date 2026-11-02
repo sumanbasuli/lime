@@ -4,6 +4,7 @@ import {
   saveSystemSettings,
 } from "@/lib/report-settings";
 import { rejectCrossOriginWrite } from "@/lib/ordinary-api-origin";
+import { readBoundedJSONBody } from "@/lib/bounded-json-body";
 import type {
   IntegrationSettings,
   PerformanceSettings,
@@ -13,6 +14,24 @@ import type {
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+const settingsBodyOptions = { maxBytes: 1024 * 1024, timeoutMs: 60_000 };
+
+function rejectedSettingsBody(kind: "too_large" | "timed_out" | "invalid") {
+  if (kind === "too_large") {
+    return Response.json(
+      { error: "Request body too large" },
+      { status: 413, headers: { Connection: "close" } }
+    );
+  }
+  if (kind === "timed_out") {
+    return Response.json(
+      { error: "Request body timed out" },
+      { status: 408, headers: { Connection: "close" } }
+    );
+  }
+  return null;
+}
 
 function isBoolean(value: unknown): value is boolean {
   return typeof value === "boolean";
@@ -133,7 +152,12 @@ export async function GET() {
 export async function PUT(request: Request) {
   const rejected = rejectCrossOriginWrite(request);
   if (rejected) return rejected;
-  const payload = parseSettingsPayload(await request.json().catch(() => null));
+  const body = await readBoundedJSONBody(request, settingsBodyOptions);
+  if (body.kind !== "ok") {
+    const rejection = rejectedSettingsBody(body.kind);
+    if (rejection) return rejection;
+  }
+  const payload = parseSettingsPayload(body.kind === "ok" ? body.value : null);
 
   if (payload === null) {
     return Response.json(
@@ -149,7 +173,12 @@ export async function PUT(request: Request) {
 export async function POST(request: Request) {
   const rejected = rejectCrossOriginWrite(request);
   if (rejected) return rejected;
-  const payload = (await request.json().catch(() => ({}))) as {
+  const body = await readBoundedJSONBody(request, settingsBodyOptions);
+  if (body.kind !== "ok") {
+    const rejection = rejectedSettingsBody(body.kind);
+    if (rejection) return rejection;
+  }
+  const payload = (body.kind === "ok" ? body.value : {}) as {
     action?: string;
   };
 

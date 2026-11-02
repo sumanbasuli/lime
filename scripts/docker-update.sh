@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Zero-ish-downtime update for a Docker Compose LIME deployment.
+# Maintenance-window update for a Docker Compose LIME deployment.
 #
 # Flow:
 #   1. dump the local Postgres (if using the bundled db service)
 #      to dist/backups/lime-pre-<tag>-<timestamp>.sql.gz
 #   2. pull the new GHCR images defined by LIME_IMAGE_TAG
-#   3. migrate via a one-shot Shopkeeper container so the schema
-#      is ready before long-running containers are touched
-#   4. recreate shopkeeper, wait for health, then recreate ui
+#   3. stop the old UI and Shopkeeper before applying schema changes
+#   4. migrate via a one-shot Shopkeeper container
+#   5. recreate Shopkeeper, wait for health, then recreate UI
 #
 # Usage (from repo root):
 #   ./scripts/docker-update.sh v1.0.3
@@ -84,7 +84,7 @@ if compose ps --services 2>/dev/null | grep -qx "db"; then
   ( set -C; compose exec -T db pg_dump -U "${POSTGRES_USER:-lime}" "${POSTGRES_DB:-lime_db}" | gzip -9 > "${BACKUP_FILE}" )
 elif [[ -n "${DATABASE_URL:-}" ]] && command -v pg_dump >/dev/null 2>&1; then
   echo "    dumping external database via host pg_dump"
-  ( set -C; pg_dump "${DATABASE_URL}" | gzip -9 > "${BACKUP_FILE}" )
+  dump_external_database "${DATABASE_URL}" "${BACKUP_FILE}"
 else
   echo "    no bundled db and pg_dump unavailable on host; skipping automatic backup"
   echo "    (take a manual backup of your DATABASE_URL target before continuing)"
@@ -107,6 +107,12 @@ export LIME_IMAGE_TAG="${TAG}"
 echo "==> Pulling new images"
 compose pull shopkeeper ui
 
+echo "==> Stopping old UI and Shopkeeper for migration"
+compose stop ui shopkeeper
+
+echo "==> Verifying browser sandbox and catalogs before migration"
+compose run --rm --no-deps shopkeeper ./shopkeeper --verify-startup
+
 echo "==> Applying migrations with one-shot Shopkeeper"
 compose run --rm --no-deps shopkeeper ./shopkeeper --migrate
 
@@ -115,7 +121,7 @@ compose up -d --no-deps shopkeeper
 
 echo "==> Waiting for Shopkeeper health"
 for attempt in $(seq 1 30); do
-  if compose exec -T shopkeeper wget -qO- "http://127.0.0.1:${SHOPKEEPER_PORT:-8080}/api/health" >/dev/null 2>&1; then
+  if compose exec -T shopkeeper setpriv --reuid=10001 --regid=10001 --clear-groups --bounding-set=-all --inh-caps=-all --ambient-caps=-all --no-new-privs -- wget -qO- "http://127.0.0.1:${SHOPKEEPER_PORT:-8080}/api/health" >/dev/null 2>&1; then
     echo "    healthy after ${attempt} attempts"
     break
   fi
@@ -134,4 +140,5 @@ echo "Update to ${TAG} complete."
 if [[ -n "${BACKUP_FILE}" ]]; then
   echo "Backup: ${BACKUP_FILE}"
 fi
-echo "Rollback with: ./scripts/docker-update.sh ${OLD_TAG}"
+echo "Previous image tag: ${OLD_TAG}. Do not restart it against an unreviewed migrated database."
+echo "Recovery requires a schema-compatible release or a matched pre-update database, screenshot, and configuration backup."

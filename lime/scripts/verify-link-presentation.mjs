@@ -6,13 +6,21 @@ import vm from "node:vm";
 
 const require = createRequire(new URL("../package.json", import.meta.url));
 const ts = require("typescript");
+const urlPresentationSource = await readFile(new URL("../src/lib/url-presentation.ts", import.meta.url), "utf8");
+const urlPresentationExports = {};
+vm.runInNewContext(ts.transpileModule(urlPresentationSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+}).outputText, { exports: urlPresentationExports, URL });
 const source = await readFile(new URL("../src/lib/link-presentation.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const exports = {};
 // Type-only icon imports disappear: this exercises the actual helper with no React or network.
-vm.runInNewContext(compiled, { exports, URL });
+vm.runInNewContext(compiled, { exports, URL, require: (name) => {
+  assert.equal(name, "@/lib/url-presentation");
+  return urlPresentationExports;
+} });
 const { getLinkPresentation } = exports;
 
 const iconSource = await readFile(new URL("../src/components/bootstrap-icon.tsx", import.meta.url), "utf8");
@@ -23,6 +31,35 @@ const iconExports = {};
 vm.runInNewContext(iconCompiled, { exports: iconExports, require });
 const { createElement } = require("react");
 const { renderToStaticMarkup } = require("react-dom/server");
+const linkSummarySource = await readFile(new URL("../src/components/link-check-summary.tsx", import.meta.url), "utf8");
+const linkSummaryCompiled = ts.transpileModule(linkSummarySource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+}).outputText;
+const linkSummaryExports = {};
+vm.runInNewContext(linkSummaryCompiled, {
+  exports: linkSummaryExports,
+  URL,
+  require: (name) => name === "@/lib/url-presentation"
+    ? urlPresentationExports
+    : name === "@/components/bootstrap-icon"
+      ? { BootstrapIcon: () => null }
+      : require(name),
+});
+
+test("saved link presentation removes userinfo from visible text and navigation", () => {
+  const html = renderToStaticMarkup(createElement(linkSummaryExports.LinkUrl, {
+    url: "https://reader:secret@example.test/path",
+  }));
+  assert.match(html, /href="https:\/\/example\.test\/path"/);
+  assert.match(html, />https:\/\/example\.test\/path<\/a>/);
+  assert.ok(!html.includes("reader") && !html.includes("secret"));
+  const ordinary = renderToStaticMarkup(createElement(linkSummaryExports.LinkUrl, {
+    url: "https://example.test/path?q=1#part",
+  }));
+  assert.match(ordinary, /href="https:\/\/example\.test\/path"/);
+  assert.match(ordinary, />https:\/\/example\.test\/path<\/a>/);
+  assert.ok(!ordinary.includes("?q=1") && !ordinary.includes("#part"));
+});
 
 test("local Bootstrap SVGs are decorative, scalable, and require no remote assets", () => {
   for (const name of ["linkedin", "github", "wordpress", "twitter-x", "facebook", "instagram", "youtube", "globe2", "image", "code-slash", "chevron-down", "shield-lock"]) {
@@ -90,10 +127,10 @@ test("generic hosts, IPv6, and localhost are retained without inventing brands",
   }
 });
 
-test("paths preserve full long queries, repeated parameters, encoding, and fragments", () => {
+test("paths preserve encoding but omit long queries and fragments", () => {
   const suffix = `/download/%E2%9C%93?item=first&item=second&token=${"a".repeat(4096)}#details`;
   const result = getLinkPresentation(`https://example.com${suffix}`);
-  assert.equal(result.path, suffix);
+  assert.equal(result.path, "/download/%E2%9C%93");
   assert.equal(getLinkPresentation("https://example.com").path, "/");
 });
 

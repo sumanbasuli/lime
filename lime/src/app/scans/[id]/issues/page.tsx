@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { redactUrlUserinfo } from "@/lib/url-presentation";
 import { count, eq } from "drizzle-orm";
 import { MaterialSymbol } from "@/components/material-symbol";
 import { db } from "@/db";
@@ -23,7 +24,7 @@ function formatDomain(value: string): string {
   try {
     return new URL(value).hostname.replace(/^www\./, "");
   } catch {
-    return value;
+    return redactUrlUserinfo(value);
   }
 }
 

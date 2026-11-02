@@ -22,7 +22,7 @@ Scan sitemaps, capture screenshots, review issues in a dashboard.
 
 LIME is an accessibility scanner you host yourself. Point it at a sitemap or a URL: it visits eligible pages with headless Chromium, runs configured WCAG A/AA axe-core checks with Lighthouse-aligned overrides, captures focused screenshots, and groups findings into reviewable issues with ACT rule guidance. Automated findings support review; they do not establish accessibility conformance on their own.
 
-Migrations apply on boot, interrupted scans recover on restart, and deployment helpers support Docker, Fly.io, and Debian systemd. Scan cost and report size depend on the target site and configured limits.
+Migrations apply on boot, interrupted scans recover on restart, and deployment helpers support Docker and Debian systemd. Scan cost and report size depend on the target site and configured limits.
 
 ## Features
 
@@ -36,8 +36,8 @@ Migrations apply on boot, interrupted scans recover on restart, and deployment h
 - **Scan recovery** - non-terminal scans resume after Shopkeeper restarts.
 - **Update notice** - enabled-by-default release checks and a sidebar banner when a newer GitHub release is available; server and browser controls let you opt out.
 - **Full MCP workflows** - compatible AI clients read saved evidence, reports and screenshots, then manage scan/link lifecycles, false-positive triage, and reporting/performance settings with operator-enabled write access. Existing keys stay read-only by default.
-- **Link checker (unreleased source)** - bounded single-page or same-origin crawl checks with saved destinations/source references and CSV; opt in with **Include link check** on a normal accessibility scan without changing its score or screenshots. Six additive MCP tools read its saved history, totals, companion status, targets, and paginated references through the existing endpoint/key.
-- **Three deploy targets** - Fly.io, Docker, and Debian systemd.
+- **Link checker** - bounded single-page or same-origin crawl checks with saved destinations/source references and CSV; opt in with **Include link check** on a normal accessibility scan without changing its score or screenshots. Six additive MCP tools read its saved history, totals, companion status, targets, and paginated references through the existing endpoint/key.
+- **Deployment options** - Docker and Debian systemd.
 
 ## Architecture
 
@@ -59,12 +59,12 @@ Full architecture docs: [lime.heysuman.com/docs/reference/architecture/shopkeepe
 
 ## Quick start
 
-Install Git, Make, and Docker with the Compose plugin. From a new checkout:
+Install Git, Make, and Docker with Compose, and start the Docker engine. From a new checkout:
 
 ```bash
 git clone https://github.com/sumanbasuli/lime.git
 cd lime
-cp .env.example .env
+make init-env
 make start-all
 ```
 
@@ -75,7 +75,7 @@ Open:
 
 `make stop-all` stops this project's stack and preserves its data. `make clean` deletes its database/screenshot volumes and local build artifacts; use it only for an intentional reset. Do not overwrite an existing `.env` when updating a checkout.
 
-See [Setup](docs/setup.md) for prerequisites, native development, port overrides, and troubleshooting. The dashboard and ordinary HTTP API have no built-in user authentication; protect any remotely reachable instance with an appropriate access layer. The MCP bearer key protects MCP requests, not the rest of the dashboard.
+See [Setup](docs/setup.md) for prerequisites, native development, port overrides, and troubleshooting. Manual source and release Compose runs publish the dashboard and ordinary HTTP API on host interfaces by default. Neither has built-in user authentication: before making those ports reachable from another machine, restrict them with a firewall or authenticated reverse proxy and use TLS. The MCP bearer key protects MCP requests, not the rest of the dashboard.
 
 ## Deploy
 
@@ -83,40 +83,19 @@ LIME publishes versioned Docker images to GHCR from the main-branch release work
 
 | Target | One-liner | Guide |
 |--------|-----------|-------|
-| **Fly.io** | `./scripts/fly-deploy.sh vX.Y.Z` | [Fly.io guide](https://lime.heysuman.com/docs/reference/deployment/fly/) |
 | **Docker** | `docker compose -f docker-compose.release.yml up -d` | [Docker guide](https://lime.heysuman.com/docs/reference/deployment/docker/) |
 | **Debian systemd** | `make debian-install` | [Debian guide](https://lime.heysuman.com/docs/reference/deployment/debian/) |
 
-### Deploy to Fly.io
-
-Fly Launch is Fly.io's app workflow around `fly launch`, `fly.toml`, and `fly deploy`; see [Fly Launch](https://fly.io/launch) for the platform overview. LIME uses that model, but it is a two-app deployment (Shopkeeper + UI), so do not run a single root-level `fly launch` and expect the whole stack to be configured. Use the included helper instead: `scripts/fly-deploy.sh` creates both apps, provisions screenshot storage, wires private networking, and deploys the published GHCR images.
-
-Before deploying, install [`flyctl`](https://fly.io/docs/flyctl/install/) and authenticate:
-
-```bash
-flyctl auth login
-```
-
-Use either an external PostgreSQL URL:
-
-```bash
-export DATABASE_URL='postgresql://...'
-./scripts/fly-deploy.sh vX.Y.Z
-```
-
-Or attach Fly Managed Postgres to both apps first; the helper will reuse existing `DATABASE_URL` Fly secrets. Details: [Fly.io deployment docs](https://lime.heysuman.com/docs/reference/deployment/fly/).
-
 ### Updating
 
-Back up the database and screenshots before updating. The update helpers differ by deployment target; do not assume each command creates a backup automatically. In particular, Fly.io database backups must be managed separately. Check the target's guide for prerequisites, migration behavior, and rollback limits.
+Back up the database and screenshots before updating. Check your deployment guide for prerequisites, backup behavior, migration steps, and rollback limits.
 
 ```bash
-./scripts/fly-update.sh vX.Y.Z            # Fly.io
 make update-release TAG=vX.Y.Z            # published Docker images (repository helper)
 sudo ./scripts/debian-update.sh vX.Y.Z    # Debian systemd
 ```
 
-For a source-built Docker stack, preserve `.env` and volumes, check out the intended source revision, then use `make start-all` to build that source. The legacy `make update` helper does not reliably select those rebuilt images or validate its backup; do not use its success message as upgrade evidence. Details and rollback: [update docs](https://lime.heysuman.com/docs/reference/deployment/updates/).
+For a source-built Docker stack, preserve `.env` and volumes, take a matching backup, then use the maintenance-window `make update TAG=vX.Y.Z` command from the updated checkout. It rebuilds the Compose-selected images and checks backend/UI readiness; a live upgrade rehearsal and post-update scan/report check are still needed. Details and recovery: [update docs](https://lime.heysuman.com/docs/reference/deployment/updates/).
 
 ## Configuration
 
@@ -129,6 +108,7 @@ Runtime configuration lives in `.env` (root) or deploy-specific env files.
 | `LIME_IMAGE_REGISTRY` | release only | GHCR namespace for published images, e.g. `ghcr.io/sumanbasuli`. |
 | `LIME_IMAGE_TAG` | release only | Pinned GHCR release tag selected for deployment. |
 | `LIME_API_PORT` / `LIME_UI_PORT` | optional | Published ports (defaults 8080 / 3000). |
+| `LIME_DB_BIND_HOST` | source Compose only | PostgreSQL host bind address; defaults to `127.0.0.1`. Expose it remotely only behind deliberate network controls. |
 | `LIME_UPDATE_CHECK` | optional | Best-effort GitHub release checks are enabled by default. Set `false` to disable outbound checks; Settings also controls each browser's card visibility. |
 | `LIME_GITHUB_REPO` | optional | Override the update-check repo (default `sumanbasuli/lime`). |
 | `ACT_RULES_PATH` | optional | Override the bundled ACT catalog path. |
@@ -161,12 +141,12 @@ make dev-ui              # native workflow: NextJS with hot reload
 | `make docs-verify` | Build and browser-check the marketing website and docs |
 | `make verify-app` | Verify existing dashboard features against an isolated Docker stack and deterministic local pages |
 | `make backup-db` | Dump the bundled Postgres to `dist/backups/` |
-| `make update TAG=vX.Y.Z` | Legacy helper; not a verified source-stack upgrade path. Follow the update guide instead |
+| `make update TAG=vX.Y.Z` | Maintenance update for a source-built Docker stack; back up screenshots/configuration separately |
 | `make clean` | Stop the stack and delete its data volumes and local build artifacts |
 
 ## Tech stack
 
-- **Backend**: Go 1.25, Chi, pgx, golang-migrate, chromedp
+- **Backend**: Go 1.27, Chi, pgx, golang-migrate, chromedp
 - **Frontend**: NextJS 16 (App Router), shadcn/ui, Drizzle ORM, TailwindCSS v4
 - **Browser**: Chromium (Debian bookworm base image)
 - **DB**: PostgreSQL 17
@@ -179,7 +159,7 @@ To review the complete marketing website and docs locally, install the docs depe
 
 `make docs` refreshes the docs site locally. It uses a separate `lime-docs` Docker Compose project, separate Postgres and screenshot volumes, non-default ports, fresh single-page demo scans for `https://heysuman.com`, `https://www.fake-university.com/`, and `https://overlaysdontwork.com/`, and a new standalone link check for the selected capture target. It supplies explicit isolated IDs and refreshes ten product images, never current private/local scans. See [Docs Site](docs/docs-site.md) for capture arguments, wait boundaries, assertions, and cleanup.
 
-For the project handoff, feature verification matrix, isolated test workflow, and current verification evidence, see [Verification And Handoff](docs/verification.md). The working **Link checker** replaces the earlier design preview in unreleased source: see the [user guide](https://lime.heysuman.com/docs/user/link-checker/) and [architecture/limits](docs/architecture/link-checker.md). Published images may not include this source change yet. Link reachability is separate from accessibility scoring and does not verify fragment anchors or JavaScript-created links.
+For the project handoff, feature verification matrix, isolated test workflow, and current verification evidence, see [Verification And Handoff](docs/verification.md). The working **Link checker** replaces the earlier design preview in version 2.0: see the [user guide](https://lime.heysuman.com/docs/user/link-checker/) and [architecture/limits](docs/architecture/link-checker.md). Link reachability is separate from accessibility scoring and does not verify fragment anchors or JavaScript-created links.
 
 ## AI Client Integration
 

@@ -18,6 +18,7 @@ type Scan struct {
 	TotalURLs        int       `json:"total_urls"`
 	ScannedURLs      int       `json:"scanned_urls"`
 	IncludeLinkCheck bool      `json:"include_link_check"`
+	RootPublic       bool      `json:"-"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -145,9 +146,10 @@ type MCPAuthSettings struct {
 // MCPActionRequest is a durable reservation. An unfinished reservation is never
 // rerun automatically: the original action may have succeeded before a crash.
 type MCPActionRequest struct {
-	Tool          string
-	ArgumentsHash string
-	Response      []byte
+	Tool             string
+	ArgumentsHash    string
+	Response         []byte
+	ResponseTooLarge bool
 }
 
 // MCPScanScoreSummary mirrors the persisted scan score read model for MCP reads.

@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   issueOccurrences,
@@ -19,6 +19,7 @@ import {
 } from "@/lib/act-rules";
 import { getPerformanceSettings } from "@/lib/report-settings";
 import { getLighthouseAccessibilityWeight } from "@/lib/scan-scoring";
+import { redactOptionalUrlUserinfo, redactUrlUserinfo } from "@/lib/url-presentation";
 
 export const ISSUE_SUMMARIES_PAGE_SIZE = 12;
 export const ISSUE_OCCURRENCES_PAGE_SIZE = 25;
@@ -103,6 +104,21 @@ export interface NeedsReviewIssueDetail extends DetailBase {
 
 export type IssueDetailResponse = FailedIssueDetail | NeedsReviewIssueDetail;
 
+export function redactIssueDetailForPresentation<T extends IssueDetailResponse>(detail: T): T {
+  return {
+    ...detail,
+    helpUrl: redactOptionalUrlUserinfo(detail.helpUrl),
+    actRules: detail.actRules.map((rule) => ({
+      ...rule,
+      ruleUrl: redactUrlUserinfo(rule.ruleUrl),
+    })),
+    occurrences: detail.occurrences.map((occurrence) => ({
+      ...occurrence,
+      pageUrl: redactUrlUserinfo(occurrence.pageUrl),
+    })),
+  };
+}
+
 function severitySortOrder(
   severity: "critical" | "serious" | "moderate" | "minor"
 ): number {
@@ -127,18 +143,6 @@ function compareFailedIssueSummaries(
     right.weight - left.weight ||
     severitySortOrder(left.severity) - severitySortOrder(right.severity) ||
     left.title.localeCompare(right.title)
-  );
-}
-
-function isFreshCacheRow(
-  cacheUpdatedAt: Date,
-  cacheScanUpdatedAt: Date,
-  scanUpdatedAt: Date,
-  ttlSeconds: number
-): boolean {
-  return (
-    cacheScanUpdatedAt.getTime() >= scanUpdatedAt.getTime() &&
-    Date.now() - cacheUpdatedAt.getTime() <= ttlSeconds * 1000
   );
 }
 
@@ -341,73 +345,71 @@ function cacheRowsToIssueSummaries(
   });
 }
 
-function buildIssueCounts(items: IssueSummaryItem[]): IssueListCounts {
-  const activeIssueCount = items.filter(
-    (item) => item.kind === "failed" && !item.isFalsePositive
-  ).length;
-  const excludedIssueCount = items.filter(
-    (item) => item.kind === "failed" && item.isFalsePositive
-  ).length;
-  const needsReviewCount = items.filter(
-    (item) => item.kind === "needs_review"
-  ).length;
-
-  return {
-    activeIssueCount,
-    excludedIssueCount,
-    needsReviewCount,
-    totalIssueCardCount: activeIssueCount + excludedIssueCount + needsReviewCount,
-  };
-}
-
 async function loadCachedIssueSummaries(
-  scanId: string
+  scanId: string,
+  offset: number,
+  limit: number
 ): Promise<{
   items: IssueSummaryItem[];
   counts: IssueListCounts;
 } | null> {
-  const [[scan], performanceSettings] = await Promise.all([
-    db
+  const { summaryCacheTtlSeconds } = await getPerformanceSettings();
+  const cached = await db.transaction(async (tx) => {
+    const [scan] = await tx
       .select({ updatedAt: scans.updatedAt })
       .from(scans)
       .where(eq(scans.id, scanId))
-      .limit(1),
-    getPerformanceSettings(),
-  ]);
+      .limit(1);
+    if (!scan) return { kind: "missing" as const };
+    const freshAfter = new Date(Date.now() - summaryCacheTtlSeconds * 1000);
 
-  if (!scan) {
-    return null;
-  }
+    // Check every cached row in the same snapshot as the requested page.
+    // Otherwise a concurrent cache replacement can mix old counts and new items.
+    // Pass UTC strings for timestamp-without-time-zone comparisons: node-postgres
+    // serializes bare Date parameters in the process's local timezone.
+    const [state] = await tx
+      .select({
+        total: count(),
+        active: sql<number>`count(*) FILTER (WHERE ${scanIssueSummaryCache.kind} = 'failed' AND NOT ${scanIssueSummaryCache.isFalsePositive})`.mapWith(Number),
+        excluded: sql<number>`count(*) FILTER (WHERE ${scanIssueSummaryCache.kind} = 'failed' AND ${scanIssueSummaryCache.isFalsePositive})`.mapWith(Number),
+        needsReview: sql<number>`count(*) FILTER (WHERE ${scanIssueSummaryCache.kind} <> 'failed')`.mapWith(Number),
+        stale: sql<number>`count(*) FILTER (WHERE ${scanIssueSummaryCache.scanUpdatedAt} < ${scan.updatedAt.toISOString()} OR ${scanIssueSummaryCache.updatedAt} < ${freshAfter.toISOString()})`.mapWith(Number),
+      })
+      .from(scanIssueSummaryCache)
+      .where(eq(scanIssueSummaryCache.scanId, scanId));
+    if (state.total === 0 || state.stale > 0) {
+      return { kind: "rebuild" as const, scan };
+    }
 
-  const rows = await db
-    .select()
-    .from(scanIssueSummaryCache)
-    .where(eq(scanIssueSummaryCache.scanId, scanId))
-    .orderBy(
-      asc(scanIssueSummaryCache.sortBucket),
-      desc(scanIssueSummaryCache.weight),
-      asc(scanIssueSummaryCache.sortSeverity),
-      asc(scanIssueSummaryCache.sortTitle),
-      asc(scanIssueSummaryCache.itemKey)
-    );
-
-  if (
-    rows.length > 0 &&
-    rows.every((row) =>
-      isFreshCacheRow(
-        row.updatedAt,
-        row.scanUpdatedAt,
-        scan.updatedAt,
-        performanceSettings.summaryCacheTtlSeconds
+    const rows = offset >= state.total ? [] : await tx
+      .select()
+      .from(scanIssueSummaryCache)
+      .where(eq(scanIssueSummaryCache.scanId, scanId))
+      .orderBy(
+        asc(scanIssueSummaryCache.sortBucket),
+        desc(scanIssueSummaryCache.weight),
+        asc(scanIssueSummaryCache.sortSeverity),
+        asc(scanIssueSummaryCache.sortTitle),
+        asc(scanIssueSummaryCache.itemKey)
       )
-    )
-  ) {
-    const items = cacheRowsToIssueSummaries(rows);
+      .limit(limit)
+      .offset(offset);
+
     return {
-      items,
-      counts: buildIssueCounts(items),
+      kind: "fresh" as const,
+      items: cacheRowsToIssueSummaries(rows),
+      counts: {
+        activeIssueCount: state.active,
+        excludedIssueCount: state.excluded,
+        needsReviewCount: state.needsReview,
+        totalIssueCardCount: state.total,
+      },
     };
-  }
+  }, { isolationLevel: "repeatable read", accessMode: "read only" });
+
+  if (cached.kind === "missing") return null;
+  if (cached.kind === "fresh") return { items: cached.items, counts: cached.counts };
+  const { scan } = cached;
 
   const fresh = await loadIssueSummaries(scanId);
   const cacheRows = fresh.items.map((item) =>
@@ -440,7 +442,7 @@ async function loadCachedIssueSummaries(
     }
   });
 
-  return fresh;
+  return { items: fresh.items.slice(offset, offset + limit), counts: fresh.counts };
 }
 
 export async function loadIssueSummariesPage(
@@ -452,14 +454,18 @@ export async function loadIssueSummariesPage(
   counts: IssueListCounts;
 }> {
   const [{ items, counts }, axeRuleCatalog] = await Promise.all([
-    loadCachedIssueSummaries(scanId).then((cached) => cached ?? loadIssueSummaries(scanId)),
+    loadCachedIssueSummaries(scanId, offset, limit).then((cached) => cached ?? loadIssueSummaries(scanId).then((fresh) => ({
+      items: fresh.items.slice(offset, offset + limit),
+      counts: fresh.counts,
+    }))),
     getAxeRuleCatalog(),
   ]);
   return {
-    items: items.slice(offset, offset + limit).map((item) => {
+    items: items.map((item) => {
       const ruleId = item.kind === "failed" ? item.violationType : item.ruleId;
       return {
         ...item,
+        helpUrl: redactOptionalUrlUserinfo(item.helpUrl),
         description: axeRuleCatalog[ruleId]?.description?.trim() || null,
       };
     }),
@@ -675,21 +681,22 @@ export async function loadIssueDetail(
   occurrenceOffset: number,
   occurrenceLimit: number
 ): Promise<IssueDetailResponse | null> {
-  if (kind === "failed") {
-    return loadFailedIssueDetail(
-      scanId,
-      key,
-      occurrenceOffset,
-      occurrenceLimit
-    );
-  }
+  const detail =
+    kind === "failed"
+      ? await loadFailedIssueDetail(
+          scanId,
+          key,
+          occurrenceOffset,
+          occurrenceLimit
+        )
+      : await loadNeedsReviewIssueDetail(
+          scanId,
+          key,
+          occurrenceOffset,
+          occurrenceLimit
+        );
 
-  return loadNeedsReviewIssueDetail(
-    scanId,
-    key,
-    occurrenceOffset,
-    occurrenceLimit
-  );
+  return detail ? redactIssueDetailForPresentation(detail) : null;
 }
 
 export async function loadIssueSummaryByKey(
@@ -725,7 +732,7 @@ export async function loadIssueSummaryByKey(
       issueId: issue.issueId,
       violationType: issue.violationType,
       title: issue.title,
-      helpUrl: issue.helpUrl,
+      helpUrl: redactOptionalUrlUserinfo(issue.helpUrl),
       severity: issue.severity,
       isFalsePositive: issue.isFalsePositive,
       occurrenceCount: issue.occurrenceCount,
@@ -785,7 +792,7 @@ export async function loadIssueSummaryByKey(
     key,
     ruleId: key,
     title: metadata?.help || key,
-    helpUrl: metadata?.helpUrl || null,
+    helpUrl: redactOptionalUrlUserinfo(metadata?.helpUrl || null),
     occurrenceCount,
     weight,
     scored: weight > 0,
@@ -848,7 +855,7 @@ export async function loadOccurrencesForIssues(
       screenshotPath: row.screenshotPath,
       elementScreenshotPath: row.elementScreenshotPath,
       cssSelector: row.cssSelector,
-      pageUrl: row.pageUrl,
+      pageUrl: redactUrlUserinfo(row.pageUrl),
     });
     grouped.set(row.issueId, group);
   }

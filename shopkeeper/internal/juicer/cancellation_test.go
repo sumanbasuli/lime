@@ -6,7 +6,25 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/chromedp/chromedp"
 )
+
+func TestBrowserCancelBeforeAllocationIsOneShot(t *testing.T) {
+	_, rawCancel := chromedp.NewContext(context.Background())
+	cancel := onceBrowserCancel(rawCancel)
+	done := make(chan struct{})
+	go func() {
+		cancel()
+		cancel()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second browser cancellation blocked before allocation")
+	}
+}
 
 func TestShouldTreatAsCanceledUsesParentRunState(t *testing.T) {
 	activeRun := context.Background()

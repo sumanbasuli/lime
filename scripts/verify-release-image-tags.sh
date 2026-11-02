@@ -21,12 +21,11 @@ fi
 
 if [[ "${0##*/}" == make || "${0##*/}" == docker ]]; then
   if [[ "${0##*/}" == make && "${PUSH_IMAGES:-true}" == true ]]; then
-    build_context="" build_version="" build_commit="" build_flags="" make_location="" previous_argument=""
+    build_context="" build_commit="" build_flags="" make_location="" previous_argument=""
     for argument in "$@"; do
       if [[ "${previous_argument}" == -C ]]; then make_location="${argument}"; fi
       case "${argument}" in
         DOCKER_BUILD_CONTEXT=*) build_context="${argument#DOCKER_BUILD_CONTEXT=}" ;;
-        VERSION=*) build_version="${argument#VERSION=}" ;;
         GIT_COMMIT=*) build_commit="${argument#GIT_COMMIT=}" ;;
         DOCKER_BUILD_FLAGS=*) build_flags="${argument#DOCKER_BUILD_FLAGS=}" ;;
       esac
@@ -34,7 +33,7 @@ if [[ "${0##*/}" == make || "${0##*/}" == docker ]]; then
     done
     [[ -n "${build_context}" && "${build_context}" != . && "${make_location}" == "${build_context}" ]] || exit 34
     [[ -f "${build_context}/shopkeeper/Dockerfile" && -f "${build_context}/lime/Dockerfile" ]] || exit 35
-    [[ "$(< "${build_context}/VERSION")" == 2.0.0 && "${build_version}" == 2.0.0 && "${build_commit}" == "${LIME_RELEASE_TEST_EXPECT_HEAD:0:7}" && "${build_flags}" == --pull ]] || exit 36
+    [[ "$(< "${build_context}/VERSION")" == 2.0.0 && "${build_commit}" == "${LIME_RELEASE_TEST_EXPECT_HEAD:0:7}" && "${build_flags}" == --pull ]] || exit 36
     "${LIME_RELEASE_TEST_REAL_GIT}" -C "${LIME_RELEASE_TEST_WORK}" show "${LIME_RELEASE_TEST_EXPECT_HEAD}:shopkeeper/Dockerfile" | cmp - "${build_context}/shopkeeper/Dockerfile" >/dev/null || exit 38
     "${LIME_RELEASE_TEST_REAL_GIT}" -C "${LIME_RELEASE_TEST_WORK}" show "${LIME_RELEASE_TEST_EXPECT_HEAD}:lime/Dockerfile" | cmp - "${build_context}/lime/Dockerfile" >/dev/null || exit 39
     "${LIME_RELEASE_TEST_REAL_GIT}" -C "${LIME_RELEASE_TEST_WORK}" show "${LIME_RELEASE_TEST_EXPECT_HEAD}:Makefile" | cmp - "${build_context}/Makefile" >/dev/null || exit 40
@@ -45,6 +44,14 @@ if [[ "${0##*/}" == make || "${0##*/}" == docker ]]; then
       [[ "${argument}" != -C ]] || exit 41
     done
     [[ "${DOCKER_BUILD_FLAGS:-}" == '--target dev' ]] || exit 42
+  fi
+  if [[ "${0##*/}" == make && "${LIME_RELEASE_TEST_FAIL_UI_BUILD:-}" == true ]]; then
+    for argument in "$@"; do
+      if [[ "${argument}" == build-docker-ui ]]; then
+        printf '%s\n' "make $*" >> "${LIME_RELEASE_TEST_CALLS}"
+        exit 43
+      fi
+    done
   fi
   if [[ "${0##*/}" == make && "${LIME_RELEASE_TEST_REQUIRE_CLAIM:-}" == true ]]; then
     claimed_sha="$("${LIME_RELEASE_TEST_REAL_GIT}" --git-dir="${LIME_RELEASE_TEST_REMOTE}" rev-list -n 1 refs/tags/v2.0.0)"
@@ -63,6 +70,7 @@ trap 'rm -r -- "${test_dir}"' EXIT
 
 mkdir -p "${test_dir}/work/scripts" "${test_dir}/work/shopkeeper" "${test_dir}/work/lime/public" "${test_dir}/bin" "${test_dir}/tmp"
 cp "${ROOT_DIR}/scripts/publish-release-images.sh" "${test_dir}/work/scripts/"
+cp "${ROOT_DIR}/scripts/validate-release-version.sh" "${test_dir}/work/scripts/"
 cp "${ROOT_DIR}/Makefile" "${test_dir}/work/Makefile"
 cp "${ROOT_DIR}/.gitignore" "${test_dir}/work/.gitignore"
 cp "${ROOT_DIR}/.dockerignore" "${test_dir}/work/.dockerignore"
@@ -76,7 +84,7 @@ git -C "${test_dir}/work" remote add origin "${test_dir}/origin.git"
 printf '2.0.0\n' > "${test_dir}/work/VERSION"
 printf 'FROM scratch\n' > "${test_dir}/work/shopkeeper/Dockerfile"
 printf 'FROM scratch\n' > "${test_dir}/work/lime/Dockerfile"
-git -C "${test_dir}/work" add VERSION Makefile .gitignore .dockerignore scripts/publish-release-images.sh shopkeeper/.gitignore shopkeeper/Dockerfile lime/.gitignore lime/Dockerfile
+git -C "${test_dir}/work" add VERSION Makefile .gitignore .dockerignore scripts/publish-release-images.sh scripts/validate-release-version.sh shopkeeper/.gitignore shopkeeper/Dockerfile lime/.gitignore lime/Dockerfile
 git -C "${test_dir}/work" commit -qm 'first release candidate'
 old_sha="$(git -C "${test_dir}/work" rev-parse HEAD)"
 printf 'FROM scratch\n# current release candidate\n' > "${test_dir}/work/shopkeeper/Dockerfile"
@@ -123,7 +131,7 @@ if ! env PATH="${test_dir}/bin:${PATH}" \
   LIME_RELEASE_TEST_REAL_GIT="${REAL_GIT}" \
   DOCKER_BUILD_FLAGS='--target dev' \
   "${REAL_MAKE}" -C "${archive_context}" \
-    DOCKER_BUILD_CONTEXT="${archive_context}" VERSION=2.0.0 GIT_COMMIT="${head_sha:0:7}" DOCKER_BUILD_FLAGS=--pull \
+    DOCKER_BUILD_CONTEXT="${archive_context}" GIT_COMMIT="${head_sha:0:7}" DOCKER_BUILD_FLAGS=--pull \
     build-docker-shopkeeper build-docker-ui > "${test_dir}/make_stdout" 2> "${test_dir}/stderr"; then
   fail 'archived Makefile could not build both images with fake Docker'
 fi
@@ -220,6 +228,15 @@ git --git-dir="${test_dir}/origin.git" cat-file -p refs/tags/v2.0.0 | grep -Fqx 
 git -C "${test_dir}/work" fetch -q --force --tags origin 'refs/tags/v2.0.0:refs/tags/v2.0.0'
 [[ "$(git -C "${test_dir}/work" rev-list -n 1 refs/tags/v2.0.0)" == "${head_sha}" ]] || fail 'GitHub Release tag fetch did not accept the claim'
 
+# A failed second build must not publish either image (including :latest).
+if run_publisher v2.0.0 LIME_RELEASE_TEST_FAIL_UI_BUILD=true; then
+  fail 'UI build failure unexpectedly published images'
+fi
+[[ "$(grep -c '^make ' "${test_dir}/calls")" -eq 2 ]] || fail 'UI failure did not attempt both builds'
+if grep -q '^docker ' "${test_dir}/calls"; then
+  fail 'an image was tagged or pushed before both builds finished'
+fi
+
 # Re-running at the same commit works for both annotated and lightweight tags.
 git -C "${test_dir}/work" tag -fa v2.0.0 -m current HEAD >/dev/null
 git -C "${test_dir}/work" push -q --force origin refs/tags/v2.0.0
@@ -257,5 +274,25 @@ if ! run_publisher v2.0.0 PUSH_IMAGES=false; then
   fail 'offline no-push build rejected local source changes'
 fi
 [[ "$(grep -c '^make ' "${test_dir}/calls")" -eq 2 ]] || fail 'offline dirty no-push build did not run'
+
+# An invalid file version must be rejected before being handed to Make, whose
+# command-line variables can expand Make functions such as $(shell ...).
+printf '2.0.0$(shell touch %s)\n' "${test_dir}/unexpected-command" > "${test_dir}/work/VERSION"
+if run_publisher 'v2.0.0$(shell touch ignored)' PUSH_IMAGES=false; then
+  fail 'invalid file version reached the image build'
+fi
+[[ ! -e "${test_dir}/unexpected-command" && ! -s "${test_dir}/calls" ]] || fail 'invalid file version caused image work or command expansion'
+
+printf '2.0.0 \n' > "${test_dir}/work/VERSION"
+if run_publisher v2.0.0 PUSH_IMAGES=false; then
+  fail 'whitespace-bearing file version was normalized into a release tag'
+fi
+[[ ! -s "${test_dir}/calls" ]] || fail 'whitespace-bearing file version reached Make'
+
+printf '2.0.0\n\n' > "${test_dir}/work/VERSION"
+if run_publisher v2.0.0 PUSH_IMAGES=false; then
+  fail 'extra blank version line was normalized into a release tag'
+fi
+[[ ! -s "${test_dir}/calls" ]] || fail 'extra blank version line reached Make'
 
 printf 'Release image tag verification passed.\n'

@@ -26,7 +26,6 @@ print_help() {
     '  macOS           Docker Desktop/Homebrew setup; first-run dialogs may require approval.' \
     '  Ubuntu/Debian   Automatic Docker Engine and Compose prerequisite setup.' \
     '  Other Linux     Docker must already be installed; dependencies use apt-get, dnf or yum.' \
-    '  Fly.io          Not supported by this installer. Fly.io deployment is a separate workflow.' \
     '' \
     'Configuration (environment variables):' \
     '  LIME_INSTALL_DIR  Fresh destination directory (default: $PWD/lime).' \
@@ -44,7 +43,7 @@ print_help() {
     '  All service ports bind to localhost. Use an SSH tunnel to access a remote VPS.' \
     '  Requires a local Unix-socket Docker context and Compose 2.24.4+.' \
     '  Existing install directories, LIME containers and default data volumes are not reused.' \
-    '  This is a fresh installer, not an updater or a systemd/Fly.io deployment tool.' \
+    '  This is a fresh installer, not an updater or a systemd deployment tool.' \
     '  Run as your ordinary user; administrator approval is requested when needed.'
 }
 
@@ -228,7 +227,7 @@ lime_install_main() {
   fi
   say 'Checking localhost port availability with a disposable, volume-free container'
   "$docker_command" run --rm --entrypoint /bin/true \
-    -p "127.0.0.1:${db_port}:5432" -p "127.0.0.1:${api_port}:8080" -p "127.0.0.1:${ui_port}:3000" postgres:17-alpine || fail 'Local ports are occupied or Docker cannot start a container. Choose different LIME_DB_PORT/LIME_API_PORT/LIME_UI_PORT values. No LIME clone or data was created.'
+    -p "127.0.0.1:${db_port}:5432" -p "127.0.0.1:${api_port}:8080" -p "127.0.0.1:${ui_port}:3000" postgres:17.11-alpine || fail 'Local ports are occupied or Docker cannot start a container. Choose different LIME_DB_PORT/LIME_API_PORT/LIME_UI_PORT values. No LIME clone or data was created.'
   say "Cloning sumanbasuli/lime into $target (ref: $ref)"
   mkdir -p "$(dirname "$target")"
   git clone -- https://github.com/sumanbasuli/lime.git "$target"
@@ -241,6 +240,22 @@ lime_install_main() {
   else git -C "$target" checkout --detach "origin/${ref}"; fi
   [[ -f "$target/.env.example" && -f "$target/Makefile" && -f "$target/docker-compose.yml" && -f "$target/VERSION" ]] || fail 'Selected revision lacks the expected source deployment files. Its clone was retained for inspection.'
   [[ ! -e "$target/.env" ]] || fail 'Clone unexpectedly contains .env. It was not overwritten.'
+  # Only this fresh clone's public JSON catalogs are bind-mounted into two
+  # non-root containers. Keep them readable even if the caller uses umask 077;
+  # do not broaden permissions on the checkout, configuration, or captures.
+  [[ ! -L "$target/data" ]] || fail 'The cloned data directory must not be a symlink.'
+  if [[ -d "$target/data" ]]; then
+    local catalog
+    for catalog in "$target/data/"*.json; do
+      [[ -e "$catalog" || -L "$catalog" ]] || continue
+      [[ -f "$catalog" && ! -L "$catalog" ]] || fail 'Public catalog paths must be ordinary JSON files.'
+    done
+    chmod 0755 "$target/data"
+    for catalog in "$target/data/"*.json; do
+      [[ -f "$catalog" ]] || continue
+      chmod 0644 "$catalog"
+    done
+  fi
   version="$(tr -d '[:space:]' < "$target/VERSION")"
   commit="$(git -C "$target" rev-parse --short HEAD)"
   [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.-]+)?$ && "$commit" =~ ^[0-9a-fA-F]{7,40}$ ]] || fail 'Selected revision has invalid version/commit metadata.'

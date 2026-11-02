@@ -34,10 +34,11 @@ async function loadSettings({ allowWrites = true, failLock = false } = {}) {
     update: () => ({ set: (patch) => ({ where: async () => { calls.push("update"); Object.assign(row, patch); } }) }),
   };
   const dependencies = {
-    "drizzle-orm": { sql, eq: (field, value) => [field, value] },
+    "drizzle-orm": { sql, eq: (field, value) => [field, value], getTableColumns: (table) => table },
     crypto: { createHash, randomBytes, timingSafeEqual },
     "@/db/schema": { appSettings: { key: "key" } },
     "@/lib/report-settings-config": config,
+    "@/lib/mcp-report-read": { readReportQuery: async (query) => await query },
     "@/db": { db: { transaction: async (work) => {
       try { const result = await work(tx); calls.push("commit"); return result; }
       catch (error) { calls.push("rollback"); throw error; }

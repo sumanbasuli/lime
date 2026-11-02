@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/chromedp/chromedp"
+	"github.com/sumanbasuli/lime/shopkeeper/internal/actrules"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/config"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/database"
 	"github.com/sumanbasuli/lime/shopkeeper/internal/linkchecker"
@@ -23,9 +25,31 @@ import (
 
 func main() {
 	migrateOnly := flag.Bool("migrate", false, "apply database migrations and exit")
+	verifyOnly := flag.Bool("verify-startup", false, "verify browser sandbox and catalogs without applying migrations or starting HTTP")
 	flag.Parse()
+	if *migrateOnly && *verifyOnly {
+		log.Fatal("--migrate and --verify-startup cannot be used together")
+	}
 
 	cfg := config.Load()
+	if cfg.DatabaseURL == "" {
+		log.Fatal("DATABASE_URL is required; configure the existing database credential before starting Shopkeeper")
+	}
+	if !*migrateOnly {
+		if os.Geteuid() == 0 {
+			log.Fatal("Shopkeeper must run as a non-root user; use the updated container entrypoint or the native lime service account")
+		}
+		if _, err := actrules.Default(); err != nil {
+			log.Fatalf("ACT catalog must be readable and valid before startup: %v", err)
+		}
+		if err := verifyChromeStartup(); err != nil {
+			log.Fatalf("Chromium sandbox startup failed; install the current Compose policy or configure the native browser sandbox: %v", err)
+		}
+	}
+	if *verifyOnly {
+		log.Println("Browser sandbox and catalog startup checks passed; no database migrations applied")
+		return
+	}
 
 	// Run migrations
 	if err := database.RunMigrations(cfg.DatabaseURL); err != nil {
@@ -57,7 +81,7 @@ func main() {
 	pdfReporter := reporter.New(allocCtx, cfg.ReportBaseURL)
 
 	if err := sc.RecoverInterruptedScans(); err != nil {
-		log.Printf("Scanner recovery failed: %v", err)
+		log.Fatalf("Scanner recovery failed: %v", err)
 	}
 	lc := linkchecker.NewRunner(repo)
 	if err := lc.Start(context.Background()); err != nil {
@@ -106,7 +130,8 @@ func createChromeAllocator() (context.Context, context.CancelFunc) {
 	chromePath := findChromeBinary()
 
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
-		chromedp.NoSandbox,
+		// Explicit false prevents chromedp from disabling the sandbox as root.
+		chromedp.Flag("no-sandbox", false),
 		chromedp.DisableGPU,
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.Flag("disable-extensions", true),
@@ -120,6 +145,26 @@ func createChromeAllocator() (context.Context, context.CancelFunc) {
 	}
 
 	return chromedp.NewExecAllocator(context.Background(), opts...)
+}
+
+// Probe a separate browser before migrations or HTTP. This catches an old
+// image-only Compose update that lacks the required host-side seccomp policy.
+// The real reporter allocator is created afterward and keeps its old lifecycle.
+func verifyChromeStartup() error {
+	allocCtx, allocCancel := createChromeAllocator()
+	defer allocCancel()
+	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
+	defer browserCancel()
+	ctx, cancel := context.WithTimeout(browserCtx, 45*time.Second)
+	defer cancel()
+	var ready bool
+	if err := chromedp.Run(ctx, chromedp.Navigate("about:blank"), chromedp.Evaluate("1 + 1 === 2", &ready)); err != nil {
+		return err
+	}
+	if !ready {
+		return fmt.Errorf("Chromium did not complete its startup probe")
+	}
+	return nil
 }
 
 // findChromeBinary searches for Chrome/Chromium in common locations.

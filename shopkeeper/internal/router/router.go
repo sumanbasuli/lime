@@ -28,7 +28,8 @@ func Setup(
 	h.WithLinkChecker(repo, lr)
 
 	// Middleware
-	r.Use(middleware.Logger)
+	r.Use(rejectUntrustedHost)
+	r.Use(middleware.RequestLogger(diagnosticLogFormatter{}))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.RequestID)
 
@@ -75,6 +76,8 @@ func Setup(
 			r.Get("/{id}", h.GetScan)
 			r.Delete("/{id}", h.DeleteScan)
 			r.Get("/{id}/issues", h.GetScanIssues)
+			r.Get("/{id}/issues/page", h.GetScanIssuesPage)
+			r.Get("/{id}/issues/{issueId}/occurrences", h.GetScanIssueOccurrences)
 			r.Get("/{id}/link-check", h.GetScanLinkCheck)
 			r.Get("/{id}/issues/report.pdf", h.DownloadIssueReport)
 			r.Post("/{id}/issues/{issueId}/false-positive", h.MarkIssueFalsePositive)

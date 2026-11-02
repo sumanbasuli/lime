@@ -21,6 +21,13 @@ expect_url() {
   [[ "${actual}" == "${expected}" ]] || fail "DATABASE_URL did not match expected data"
 }
 
+expect_port() {
+  local expected="$1"
+  local actual
+  actual="$(read_debian_shopkeeper_port "${env_file}")" || fail "could not read expected port"
+  [[ "${actual}" == "${expected}" ]] || fail "SHOPKEEPER_PORT did not match expected data"
+}
+
 printf '%s\n' \
   '# Shopkeeper runtime environment' \
   'DATABASE_URL=postgresql://lime:password@127.0.0.1:5432/lime_db?sslmode=disable' \
@@ -49,5 +56,29 @@ printf '%s\n' 'SHOPKEEPER_PORT=8080' > "${env_file}"
 if read_debian_database_url "${env_file}" >/dev/null 2>&1; then
   fail "missing DATABASE_URL was accepted"
 fi
+
+printf '%s\n' 'DATABASE_URL=postgresql://lime:password@localhost/db' > "${env_file}"
+expect_port 8080
+
+printf '%s\n' \
+  'SHOPKEEPER_PORT=8080' \
+  '  SHOPKEEPER_PORT="18080"' > "${env_file}"
+expect_port 18080
+
+printf '%s\n' 'SHOPKEEPER_PORT=65535' > "${env_file}"
+expect_port 65535
+
+for invalid_port in 0 65536 not-a-port; do
+  printf 'SHOPKEEPER_PORT=%s\n' "${invalid_port}" > "${env_file}"
+  if read_debian_shopkeeper_port "${env_file}" >/dev/null 2>&1; then
+    fail "invalid SHOPKEEPER_PORT was accepted"
+  fi
+done
+
+printf 'SHOPKEEPER_PORT=$(touch %s)\n' "${marker}" > "${env_file}"
+if read_debian_shopkeeper_port "${env_file}" >/dev/null 2>&1; then
+  fail "environment-file command substitution was accepted as a port"
+fi
+[[ ! -e "${marker}" ]] || fail "environment-file command substitution executed as a port"
 
 echo "Debian environment-file verification passed."

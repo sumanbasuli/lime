@@ -39,7 +39,6 @@ body:
       label: Deployment target
       options:
         - Docker
-        - Fly.io
         - Linux systemd
         - Local development
         - Other
