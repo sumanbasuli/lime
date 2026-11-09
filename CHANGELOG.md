@@ -5,15 +5,22 @@ section matching `VERSION` to populate GitHub Release notes.
 
 ## [Unreleased]
 
-- Require Chromium's sandbox for scans and PDF reports. Docker deployments now include a scoped seccomp policy, a non-root backend, and guarded preparation of legacy screenshot ownership. Existing installs need the complete updated Compose bundle and a one-time stopped-backend upgrade; image-only updates fail startup when sandbox support is missing.
+## [2.0.0] - 2026-11-09
 
+### Upgrading an existing installation
+
+Use a maintenance window for this upgrade. Back up PostgreSQL, screenshots, and configuration; keep the same deployment project and volumes. Obtain the complete updated checkout or release bundle, including the Compose file and `deploy/docker/` sandbox policy. Set `LIME_ALLOWED_HOSTS` to include the dashboard and API hostnames used by your deployment, and review the new default 2 GiB backend memory limit.
+
+Stop every old Shopkeeper before applying migrations through `000020` or starting the new backend. Run the sandbox startup preflight, migrate, and then start the backend and UI. Existing image-only updaters need the updated deployment files and upgrade helper for this first v2 cutover. External databases must use supported PostgreSQL 17. See the [complete upgrade instructions](https://github.com/sumanbasuli/lime/blob/v2.0.0/docs/deployment/updates.md), including backup, recovery, and post-upgrade checks.
+
+### Changes
+
+- Require Chromium's sandbox for scans and PDF reports. Docker deployments now include a scoped seccomp policy, a non-root backend, and guarded preparation of legacy screenshot ownership. Existing installs need the complete updated Compose bundle and a one-time stopped-backend upgrade; image-only updates fail startup when sandbox support is missing.
 - Stored new Link Checker source occurrences as ordered rows, so a destination repeated across many pages no longer causes a growing JSONB rewrite on every progress save. Existing checks, source order, duplicates, paging, MCP reads, and CSV exports are preserved. Migration `000019` requires all old backends to be stopped before the new backend starts.
 - Bounded HTML/PDF report preparation before loading large saved evidence into the dashboard. Oversized PDFs now return a clear size error with a same-scope Full CSV path instead of a partial report; the download UI offers Full CSV when enabled. Full CSV export remains complete for its saved-data scope.
 - Long sitemap scans now save each finished page and yield to older queued scans between timed page batches. Restart recovery preserves completed findings, clears unfinished evidence, and prevents orphan screenshots from being served or reused on retry.
 - Kept the small focused-image preview available under the new screenshot access guard by requiring a saved full-size image from a completed page; unfinished preview files are now removed before retries.
-
-## [2.0.0] - 2026-10-05
-
+- Made sitemap discovery resumable across timed slices, pauses, and restarts with durable checkpoints and cumulative safety budgets. Migration `000020` publishes the complete eligible page list atomically before page scanning begins.
 - Expanded MCP to 29 tools: 17 read/evidence tools plus opt-in operational scan/link-check lifecycle, false-positive triage, deletion, and reporting/performance settings. Added canonical report/screenshot content, live permission checks, strict confirmations/argument validation, and durable job request IDs without changing existing backend lifecycle rules. Existing keys remain read-only after migration; key and permission administration stay dashboard-only.
 - Added a homepage-only one-command Mac/Linux installer with prerequisite checks, fresh-install safeguards, private local service bindings, readiness checks, and a side-effect-free `--help`/`-h` option; documented native systemd setup separately.
 - Added selectable Codex, Claude Code, and OpenCode MCP setup examples in dashboard settings.
